@@ -1,8 +1,6 @@
 import {
-  AngularNodeAppEngine,
   createNodeRequestHandler,
   isMainModule,
-  writeResponseToNodeResponse,
 } from '@angular/ssr/node';
 import express, { Request, Response } from 'express';
 import { createServer } from 'node:http';
@@ -20,6 +18,8 @@ if (!existsSync(browserDistFolder)) {
     join(process.cwd(), 'dist/app/browser'),
     join(process.cwd(), 'browser'),
     '/opt/zigbee-telemetry-panel/dist/app/browser',
+    '/root/SimpleHomeTelemetry/dist/app/browser',
+    join(process.cwd(), 'static'),
   ];
   for (const p of fallbackPaths) {
     if (existsSync(p)) {
@@ -1569,7 +1569,7 @@ app.get('/api/files/:filename', (req: Request, res: Response) => {
   }
 });
 
-// Obsluga plikow statycznych z /browser
+// Obsluga plikow statycznych z /browser (CSS, JS, Fonts, Icons, Images)
 app.use(
   express.static(browserDistFolder, {
     maxAge: '1y',
@@ -1578,47 +1578,37 @@ app.use(
   }),
 );
 
-// Catch-all renderujacy aplikacje Angular
-const angularApp = new AngularNodeAppEngine();
-app.use((req, res, next) => {
-  // Normalizacja naglowka Host dla Angular SSR w lokalnej sieci LAN (np. 10.0.0.21:3000)
-  const incomingHost = req.headers['host'];
-  if (incomingHost && !incomingHost.startsWith('localhost') && !incomingHost.startsWith('127.0.0.1')) {
-    req.headers['x-forwarded-host'] = incomingHost;
-    req.headers['host'] = `localhost:${process.env['PORT'] || 3000}`;
+// Dodatkowy fallback dla zasobow ze sciezki roboczej
+if (existsSync(join(process.cwd(), 'dist/app/browser'))) {
+  app.use(express.static(join(process.cwd(), 'dist/app/browser'), { maxAge: '1y', index: false, redirect: false }));
+}
+if (existsSync(join(process.cwd(), 'static'))) {
+  app.use(express.static(join(process.cwd(), 'static'), { index: false, redirect: false }));
+}
+
+// Catch-all SPA: serwowanie glownego interfejsu (index.html) dla kazdej trasy bez posrednictwa SSR engine
+app.use((req: Request, res: Response, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
+    return next();
   }
 
-  // 1. Sprobuj wyrenderowac przez Angular SSR Engine
-  angularApp
-    .handle(req)
-    .then((response) => {
-      if (response && response.status >= 200 && response.status < 400) {
-        writeResponseToNodeResponse(response, res);
-      } else {
-        // Fallback do index.html (Client-Side Rendering)
-        const indexPath = join(browserDistFolder, 'index.html');
-        const csrPath = join(browserDistFolder, 'index.csr.html');
-        if (existsSync(indexPath)) {
-          res.sendFile(indexPath);
-        } else if (existsSync(csrPath)) {
-          res.sendFile(csrPath);
-        } else {
-          next();
-        }
-      }
-    })
-    .catch((_err) => {
-      // W razie bledu SSR, zaserwuj index.html (CSR)
-      const indexPath = join(browserDistFolder, 'index.html');
-      const csrPath = join(browserDistFolder, 'index.csr.html');
-      if (existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else if (existsSync(csrPath)) {
-        res.sendFile(csrPath);
-      } else {
-        next(_err);
-      }
-    });
+  const possibleIndexes = [
+    join(browserDistFolder, 'index.html'),
+    join(browserDistFolder, 'index.csr.html'),
+    join(process.cwd(), 'dist/app/browser/index.html'),
+    join(process.cwd(), 'dist/app/browser/index.csr.html'),
+    '/opt/zigbee-telemetry-panel/dist/app/browser/index.html',
+    '/root/SimpleHomeTelemetry/dist/app/browser/index.html',
+    join(process.cwd(), 'static/index.html'),
+  ];
+
+  for (const idx of possibleIndexes) {
+    if (existsSync(idx)) {
+      return res.sendFile(idx);
+    }
+  }
+
+  res.status(404).send('SimpleHomeTelemetry: index.html not found. Please build the application.');
 });
 
 // WebSocket Server
