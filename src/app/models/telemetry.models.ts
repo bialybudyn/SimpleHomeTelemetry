@@ -1,13 +1,40 @@
+export type DeviceCategory = 'climate' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
+
 export interface Device {
   ieee_address: string;
   friendly_name: string;
   model: string;
+  category?: DeviceCategory;
+  vendor?: string;
   last_seen: string | null;
   battery: number | null;
-  last_temperature: number | null;
-  last_humidity: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
+
+  // Czujniki temperatury i wilgotności (Sonoff SNZB-02 / SNZB-02D / Tuya TS0201)
+  last_temperature: number | null;
+  last_humidity: number | null;
+
+  // Głowice termostatyczne Sonoff TRVZB / TRVZB Gen 2 & Tuya TRV
+  current_heating_setpoint?: number | null;
+  local_temperature?: number | null;
+  system_mode?: 'heat' | 'auto' | 'off' | string | null;
+  running_state?: 'heat' | 'idle' | string | null;
+  child_lock?: 'LOCK' | 'UNLOCK' | string | null;
+  open_window?: boolean | null;
+
+  // Włączniki i inteligentne gniazdka (Sonoff S26R2ZB, S40ZB, ZBMINIR2, Tuya Smart Plug)
+  state?: 'ON' | 'OFF' | string | null;
+  power?: number | null;      // W (Moc chwilowa)
+  voltage?: number | null;    // V (Napięcie)
+  current?: number | null;    // A (Natężenie)
+  energy?: number | null;     // kWh (Łączne zużycie energii)
+
+  // Czujniki kontaktronowe, ruchu, zalania (Sonoff SNZB-03/04/05, Tuya mmWave)
+  contact?: boolean | null;       // true = zamknięte, false = otwarte
+  occupancy?: boolean | null;     // true = ruch/obecność wykryta
+  water_leak?: boolean | null;    // true = alarm zalania
+  illuminance?: number | null;    // lux
 }
 
 export interface TelemetryPoint {
@@ -17,7 +44,23 @@ export interface TelemetryPoint {
   humidity: number | null;
   battery: number | null;
   linkquality: number | null;
+  power?: number | null;
+  energy?: number | null;
+  setpoint?: number | null;
+  state?: string | null;
   timestamp: string;
+}
+
+export interface DeviceCatalogItem {
+  id: string;
+  brand: 'Sonoff' | 'Tuya';
+  model: string;
+  name: string;
+  category: DeviceCategory;
+  description: string;
+  features: string[];
+  batteryPowered: boolean;
+  pairingGuide: string;
 }
 
 export interface HistoryStats {
@@ -94,6 +137,9 @@ export interface MqttStatus {
   last_message_topic: string | null;
   bridge_state: string | null;
   devices_discovered: number;
+  z2m_version?: string;
+  channel?: number;
+  coordinator_type?: string;
 }
 
 export interface MqttStatusResponse {

@@ -288,6 +288,56 @@ export class Telemetry {
     });
   }
 
+  sendDeviceCommand(ieee: string, command: Record<string, unknown>): Promise<boolean> {
+    return new Promise((resolve) => {
+      // Optymistyczna aktualizacja lokalnego stanu urządzenia
+      this.devices.update((list) =>
+        list.map((d) => (d.ieee_address === ieee ? { ...d, ...command } : d)),
+      );
+
+      this.http.post<{ status: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/set`, command).subscribe({
+        next: (res) => {
+          if (res?.device) {
+            this.devices.update((list) =>
+              list.map((d) => (d.ieee_address === ieee ? { ...d, ...res.device } : d)),
+            );
+          }
+          resolve(true);
+        },
+        error: () => resolve(false),
+      });
+    });
+  }
+
+  loadDemoCatalog(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; devices: Device[] }>('/api/demo-catalog', {}).subscribe({
+        next: (res) => {
+          if (res?.devices) {
+            this.devices.set(res.devices);
+            this.lastTransmissionTime.set(new Date().toLocaleTimeString());
+          }
+          resolve(true);
+        },
+        error: () => resolve(false),
+      });
+    });
+  }
+
+  addDemoDevice(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; device: Device }>('/api/demo-device', {}).subscribe({
+        next: (res) => {
+          if (res?.device) {
+            this.fetchDevices();
+          }
+          resolve(true);
+        },
+        error: () => resolve(false),
+      });
+    });
+  }
+
   resetAllData(): Promise<boolean> {
     return new Promise((resolve) => {
       this.http.post('/api/reset-data', {}).subscribe({
@@ -404,6 +454,13 @@ export class Telemetry {
       if (state) {
         this.bridgeState.set(state);
       }
+    } else if (type === 'device_updated') {
+      const dev = event['device'] as Device;
+      if (dev && dev.ieee_address) {
+        this.devices.update((list) =>
+          list.map((d) => (d.ieee_address === dev.ieee_address ? { ...d, ...dev } : d)),
+        );
+      }
     } else if (type === 'devices_updated') {
       const devList = event['devices'] as Device[];
       if (Array.isArray(devList)) {
@@ -438,6 +495,10 @@ export class Telemetry {
             last_humidity: data.humidity !== undefined ? data.humidity : d.last_humidity,
             battery: data.battery !== undefined ? data.battery : d.battery,
             linkquality: data.linkquality !== undefined ? data.linkquality : d.linkquality,
+            power: data.power !== undefined ? data.power : d.power,
+            energy: data.energy !== undefined ? data.energy : d.energy,
+            current_heating_setpoint: data.setpoint !== undefined ? data.setpoint : d.current_heating_setpoint,
+            state: data.state !== undefined ? data.state : d.state,
             last_seen: data.timestamp ?? new Date().toISOString(),
             isRecentlyUpdated: true,
           };

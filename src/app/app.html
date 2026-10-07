@@ -47,6 +47,19 @@
       </button>
 
       <button
+        (click)="setTab('catalog')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'catalog'"
+        [class.text-white]="activeTab() === 'catalog'"
+        [class.shadow-sm]="activeTab() === 'catalog'"
+        [class.text-slate-400]="activeTab() !== 'catalog'"
+        [class.hover:text-white]="activeTab() !== 'catalog'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">hub</mat-icon>
+        <span>Katalog Sonoff & Tuya</span>
+      </button>
+
+      <button
         (click)="setTab('dongle-max')"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
         [class.bg-slate-800]="activeTab() === 'dongle-max'"
@@ -224,6 +237,70 @@
 
   <!-- ZAKŁADKA 1: PULPIT NA ŻYWO (DASHBOARD) -->
   @if (activeTab() === 'dashboard') {
+    <!-- PASEK STANU USŁUG W TLE (Mosquitto + Zigbee2MQTT + Dongle-M) -->
+    <div class="mb-6 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
+      <!-- 1. Mosquitto MQTT -->
+      <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
+        <span
+          class="w-2.5 h-2.5 rounded-full shrink-0"
+          [class.bg-emerald-400]="telemetry.mqttStatus()?.connected"
+          [class.shadow-emerald-400/50]="telemetry.mqttStatus()?.connected"
+          [class.shadow-sm]="telemetry.mqttStatus()?.connected"
+          [class.bg-rose-400]="!telemetry.mqttStatus()?.connected"
+        ></span>
+        <div class="truncate">
+          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Broker Mosquitto</div>
+          <div class="text-slate-200 truncate font-semibold">
+            @if (telemetry.mqttStatus()?.connected) {
+              <span class="text-emerald-400">Połączono</span> (port 1883)
+            } @else {
+              <span class="text-rose-400">Rozłączono</span>
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Zigbee2MQTT Bridge -->
+      <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
+        <span
+          class="w-2.5 h-2.5 rounded-full shrink-0"
+          [class.bg-emerald-400]="telemetry.bridgeState() === 'online'"
+          [class.bg-amber-400]="telemetry.bridgeState() !== 'online'"
+        ></span>
+        <div class="truncate">
+          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Mostek Zigbee2MQTT</div>
+          <div class="text-slate-200 truncate font-semibold">
+            <span [class.text-emerald-400]="telemetry.bridgeState() === 'online'" [class.text-amber-400]="telemetry.bridgeState() !== 'online'">
+              {{ telemetry.bridgeState() === 'online' ? 'Online' : (telemetry.bridgeState() || 'offline') }}
+            </span>
+            <span class="text-slate-500 text-[11px] ml-1">(port 8080)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Koordynator Sonoff Dongle Max -->
+      <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
+        <mat-icon class="text-cyan-400 text-base !w-4 !h-4 shrink-0">router</mat-icon>
+        <div class="truncate">
+          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Koordynator Dongle-M</div>
+          <div class="text-cyan-300 truncate font-semibold">
+            {{ telemetry.dongleMaxConfig()?.connection_mode === 'network_tcp' ? 'tcp://Dongle-M.local:6638' : '/dev/ttyACM0' }}
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Pomiary & Baza SQLite -->
+      <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
+        <mat-icon class="text-indigo-400 text-base !w-4 !h-4 shrink-0">storage</mat-icon>
+        <div class="truncate">
+          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Baza SQLite & Telemetria</div>
+          <div class="text-slate-200 truncate font-semibold">
+            <span>{{ telemetry.devices().length }} czujników</span> · <span class="text-slate-400">WAL Mode</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Ostrzeżenie o baterii < 15% w głównym pulpicie -->
     @if (telemetry.lowBatteryDevices().length > 0) {
       <div class="mb-6 p-4 rounded-2xl bg-rose-950/70 border border-rose-800 text-rose-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-rose-950/30">
@@ -250,62 +327,224 @@
         </span>
       </div>
     }
-    <!-- Podsumowanie stanu sieci -->
+
+    <!-- Podsumowanie stanu sieci oraz filtry kategorii Sonoff / Tuya -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
       <div>
         <h2 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-          Pomiary środowiskowe na żywo
+          Pulpit Urządzeń Zigbee
           @if (telemetry.alertCount() > 0) {
             <span class="px-2 py-0.5 text-xs rounded-full bg-rose-950/80 border border-rose-800 text-rose-300 font-normal">
-              {{ telemetry.alertCount() }} alerty progowe
+              {{ telemetry.alertCount() }} alerty
             </span>
           }
         </h2>
         <p class="text-xs text-slate-400 mt-0.5">
-          Automatyczna aktualizacja w czasie rzeczywistym. Kliknij kafelek, aby otworzyć wykres analityczny Chart.js.
+          Głowice TRVZB, sterowane gniazdka, przekaźniki i sensory z automatyczną synchronizacją MQTT.
         </p>
       </div>
 
-      <div class="flex items-center gap-4 text-xs font-mono">
+      <div class="flex flex-wrap items-center gap-3 text-xs font-mono">
         <div class="text-slate-400">
           <span>Ostatnia transmisja:</span>
           <span class="text-cyan-400 ml-1 font-semibold">{{ telemetry.lastTransmissionTime() }}</span>
         </div>
         <div class="text-slate-500">·</div>
         <div class="text-slate-400">
-          <span>Czujniki:</span>
+          <span>Urządzenia:</span>
           <span class="text-white font-bold ml-1">{{ telemetry.devices().length }}</span>
         </div>
+        <button
+          (click)="loadFullDemoCatalog()"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
+          title="Załaduj próbki urządzeń Sonoff (TRVZB, S26R2, ZBMINIR2) i Tuya"
+        >
+          <mat-icon class="text-xs !w-3.5 !h-3.5">auto_awesome</mat-icon>
+          <span>Demo Sonoff & Tuya</span>
+        </button>
       </div>
     </div>
 
-    <!-- Siatka kafelków czujników -->
+    <!-- Pasek filtrów kategorii urządzeń (gdy są urządzenia w sieci) -->
     @if (telemetry.devices().length > 0) {
+      <div class="flex flex-wrap items-center gap-2 mb-6">
+        <button
+          (click)="setCategoryFilter('all')"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+          [class.bg-slate-800]="selectedCategoryFilter() === 'all'"
+          [class.text-white]="selectedCategoryFilter() === 'all'"
+          [class.text-slate-400]="selectedCategoryFilter() !== 'all'"
+        >
+          Wszystkie ({{ telemetry.devices().length }})
+        </button>
+
+        <button
+          (click)="setCategoryFilter('climate')"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+          [class.bg-rose-500/20]="selectedCategoryFilter() === 'climate'"
+          [class.text-rose-300]="selectedCategoryFilter() === 'climate'"
+          [class.border]="selectedCategoryFilter() === 'climate'"
+          [class.border-rose-500/30]="selectedCategoryFilter() === 'climate'"
+          [class.text-slate-400]="selectedCategoryFilter() !== 'climate'"
+        >
+          <mat-icon class="text-xs !w-3.5 !h-3.5 text-rose-400">thermostat</mat-icon>
+          <span>Głowice TRVZB ({{ climateCount() }})</span>
+        </button>
+
+        <button
+          (click)="setCategoryFilter('plug')"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+          [class.bg-emerald-500/20]="selectedCategoryFilter() === 'plug'"
+          [class.text-emerald-300]="selectedCategoryFilter() === 'plug'"
+          [class.border]="selectedCategoryFilter() === 'plug'"
+          [class.border-emerald-500/30]="selectedCategoryFilter() === 'plug'"
+          [class.text-slate-400]="selectedCategoryFilter() !== 'plug'"
+        >
+          <mat-icon class="text-xs !w-3.5 !h-3.5 text-emerald-400">power</mat-icon>
+          <span>Gniazdka 16A ({{ plugCount() }})</span>
+        </button>
+
+        <button
+          (click)="setCategoryFilter('switch')"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+          [class.bg-cyan-500/20]="selectedCategoryFilter() === 'switch'"
+          [class.text-cyan-300]="selectedCategoryFilter() === 'switch'"
+          [class.border]="selectedCategoryFilter() === 'switch'"
+          [class.border-cyan-500/30]="selectedCategoryFilter() === 'switch'"
+          [class.text-slate-400]="selectedCategoryFilter() !== 'switch'"
+        >
+          <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">toggle_on</mat-icon>
+          <span>Wyłączniki / ZBMINI ({{ switchCount() }})</span>
+        </button>
+
+        <button
+          (click)="setCategoryFilter('sensor')"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+          [class.bg-blue-500/20]="selectedCategoryFilter() === 'sensor'"
+          [class.text-blue-300]="selectedCategoryFilter() === 'sensor'"
+          [class.border]="selectedCategoryFilter() === 'sensor'"
+          [class.border-blue-500/30]="selectedCategoryFilter() === 'sensor'"
+          [class.text-slate-400]="selectedCategoryFilter() !== 'sensor'"
+        >
+          <mat-icon class="text-xs !w-3.5 !h-3.5 text-blue-400">sensors</mat-icon>
+          <span>Sensory & Radary ({{ sensorCount() }})</span>
+        </button>
+      </div>
+    }
+
+    <!-- Siatka kafelków czujników i urządzeń sterowanych -->
+    @if (filteredDevices().length > 0) {
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-        @for (device of telemetry.devices(); track device.ieee_address) {
+        @for (device of filteredDevices(); track device.ieee_address) {
           <app-device-card
             [device]="device"
             (cardClicked)="openAnalytics($event)"
             (renameRequested)="openRenameDialog($event)"
+            (commandRequested)="handleDeviceCommand($event)"
           />
         }
       </div>
-    } @else {
-      <!-- Stan pusty: brak danych -->
-      <div class="text-center py-20 px-4 border border-dashed border-slate-800 rounded-2xl bg-slate-900/40">
-        <div class="w-14 h-14 mx-auto mb-3 rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
-          <mat-icon class="text-3xl">sensors_off</mat-icon>
-        </div>
-        <h3 class="text-base font-semibold text-slate-300">brak danych — Brak zarejestrowanych czujników Zigbee</h3>
-        <p class="text-xs text-slate-500 max-w-md mx-auto mt-1 mb-5">
-          Podłącz koordynator lub router Sonoff Dongle Max (układ Silicon Labs EFR32MG24) przez sieć TCP (port 6638) lub USB i kliknij przycisk parowania.
-        </p>
-        <button
-          (click)="triggerPairing()"
-          class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-        >
-          Rozpocznij parowanie (60s)
+    } @else if (telemetry.devices().length > 0) {
+      <div class="text-center py-12 px-4 border border-slate-800 rounded-2xl bg-slate-900/40">
+        <p class="text-xs text-slate-400">Brak urządzeń w wybranej kategorii filtra.</p>
+        <button (click)="setCategoryFilter('all')" class="mt-2 text-xs text-cyan-400 hover:underline cursor-pointer">
+          Pokaż wszystkie urządzenia
         </button>
+      </div>
+    } @else {
+      <!-- Rozbudowany Stan Początkowy / Onboarding po pierwszym uruchomieniu -->
+      <div class="p-8 sm:p-10 border border-dashed border-slate-800 rounded-3xl bg-slate-900/50 backdrop-blur-sm space-y-8">
+        
+        <!-- Nagłówek stanu -->
+        <div class="text-center max-w-xl mx-auto space-y-3">
+          <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-tr from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-inner">
+            <mat-icon class="text-3xl !w-8 !h-8">sensors</mat-icon>
+          </div>
+          <div class="space-y-1">
+            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Usługi w tle aktywne i gotowe do odbioru</span>
+            </div>
+            <h3 class="text-lg font-bold text-white tracking-tight">
+              Oczekiwanie na urządzenia Sonoff & Tuya
+            </h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Broker Mosquitto oraz demon Zigbee2MQTT działają w tle. Obsługujemy głowice <strong class="text-white">TRVZB i TRVZB Gen 2</strong>, inteligentne gniazdka <strong class="text-white">S26R2ZB</strong>, wyłączniki <strong class="text-white">ZBMINIR2</strong> oraz sensory Tuya.
+            </p>
+          </div>
+        </div>
+
+        <!-- 3-krokowa instrukcja parowania urządzenia -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+          <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">1</span>
+              <h4 class="text-xs font-bold text-white">Włącz tryb parowania</h4>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Kliknij przycisk <strong class="text-slate-200">"Włącz parowanie (60s)"</strong>. Koordynator Sonoff Dongle Max otworzy sieć radiową dla nowych urządzeń.
+            </p>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">2</span>
+              <h4 class="text-xs font-bold text-white">Aktywuj urządzenie</h4>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Przytrzymaj przycisk parowania na urządzeniu (TRVZB, S26R2ZB, ZBMINIR2, Tuya) przez <strong class="text-slate-200">5 sekund</strong>, aż dioda LED zamiga.
+            </p>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">3</span>
+              <h4 class="text-xs font-bold text-white">Steruj z panelu</h4>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Urządzenie natychmiast pojawi się na kafelku — możesz zmieniać nastawę TRVZB, włączać gniazdko czy monitorować energię.
+            </p>
+          </div>
+        </div>
+
+        <!-- Przyciski akcji -->
+        <div class="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <button
+            (click)="triggerPairing()"
+            [disabled]="telemetry.isPairing()"
+            class="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
+          >
+            <mat-icon class="text-base !w-4 !h-4">{{ telemetry.isPairing() ? 'refresh' : 'sensors' }}</mat-icon>
+            <span>{{ telemetry.isPairing() ? 'Parowanie aktywne (' + telemetry.pairingRemainingSeconds() + 's)' : 'Włącz tryb parowania (60s)' }}</span>
+          </button>
+
+          <button
+            (click)="loadFullDemoCatalog()"
+            class="flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-950/40 transition-colors cursor-pointer"
+          >
+            <mat-icon class="text-base !w-4 !h-4">auto_awesome</mat-icon>
+            <span>Załaduj zestaw Sonoff & Tuya (Demo)</span>
+          </button>
+
+          <button
+            (click)="setTab('catalog')"
+            class="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <mat-icon class="text-base !w-4 !h-4">hub</mat-icon>
+            <span>Przeglądaj katalog produktów</span>
+          </button>
+
+          <a
+            href="http://localhost:8080"
+            target="_blank"
+            rel="noopener"
+            class="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <mat-icon class="text-base !w-4 !h-4">open_in_new</mat-icon>
+            <span>Konsola Zigbee2MQTT (port 8080)</span>
+          </a>
+        </div>
+
       </div>
     }
 
@@ -316,9 +555,9 @@
         <span>Sprzęt: ITEAD Sonoff Zigbee 3.0 Dongle Max (EFR32MG24 + ESP32-D0WD)</span>
       </div>
       <div class="flex items-center gap-4 text-[11px]">
-        <span>Połączenie: Sieć TCP / USB</span>
+        <span>Połączenie: Sieć TCP (port 6638) / USB (/dev/ttyACM0)</span>
         <span>Baza: SQLite (WAL Mode)</span>
-        <span>API: REST + WebSocket</span>
+        <span>API: REST + WebSocket + SSE</span>
       </div>
     </div>
   }
@@ -326,6 +565,11 @@
   <!-- ZAKŁADKA INSTALATOR & USŁUGI W TLE -->
   @if (activeTab() === 'installer') {
     <app-installer-view />
+  }
+
+  <!-- ZAKŁADKA KATALOG PRODUKTÓW SONOFF & TUYA -->
+  @if (activeTab() === 'catalog') {
+    <app-device-catalog />
   }
 
   <!-- ZAKŁADKA DONGLE MAX: SIEĆ I TRYB ROUTERA -->

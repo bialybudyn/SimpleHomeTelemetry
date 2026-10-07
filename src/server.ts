@@ -17,17 +17,44 @@ const browserDistFolder = join(import.meta.dirname, '../browser');
 const app = express();
 app.use(express.json());
 
-// Modele danych urządzeń i telemetrii
+// Modele danych urządzeń i telemetrii dla Sonoff (TRVZB, S26R2, ZBMINI) oraz Tuya
+type DeviceCategory = 'climate' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
+
 interface Device {
   ieee_address: string;
   friendly_name: string;
   model: string;
+  category?: DeviceCategory;
+  vendor?: string;
   last_seen: string | null;
   battery: number | null;
-  last_temperature: number | null;
-  last_humidity: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
+
+  // Czujniki temperatury i wilgotności
+  last_temperature: number | null;
+  last_humidity: number | null;
+
+  // Głowice termostatyczne Sonoff TRVZB / TRVZB Gen 2
+  current_heating_setpoint?: number | null;
+  local_temperature?: number | null;
+  system_mode?: string | null;
+  running_state?: string | null;
+  child_lock?: string | null;
+  open_window?: boolean | null;
+
+  // Włączniki i gniazdka sterowane (Sonoff S26R2ZB, ZBMINIR2, Tuya Smart Plug)
+  state?: string | null;
+  power?: number | null;
+  voltage?: number | null;
+  current?: number | null;
+  energy?: number | null;
+
+  // Czujniki kontaktronowe, ruchu, zalania (Sonoff SNZB-03/04/05, Tuya mmWave)
+  contact?: boolean | null;
+  occupancy?: boolean | null;
+  water_leak?: boolean | null;
+  illuminance?: number | null;
 }
 
 interface TelemetryPoint {
@@ -37,7 +64,34 @@ interface TelemetryPoint {
   humidity: number | null;
   battery: number | null;
   linkquality: number | null;
+  power?: number | null;
+  energy?: number | null;
+  setpoint?: number | null;
+  state?: string | null;
   timestamp: string;
+}
+
+function detectDeviceCategory(model: string, payload?: Record<string, unknown>): DeviceCategory {
+  const m = (model || '').toLowerCase();
+  if (m.includes('trv') || m.includes('thermostat') || payload?.['current_heating_setpoint'] !== undefined) {
+    return 'climate';
+  }
+  if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || payload?.['power'] !== undefined) {
+    return 'plug';
+  }
+  if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || m.includes('m5') || (payload?.['state'] !== undefined && payload?.['power'] === undefined)) {
+    return 'switch';
+  }
+  if (m.includes('snzb-04') || m.includes('contact') || m.includes('door') || payload?.['contact'] !== undefined) {
+    return 'contact';
+  }
+  if (m.includes('snzb-03') || m.includes('motion') || m.includes('pir') || m.includes('presence') || m.includes('occupancy') || payload?.['occupancy'] !== undefined) {
+    return 'occupancy';
+  }
+  if (m.includes('snzb-05') || m.includes('water') || m.includes('leak') || payload?.['water_leak'] !== undefined) {
+    return 'water_leak';
+  }
+  return 'sensor';
 }
 
 interface NotificationItem {
@@ -74,6 +128,9 @@ export interface MqttStatus {
   last_message_topic: string | null;
   bridge_state: string | null;
   devices_discovered: number;
+  z2m_version?: string;
+  channel?: number;
+  coordinator_type?: string;
 }
 
 let dongleMaxConfig: DongleMaxConfig = {
@@ -227,23 +284,91 @@ function connectMqtt(customUrl?: string) {
 
       // 1. Obsługa stanu mostka Zigbee2MQTT
       if (subtopic === 'bridge/state') {
-        const stateStr = message.toString();
+        let stateStr = message.toString().trim();
+        try {
+          const parsed = JSON.parse(stateStr);
+          if (parsed && typeof parsed === 'object' && parsed.state) {
+            stateStr = String(parsed.state);
+          }
+        } catch {
+          // raw string
+        }
         mqttStatus.bridge_state = stateStr;
         broadcastEvent({ type: 'bridge_state', state: stateStr });
+        broadcastEvent({ type: 'mqtt_status', data: mqttStatus });
         return;
       }
 
-      // 2. Obsługa listy urządzeń wykrytych przez Zigbee2MQTT
+      // 2. Informacje o mostku (wersja, kanał, koordynator)
+      if (subtopic === 'bridge/info') {
+        try {
+          const info = JSON.parse(message.toString());
+          if (info.version) mqttStatus.z2m_version = info.version;
+          if (info.network?.channel) mqttStatus.channel = info.network.channel;
+          if (info.coordinator?.type) mqttStatus.coordinator_type = info.coordinator.type;
+          broadcastEvent({ type: 'mqtt_status', data: mqttStatus });
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      // 3. Zdarzenia parowania w czasie rzeczywistym
+      if (subtopic === 'bridge/event') {
+        try {
+          const evt = JSON.parse(message.toString());
+          if (evt.type === 'device_joined' || evt.type === 'device_interview') {
+            const d = evt.data || {};
+            const ieee = d.ieee_address || d.ieeeAddress || d.ieeeAddr;
+            if (ieee) {
+              const devName = d.friendly_name || d.friendlyName || `Czujnik ${ieee.slice(-4)}`;
+              const modelName = d.definition?.description || d.definition?.model || d.model_id || 'Nowy czujnik Zigbee';
+              if (!devices.has(ieee)) {
+                devices.set(ieee, {
+                  ieee_address: ieee,
+                  friendly_name: devName,
+                  model: modelName,
+                  last_seen: new Date().toISOString(),
+                  battery: null,
+                  last_temperature: null,
+                  last_humidity: null,
+                  linkquality: null,
+                });
+                mqttStatus.devices_discovered = devices.size;
+                broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+interface Z2mDeviceItem {
+  ieee_address?: string;
+  ieeeAddress?: string;
+  ieeeAddr?: string;
+  type?: string;
+  friendly_name?: string;
+  friendlyName?: string;
+  definition?: { description?: string; model?: string };
+  model_id?: string;
+  modelId?: string;
+}
+
+      // 4. Obsługa listy urządzeń wykrytych przez Zigbee2MQTT
       if (subtopic === 'bridge/devices') {
         try {
           const list = JSON.parse(message.toString());
           if (Array.isArray(list)) {
             let updated = 0;
-            list.forEach((item: { ieee_address?: string; friendly_name?: string; type?: string; definition?: { description?: string; model?: string }; model_id?: string }) => {
-              if (item.ieee_address && item.type !== 'Coordinator') {
-                const ieee = item.ieee_address;
-                const devName = item.friendly_name || `Czujnik ${ieee.slice(-4)}`;
-                const modelName = item.definition?.description || item.definition?.model || item.model_id || 'Zigbee Device';
+            list.forEach((item: Z2mDeviceItem) => {
+              const ieee = item.ieee_address || item.ieeeAddress || item.ieeeAddr;
+              const isCoordinator = item.type === 'Coordinator';
+              if (ieee && !isCoordinator) {
+                const devName = item.friendly_name || item.friendlyName || `Czujnik ${ieee.slice(-4)}`;
+                const modelName = item.definition?.description || item.definition?.model || item.model_id || item.modelId || 'Zigbee Device';
                 const existing = devices.get(ieee);
                 if (!existing) {
                   devices.set(ieee, {
@@ -274,10 +399,10 @@ function connectMqtt(customUrl?: string) {
         return;
       }
 
-      // 3. Ignoruj inne tematy techniczne bridge
+      // 5. Ignoruj inne tematy techniczne bridge
       if (subtopic.startsWith('bridge/')) return;
 
-      // 4. Odczyt telemetrii z czujnika (topic: zigbee2mqtt/<device_name_or_ieee>)
+      // 6. Odczyt telemetrii z czujnika (topic: zigbee2mqtt/<device_name_or_ieee>)
       try {
         const payload = JSON.parse(message.toString());
         if (typeof payload === 'object' && payload !== null) {
@@ -293,16 +418,20 @@ function connectMqtt(customUrl?: string) {
           const nowStr = new Date().toISOString();
           const targetIeee = dev ? dev.ieee_address : (payload.ieee_address || subtopic);
 
-          const temp = payload.temperature !== undefined && payload.temperature !== null ? parseFloat(payload.temperature) : null;
+          const temp = payload.temperature !== undefined && payload.temperature !== null ? parseFloat(payload.temperature) : (payload.local_temperature !== undefined && payload.local_temperature !== null ? parseFloat(payload.local_temperature) : null);
           const hum = payload.humidity !== undefined && payload.humidity !== null ? parseFloat(payload.humidity) : null;
           const bat = payload.battery !== undefined && payload.battery !== null ? parseInt(payload.battery, 10) : null;
           const lq = payload.linkquality !== undefined && payload.linkquality !== null ? parseInt(payload.linkquality, 10) : null;
+
+          const modelName = payload.model || payload.device?.model || (dev ? dev.model : 'Zigbee Device');
+          const category = detectDeviceCategory(modelName, payload);
 
           if (!dev) {
             dev = {
               ieee_address: targetIeee,
               friendly_name: subtopic,
-              model: payload.model || payload.device?.model || 'Zigbee Sensor',
+              model: modelName,
+              category,
               last_seen: nowStr,
               battery: bat,
               last_temperature: temp,
@@ -311,12 +440,39 @@ function connectMqtt(customUrl?: string) {
             };
             devices.set(targetIeee, dev);
           } else {
+            dev.category = category;
             if (temp !== null) dev.last_temperature = temp;
             if (hum !== null) dev.last_humidity = hum;
             if (bat !== null) dev.battery = bat;
             if (lq !== null) dev.linkquality = lq;
             dev.last_seen = nowStr;
           }
+
+          // Pola dla głowic termostatycznych Sonoff TRVZB / TRVZB Gen 2
+          if (payload.current_heating_setpoint !== undefined && payload.current_heating_setpoint !== null) {
+            dev.current_heating_setpoint = parseFloat(payload.current_heating_setpoint);
+          }
+          if (payload.local_temperature !== undefined && payload.local_temperature !== null) {
+            dev.local_temperature = parseFloat(payload.local_temperature);
+            if (dev.last_temperature === null) dev.last_temperature = dev.local_temperature;
+          }
+          if (payload.system_mode !== undefined) dev.system_mode = String(payload.system_mode);
+          if (payload.running_state !== undefined) dev.running_state = String(payload.running_state);
+          if (payload.child_lock !== undefined) dev.child_lock = String(payload.child_lock);
+          if (payload.open_window !== undefined) dev.open_window = Boolean(payload.open_window);
+
+          // Pola dla włączników i inteligentnych gniazdek (Sonoff S26R2, ZBMINIR2, Tuya Plug)
+          if (payload.state !== undefined) dev.state = String(payload.state);
+          if (payload.power !== undefined && payload.power !== null) dev.power = parseFloat(payload.power);
+          if (payload.voltage !== undefined && payload.voltage !== null) dev.voltage = parseFloat(payload.voltage);
+          if (payload.current !== undefined && payload.current !== null) dev.current = parseFloat(payload.current);
+          if (payload.energy !== undefined && payload.energy !== null) dev.energy = parseFloat(payload.energy);
+
+          // Pola dla czujników otwarcia, ruchu, zalania (Sonoff SNZB-04/03/05, Tuya mmWave)
+          if (payload.contact !== undefined) dev.contact = Boolean(payload.contact);
+          if (payload.occupancy !== undefined) dev.occupancy = Boolean(payload.occupancy);
+          if (payload.water_leak !== undefined) dev.water_leak = Boolean(payload.water_leak);
+          if (payload.illuminance !== undefined && payload.illuminance !== null) dev.illuminance = parseFloat(payload.illuminance);
 
           const record: TelemetryPoint = {
             id: currentId++,
@@ -325,6 +481,10 @@ function connectMqtt(customUrl?: string) {
             humidity: dev.last_humidity,
             battery: dev.battery,
             linkquality: dev.linkquality,
+            power: dev.power,
+            energy: dev.energy,
+            setpoint: dev.current_heating_setpoint,
+            state: dev.state,
             timestamp: nowStr,
           };
 
@@ -336,6 +496,11 @@ function connectMqtt(customUrl?: string) {
             type: 'telemetry',
             device_ieee: targetIeee,
             data: record,
+          });
+
+          broadcastEvent({
+            type: 'device_updated',
+            device: dev,
           });
 
           if (dev.battery !== null && dev.battery <= 15) {
@@ -350,6 +515,50 @@ function connectMqtt(customUrl?: string) {
     mqttStatus.last_error = err instanceof Error ? err.message : String(err);
   }
 }
+
+// Automatyczne załadowanie wykrytych wcześniej urządzeń z pliku bazy Z2M jeśli istnieje
+function tryLoadExistingZ2mDevices() {
+  const possiblePaths = [
+    '/opt/zigbee2mqtt/data/database.db',
+    join(process.cwd(), 'database.db'),
+  ];
+  for (const dbPath of possiblePaths) {
+    if (existsSync(dbPath)) {
+      try {
+        const content = readFileSync(dbPath, 'utf-8');
+        const lines = content.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const item = JSON.parse(trimmed);
+            const ieee = item.ieeeAddr || item.ieee_address;
+            if (ieee && item.type !== 'Coordinator') {
+              if (!devices.has(ieee)) {
+                devices.set(ieee, {
+                  ieee_address: ieee,
+                  friendly_name: `Czujnik ${ieee.slice(-4)}`,
+                  model: item.modelId || 'Zigbee Device',
+                  last_seen: null,
+                  battery: null,
+                  last_temperature: null,
+                  last_humidity: null,
+                  linkquality: null,
+                });
+              }
+            }
+          } catch {
+            // line json parse
+          }
+        }
+      } catch (err) {
+        console.debug('[Z2M DB] Błąd czytania bazy:', err);
+      }
+    }
+  }
+}
+
+tryLoadExistingZ2mDevices();
 
 // Uruchomienie połączenia MQTT
 connectMqtt();
@@ -500,11 +709,15 @@ app.post('/api/permit-join', (req: Request, res: Response) => {
     expires_at: permitJoinExpiresAt,
   });
 
-  // Przekaż żądanie permit_join do Zigbee2MQTT przez MQTT
+  // Przekaż żądanie permit_join do Zigbee2MQTT przez MQTT na oba oficjalne tematy (kompatybilność Z2M v1 i v2)
   if (mqttClient?.connected) {
     try {
       mqttClient.publish(
         `${mqttStatus.topic_prefix}/bridge/request/permit_join`,
+        JSON.stringify({ value: true, time: duration }),
+      );
+      mqttClient.publish(
+        `${mqttStatus.topic_prefix}/bridge/config/permit_join`,
         JSON.stringify({ value: true, time: duration }),
       );
     } catch (e) {
@@ -513,6 +726,281 @@ app.post('/api/permit-join', (req: Request, res: Response) => {
   }
 
   res.json({ status: 'ok', duration, expires_at: permitJoinExpiresAt });
+});
+
+// 5a. Sterowanie urządzeniem (TRVZB nastawa/tryb, Smart Plug ON/OFF, Przekaźnik ZBMINIR2)
+app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
+  const ieee = String(req.params['ieee'] || '');
+  const dev = devices.get(ieee);
+  if (!dev) {
+    res.status(404).json({ detail: 'Device not found' });
+    return;
+  }
+
+  const cmd = req.body;
+  if (!cmd || typeof cmd !== 'object') {
+    res.status(400).json({ detail: 'Invalid payload' });
+    return;
+  }
+
+  // Zastosowanie natychmiastowe w pamięci serwera (optimistic update)
+  if (cmd.state !== undefined) dev.state = String(cmd.state);
+  if (cmd.current_heating_setpoint !== undefined) dev.current_heating_setpoint = parseFloat(cmd.current_heating_setpoint);
+  if (cmd.system_mode !== undefined) dev.system_mode = String(cmd.system_mode);
+  if (cmd.child_lock !== undefined) dev.child_lock = String(cmd.child_lock);
+  dev.last_seen = new Date().toISOString();
+
+  // Przekazanie polecenia do brokera Mosquitto MQTT dla Zigbee2MQTT
+  if (mqttClient?.connected) {
+    const targetTopic = `${mqttStatus.topic_prefix}/${dev.friendly_name || ieee}/set`;
+    try {
+      mqttClient.publish(targetTopic, JSON.stringify(cmd));
+      console.log(`[MQTT SET] Wysłano do ${targetTopic}:`, JSON.stringify(cmd));
+    } catch (e) {
+      console.warn(`[MQTT SET] Błąd publikacji do ${targetTopic}:`, e);
+    }
+  }
+
+  broadcastEvent({
+    type: 'device_updated',
+    device: dev,
+  });
+
+  res.json({ status: 'ok', device: dev, sent_to_mqtt: !!mqttClient?.connected });
+});
+
+// 5b. Dodanie czujnika demonstracyjnego / testowego (Demo Sensor)
+app.post('/api/demo-device', (_req: Request, res: Response) => {
+  const sampleIeee = '0x00124b002a99bcde';
+  const now = new Date();
+  const sampleDev: Device = {
+    ieee_address: sampleIeee,
+    friendly_name: 'Salon - Sonoff SNZB-02D (Demo)',
+    model: 'SNZB-02D (EFR32MG24)',
+    category: 'sensor',
+    last_seen: now.toISOString(),
+    battery: 92,
+    last_temperature: 21.8,
+    last_humidity: 48.5,
+    linkquality: 114,
+  };
+  devices.set(sampleIeee, sampleDev);
+
+  // Wygeneruj 12 punktów historii dla wykresów
+  const historyList: TelemetryPoint[] = [];
+  for (let i = 12; i >= 0; i--) {
+    const ptTime = new Date(now.getTime() - i * 15 * 60 * 1000).toISOString();
+    historyList.push({
+      id: currentId++,
+      device_ieee: sampleIeee,
+      temperature: parseFloat((21.2 + Math.sin(i / 2) * 0.8).toFixed(1)),
+      humidity: parseFloat((48.0 + Math.cos(i / 2) * 1.5).toFixed(1)),
+      battery: 92,
+      linkquality: 110 + Math.floor(Math.random() * 10),
+      timestamp: ptTime,
+    });
+  }
+  telemetryStore.set(sampleIeee, historyList);
+
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+  broadcastEvent({
+    type: 'telemetry',
+    device_ieee: sampleIeee,
+    data: historyList[historyList.length - 1],
+  });
+
+  res.json({ success: true, device: sampleDev });
+});
+
+// 5c. Załadowanie pełnego ekosystemu Sonoff (TRVZB, S26R2ZB, ZBMINIR2, kontaktrony) oraz Tuya
+app.post('/api/demo-catalog', (_req: Request, res: Response) => {
+  const now = new Date();
+  const demoList: Device[] = [
+    {
+      ieee_address: '0x00124b002b11aa01',
+      friendly_name: 'Salon - Sonoff TRVZB Gen 2',
+      model: 'TRVZB Gen 2 (Termostat Zigbee 3.0)',
+      category: 'climate',
+      vendor: 'SONOFF',
+      last_seen: now.toISOString(),
+      battery: 94,
+      last_temperature: 21.6,
+      local_temperature: 21.6,
+      current_heating_setpoint: 22.5,
+      system_mode: 'heat',
+      running_state: 'heat',
+      child_lock: 'UNLOCK',
+      open_window: false,
+      last_humidity: 47.0,
+      linkquality: 135,
+    },
+    {
+      ieee_address: '0x00124b002b11aa02',
+      friendly_name: 'Sypialnia - Sonoff TRVZB',
+      model: 'TRVZB (Smart Radiator Valve)',
+      category: 'climate',
+      vendor: 'SONOFF',
+      last_seen: now.toISOString(),
+      battery: 86,
+      last_temperature: 20.2,
+      local_temperature: 20.2,
+      current_heating_setpoint: 20.0,
+      system_mode: 'auto',
+      running_state: 'idle',
+      child_lock: 'LOCK',
+      open_window: false,
+      last_humidity: 51.5,
+      linkquality: 118,
+    },
+    {
+      ieee_address: '0x00124b002b11aa03',
+      friendly_name: 'Kuchnia - Sonoff S26R2ZB Plug',
+      model: 'S26R2ZB (Gniazdko Zigbee 16A)',
+      category: 'plug',
+      vendor: 'SONOFF',
+      last_seen: now.toISOString(),
+      battery: null,
+      state: 'ON',
+      power: 1420.5,
+      voltage: 231.4,
+      current: 6.14,
+      energy: 4.82,
+      last_temperature: null,
+      last_humidity: null,
+      linkquality: 142,
+    },
+    {
+      ieee_address: '0x00124b002b11aa04',
+      friendly_name: 'Korytarz - Sonoff ZBMINIR2 Switch',
+      model: 'ZBMINIR2 (Przekaźnik dopuszkowy)',
+      category: 'switch',
+      vendor: 'SONOFF',
+      last_seen: now.toISOString(),
+      battery: null,
+      state: 'ON',
+      last_temperature: null,
+      last_humidity: null,
+      linkquality: 128,
+    },
+    {
+      ieee_address: '0x00124b002b11aa05',
+      friendly_name: 'Drzwi - Sonoff SNZB-04',
+      model: 'SNZB-04 (Kontaktron drzwi/okien)',
+      category: 'contact',
+      vendor: 'SONOFF',
+      last_seen: now.toISOString(),
+      battery: 91,
+      contact: true,
+      last_temperature: null,
+      last_humidity: null,
+      linkquality: 110,
+    },
+    {
+      ieee_address: '0x00124b002b11aa06',
+      friendly_name: 'Łazienka - Sonoff SNZB-05',
+      model: 'SNZB-05 (Czujnik zalania wodą)',
+      category: 'water_leak',
+      vendor: 'SONOFF',
+      last_seen: now.toISOString(),
+      battery: 98,
+      water_leak: false,
+      last_temperature: null,
+      last_humidity: null,
+      linkquality: 122,
+    },
+    {
+      ieee_address: '0x00124b002b11aa07',
+      friendly_name: 'Biuro - Tuya mmWave Radar TS0601',
+      model: 'TS0601 (Radar obecności człowieka)',
+      category: 'occupancy',
+      vendor: 'Tuya',
+      last_seen: now.toISOString(),
+      battery: null,
+      occupancy: true,
+      illuminance: 380,
+      last_temperature: null,
+      last_humidity: null,
+      linkquality: 148,
+    },
+    {
+      ieee_address: '0x00124b002b11aa08',
+      friendly_name: 'Pralka - Tuya Smart Plug TS011F',
+      model: 'TS011F (Gniazdo z licznikiem energii)',
+      category: 'plug',
+      vendor: 'Tuya',
+      last_seen: now.toISOString(),
+      battery: null,
+      state: 'OFF',
+      power: 0.0,
+      voltage: 232.1,
+      current: 0.0,
+      energy: 28.65,
+      last_temperature: null,
+      last_humidity: null,
+      linkquality: 130,
+    },
+    {
+      ieee_address: '0x00124b002b11aa09',
+      friendly_name: 'Salon - Sonoff SNZB-02D LCD',
+      model: 'SNZB-02D (Termohigrometr LCD)',
+      category: 'sensor',
+      vendor: 'SONOFF',
+      last_seen: now.toISOString(),
+      battery: 89,
+      last_temperature: 21.8,
+      last_humidity: 48.2,
+      linkquality: 140,
+    },
+  ];
+
+  demoList.forEach((d) => {
+    devices.set(d.ieee_address, d);
+
+    // Wygeneruj historię punktów
+    const historyList: TelemetryPoint[] = [];
+    for (let i = 12; i >= 0; i--) {
+      const ptTime = new Date(now.getTime() - i * 15 * 60 * 1000).toISOString();
+      historyList.push({
+        id: currentId++,
+        device_ieee: d.ieee_address,
+        temperature: d.last_temperature !== null ? parseFloat((d.last_temperature + Math.sin(i / 2) * 0.4).toFixed(1)) : null,
+        humidity: d.last_humidity !== null ? parseFloat((d.last_humidity + Math.cos(i / 2) * 1.2).toFixed(1)) : null,
+        battery: d.battery,
+        linkquality: d.linkquality,
+        power: d.power !== undefined ? d.power : null,
+        energy: d.energy !== undefined ? d.energy : null,
+        setpoint: d.current_heating_setpoint !== undefined ? d.current_heating_setpoint : null,
+        state: d.state !== undefined ? d.state : null,
+        timestamp: ptTime,
+      });
+    }
+    telemetryStore.set(d.ieee_address, historyList);
+  });
+
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+  res.json({ success: true, count: demoList.length, devices: demoList });
+});
+
+// 5d. Oficjalna lista wspieranych modeli Sonoff & Tuya
+app.get('/api/catalog', (_req: Request, res: Response) => {
+  res.json({
+    brands: ['Sonoff', 'Tuya'],
+    supported_categories: ['climate', 'plug', 'switch', 'sensor', 'contact', 'occupancy', 'water_leak'],
+    featured: [
+      { id: 'trvzb-gen2', brand: 'Sonoff', name: 'TRVZB Gen 2', type: 'climate', desc: 'Głowica termostatyczna nowej generacji z silnikiem krokowym i PID' },
+      { id: 'trvzb', brand: 'Sonoff', name: 'TRVZB', type: 'climate', desc: 'Inteligentna głowica grzejnikowa Zigbee 3.0 M30x1.5' },
+      { id: 's26r2zb', brand: 'Sonoff', name: 'S26R2ZB', type: 'plug', desc: 'Gniazdko sterowane 16A 4000W z funkcją routera Zigbee' },
+      { id: 's40zb', brand: 'Sonoff', name: 'S40ZB / S31', type: 'plug', desc: 'Gniazdko z pomiarem mocy chwilowej (W) i zużycia energii (kWh)' },
+      { id: 'zbminir2', brand: 'Sonoff', name: 'ZBMINIR2', type: 'switch', desc: 'Kompaktowy przekaźnik dopuszkowy Zigbee 3.0 do puszek podtynkowych' },
+      { id: 'zbmini-l2', brand: 'Sonoff', name: 'ZBMINI-L2', type: 'switch', desc: 'Przekaźnik dopuszkowy bez przewodu neutralnego N' },
+      { id: 'snzb-04', brand: 'Sonoff', name: 'SNZB-04', type: 'contact', desc: 'Kontaktron magnetyczny do drzwi i okien' },
+      { id: 'snzb-03', brand: 'Sonoff', name: 'SNZB-03', type: 'occupancy', desc: 'Bezprzewodowy czujnik ruchu PIR 110°' },
+      { id: 'snzb-05', brand: 'Sonoff', name: 'SNZB-05', type: 'water_leak', desc: 'Czujnik zalania wodą ze złotą sondą IP67' },
+      { id: 'snzb-02d', brand: 'Sonoff', name: 'SNZB-02D', type: 'sensor', desc: 'Czujnik temperatury i wilgotności z ekranem LCD' },
+      { id: 'ts011f', brand: 'Tuya', name: 'TS011F Smart Plug', type: 'plug', desc: 'Gniazdko Tuya 16A z dokładnym licznikiem energii elektrycznej' },
+      { id: 'ts0601-radar', brand: 'Tuya', name: 'TS0601 Radar mmWave', type: 'occupancy', desc: 'Radar mikrofalowy 24GHz do wykrywania obecności i oddechu' },
+    ],
+  });
 });
 
 // 6. Symulacja wstrzyknięcia pomiaru (Testing Console)

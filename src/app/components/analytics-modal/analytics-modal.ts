@@ -115,6 +115,44 @@ import { Chart, registerables } from 'chart.js';
               </div>
             </div>
 
+            <!-- Specjalny panel sterowania dla głowic TRVZB oraz Smart Plugów w modalu -->
+            @if (device()?.current_heating_setpoint !== undefined || device()?.category === 'climate') {
+              <div class="p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-slate-950 to-slate-950 border border-rose-800/60 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-xl bg-rose-950 border border-rose-800 flex items-center justify-center text-rose-400">
+                    <mat-icon>thermostat</mat-icon>
+                  </div>
+                  <div>
+                    <div class="text-xs text-rose-300 font-bold">Sonoff TRVZB / TRVZB Gen 2 — Nastawa Termostatu</div>
+                    <div class="text-xs text-slate-400 font-mono">
+                      Aktualna nastawa: <strong class="text-white">{{ device()?.current_heating_setpoint || 21.0 }}°C</strong> • Stan zaworu: <span class="text-orange-400 font-semibold">{{ device()?.running_state === 'heat' ? 'Grzeje' : 'Czuwanie' }}</span> • Tryb: <span class="uppercase text-cyan-300">{{ device()?.system_mode || 'heat' }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-mono text-slate-400">Blokada: {{ device()?.child_lock === 'LOCK' ? 'Włączona (Lock)' : 'Wyłączona' }}</span>
+                </div>
+              </div>
+            } @else if (device()?.power !== undefined || device()?.category === 'plug') {
+              <div class="p-4 rounded-xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-slate-950 border border-emerald-800/60 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400">
+                    <mat-icon>power</mat-icon>
+                  </div>
+                  <div>
+                    <div class="text-xs text-emerald-300 font-bold">Monitor Energii Elektrycznej 230V</div>
+                    <div class="text-xs text-slate-400 font-mono">
+                      Moc chwilowa: <strong class="text-white">{{ device()?.power || 0 }} W</strong> • Napięcie: <strong class="text-cyan-300">{{ device()?.voltage || 230 }} V</strong> • Łączne zużycie: <strong class="text-emerald-300">{{ device()?.energy || 0 }} kWh</strong>
+                    </div>
+                  </div>
+                </div>
+                <div class="text-xs font-mono font-bold" [class.text-emerald-400]="device()?.state === 'ON'" [class.text-slate-400]="device()?.state !== 'ON'">
+                  Stan: {{ device()?.state || 'OFF' }}
+                </div>
+              </div>
+            }
+
             <!-- Karty statystyk dla wybranego zakresu -->
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">

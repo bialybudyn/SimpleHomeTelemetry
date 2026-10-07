@@ -154,3 +154,32 @@ System ściśle przestrzega reguły zerowej syntezy nieistniejących danych:
 4. Gdy poziom baterii dowolnego czujnika spadnie do **<= 15%**, serwer automatycznie:
    - Zapisuje zdarzenie w tabeli `notifications`.
    - Wysyła natychmiastowe powiadomienie przez WebSocket (`type: battery_alert`) do panelu WWW i aplikacji Android.
+
+---
+
+## 7. Ekosystem Urządzeń Sonoff i Tuya: Głowice TRVZB, Gniazdka i Wyłączniki
+
+System obsługuje pełną gamę produktów marki **Sonoff (https://sonoff.tech/pl-pl)** oraz urządzeń ekosystemu **Tuya**:
+
+### A. Głowice termostatyczne Sonoff TRVZB oraz TRVZB Gen 2:
+- **TRVZB Gen 2 (Nowa Generacja)**: precyzyjny silnik krokowy, algorytm PID, regulacja nastawy w krokach co 0.5°C w zakresie 5.0–30.0°C.
+- **Sterowanie na żywo z panelu**:
+  - Zmiana nastawy zadanej: `POST /api/devices/{ieee}/set` -> `{"current_heating_setpoint": 22.5}`
+  - Tryb pracy: `{"system_mode": "heat" | "auto" | "off"}`
+  - Blokada rodzicielska: `{"child_lock": "LOCK" | "UNLOCK"}`
+  - Telemetria: stan zaworu (`running_state`: `heat`/`idle`), temperatura bieżąca (`local_temperature`), detekcja otwartego okna (`open_window`).
+
+### B. Inteligentne gniazdka sterowane (Sonoff S26R2ZB, S40ZB, Tuya TS011F):
+- Obciążenie do 16A (4000W), funkcja routera Zigbee Mesh.
+- Zdalne przełączanie ON/OFF z natychmiastową reakcją: `{"state": "ON"}` / `{"state": "OFF"}`.
+- Telemetria energii elektrycznej: moc chwilowa (`power` w W), napięcie (`voltage` w V), natężenie (`current` w A), łączne zużycie (`energy` w kWh).
+
+### C. Wyłączniki i przekaźniki dopuszkowe (Sonoff ZBMINIR2, ZBMINI-L2, Tuya Switch):
+- Montaż w puszce podtynkowej 60mm za tradycyjnym włącznikiem ściennym.
+- Zdalne bistabilne przełączanie obwodu oświetleniowego (`state`: `ON`/`OFF`).
+
+### D. Sensory magnetyczne, obecności i zalania (Sonoff SNZB-03, 04, 05, Tuya mmWave):
+- **SNZB-04**: Kontaktron drzwi/okien (`contact`: `true` = zamknięte, `false` = otwarte).
+- **SNZB-03 / Tuya TS0601 Radar mmWave**: Detekcja ruchu i mikroruchów obecności (`occupancy`: `true`/`false`), pomiar natężenia światła (`illuminance` w lux).
+- **SNZB-05**: Złocona sonda zalania IP67 (`water_leak`: `true`/`false`).
+- **SNZB-02D**: Termohigrometr z ekranem LCD.

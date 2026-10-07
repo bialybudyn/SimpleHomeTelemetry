@@ -33,10 +33,26 @@ fi
 
 REAL_USER=${SUDO_USER:-$USER}
 USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+INITIAL_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Wykrywanie katalogu źródłowego panelu telemetrycznego (musi zawierać src/server.ts)
+PANEL_SOURCE=""
+if [ -f "$SCRIPT_DIR/src/server.ts" ]; then
+  PANEL_SOURCE="$SCRIPT_DIR"
+elif [ -f "$INITIAL_DIR/src/server.ts" ]; then
+  PANEL_SOURCE="$INITIAL_DIR"
+elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ]; then
+  PANEL_SOURCE="/root/SimpleHomeTelemetry"
+elif [ -f "$USER_HOME/SimpleHomeTelemetry/src/server.ts" ]; then
+  PANEL_SOURCE="$USER_HOME/SimpleHomeTelemetry"
+fi
 
 echo -e "${YELLOW}[1/7] Aktualizacja repozytoriów systemowych i instalacja narzędzi bazowych...${NC}"
 apt-get update -y
-apt-get install -y curl wget git gnupg gpg ca-certificates build-essential sqlite3 libsqlite3-dev socat ufw
+apt-get install -y curl wget git gnupg gpg ca-certificates build-essential sqlite3 libsqlite3-dev socat ufw avahi-daemon libnss-mdns
+systemctl enable avahi-daemon 2>/dev/null || true
+systemctl restart avahi-daemon 2>/dev/null || true
 
 # 2. Instalacja i konfiguracja brokera Mosquitto
 echo -e "\n${YELLOW}[2/7] Instalacja i konfiguracja brokera MQTT Eclipse Mosquitto...${NC}"
@@ -107,6 +123,15 @@ DONGLE_CHOICE=${DONGLE_CHOICE:-1}
 
 if [ "$DONGLE_CHOICE" -eq 1 ]; then
   DONGLE_PORT="tcp://Dongle-M.local:6638"
+  # Sprawdzenie czy Dongle-M.local odpowiada w sieci
+  if ! getent hosts Dongle-M.local >/dev/null 2>&1 && ! ping -c 1 -W 1 Dongle-M.local >/dev/null 2>&1; then
+    echo -e "${YELLOW}[INFO] Nazwa 'Dongle-M.local' nie odpowiada jeszcze w sieci lokalnej.${NC}"
+    read -rp "Jeśli znasz bezpośredni adres IP Dongla (np. 10.0.0.50), podaj go teraz [pozostaw puste dla Dongle-M.local]: " MANUAL_IP
+    if [ -n "$MANUAL_IP" ]; then
+      MANUAL_IP=$(echo "$MANUAL_IP" | sed -e 's|^tcp://||' -e 's|:6638$||')
+      DONGLE_PORT="tcp://${MANUAL_IP}:6638"
+    fi
+  fi
 elif [ "$DONGLE_CHOICE" -eq 2 ]; then
   # Sprawdzenie portu USB
   if [ -e "/dev/ttyACM0" ]; then
@@ -206,22 +231,43 @@ systemctl enable zigbee2mqtt
 systemctl restart zigbee2mqtt
 
 # 7. Konfiguracja i uruchomienie Panelu Telemetrii IoT
-echo -e "\n${YELLOW}[7/7] Konfiguracja Panelu Telemetrycznego i API...${NC}"
+echo -e "\n${YELLOW}[7/7] Konfiguracja i budowanie Panelu Telemetrycznego IoT...${NC}"
 APP_DIR="/opt/zigbee-telemetry-panel"
 mkdir -p "$APP_DIR"
 
 # Kopiowanie plików aplikacji do katalogu docelowego jeśli uruchamiane z repozytorium
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/package.json" ]; then
-  cp -r "$SCRIPT_DIR"/* "$APP_DIR/" 2>/dev/null || true
+if [ -n "$PANEL_SOURCE" ] && [ -f "$PANEL_SOURCE/src/server.ts" ]; then
+  echo -e "${CYAN}Kopiowanie kodu panelu z $PANEL_SOURCE do $APP_DIR...${NC}"
+  cp -r "$PANEL_SOURCE"/* "$APP_DIR/" 2>/dev/null || true
+elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ]; then
+  echo -e "${CYAN}Kopiowanie kodu panelu z /root/SimpleHomeTelemetry do $APP_DIR...${NC}"
+  cp -r /root/SimpleHomeTelemetry/* "$APP_DIR/" 2>/dev/null || true
 fi
 
+cd "$APP_DIR"
+# Usunięcie starych lub uszkodzonych dowiązań node_modules
+rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
 chown -R "$REAL_USER":"$REAL_USER" "$APP_DIR"
+
+echo -e "${CYAN}Instalacja zależności panelu w $APP_DIR...${NC}"
+if command -v pnpm >/dev/null 2>&1; then
+  sudo -u "$REAL_USER" pnpm install
+else
+  sudo -u "$REAL_USER" npm install --no-audit --no-fund
+fi
+
+echo -e "${CYAN}Kompilacja produkcyjna panelu (Angular SSR + Node.js Backend)...${NC}"
+if command -v pnpm >/dev/null 2>&1; then
+  sudo -u "$REAL_USER" pnpm run build
+else
+  sudo -u "$REAL_USER" npm run build
+fi
 
 cat << EOF > /etc/systemd/system/iot-telemetry.service
 [Unit]
 Description=Zigbee IoT Telemetry Panel & SQLite Backend
 After=network.target mosquitto.service zigbee2mqtt.service
+Wants=mosquitto.service
 
 [Service]
 Type=simple
@@ -230,9 +276,12 @@ WorkingDirectory=${APP_DIR}
 Environment="PORT=3000"
 Environment="MQTT_URL=mqtt://127.0.0.1:1883"
 Environment="MQTT_TOPIC=zigbee2mqtt"
-ExecStart=$(which npm) run start
+ExecStart=$(which node) dist/app/server/server.mjs
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iot-telemetry
 
 [Install]
 WantedBy=multi-user.target
@@ -240,6 +289,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable iot-telemetry 2>/dev/null || true
+systemctl restart iot-telemetry 2>/dev/null || true
 
 echo -e "\n${GREEN}====================================================================${NC}"
 echo -e "${GREEN}   INSTALACJA ZAKOŃCZONA SUKCESEM!                                  ${NC}"

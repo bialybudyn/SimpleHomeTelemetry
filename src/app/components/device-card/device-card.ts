@@ -6,7 +6,7 @@ import {
   output,
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
-import { Device } from '../../models/telemetry.models';
+import { Device, DeviceCategory } from '../../models/telemetry.models';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -22,80 +22,366 @@ import { Device } from '../../models/telemetry.models';
       class="group relative bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl hover:shadow-cyan-950/20 focus:outline-none focus:border-cyan-500"
       [class.telemetry-updated]="device().isRecentlyUpdated"
     >
-      <!-- Górny wiersz: Nazwa, Adres IEEE oraz Bateria -->
-      <div class="flex items-start justify-between gap-3 mb-4">
+      <!-- Górny wiersz: Badge Kategorii, Nazwa, Zmiana Nazwy oraz Bateria / Zasilanie -->
+      <div class="flex items-start justify-between gap-3 mb-3.5">
         <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5 mb-1">
+            <span
+              class="text-[10px] font-mono uppercase px-2 py-0.5 rounded-md font-semibold tracking-wide border"
+              [class]="categoryBadgeClass()"
+            >
+              {{ categoryBadgeLabel() }}
+            </span>
+            @if (device().vendor) {
+              <span class="text-[10px] font-mono text-slate-500">
+                {{ device().vendor }}
+              </span>
+            }
+          </div>
+
           <div class="flex items-center gap-1.5">
             <h3 class="text-sm font-bold text-white truncate group-hover:text-cyan-300 transition-colors">
               {{ device().friendly_name || device().ieee_address }}
             </h3>
             <button
               (click)="onRenameClick($event)"
-              class="text-slate-500 hover:text-cyan-400 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-              title="Zmień nazwę"
+              class="text-slate-500 hover:text-cyan-400 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              title="Zmień nazwę urządzenia"
             >
               <mat-icon class="text-xs !w-3.5 !h-3.5">edit</mat-icon>
             </button>
           </div>
           <div class="text-[11px] font-mono text-slate-500 truncate mt-0.5">
-            {{ device().ieee_address }}
+            {{ device().model }}
           </div>
         </div>
 
-        <!-- Wskaźnik zasilania (Bateria) -->
-        <div
-          class="flex items-center gap-1 text-xs font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/80 border border-slate-800"
-          [title]="device().battery !== undefined && device().battery !== null ? 'Poziom naładowania baterii: ' + device().battery + '%' : 'Brak danych o baterii'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4" [class]="batteryColorClass()">
-            {{ batteryIcon() }}
-          </mat-icon>
-          <span class="tabular-nums font-semibold" [class]="batteryColorClass()">
-            {{ device().battery !== undefined && device().battery !== null ? device().battery + '%' : 'brak danych' }}
-          </span>
-        </div>
+        <!-- Wskaźnik zasilania: Bateria lub Zasilanie sieciowe 230V -->
+        @if (device().battery !== undefined && device().battery !== null) {
+          <div
+            class="flex items-center gap-1 text-xs font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/80 border border-slate-800"
+            [title]="'Poziom baterii: ' + device().battery + '%'"
+          >
+            <mat-icon class="text-sm !w-4 !h-4" [class]="batteryColorClass()">
+              {{ batteryIcon() }}
+            </mat-icon>
+            <span class="tabular-nums font-semibold" [class]="batteryColorClass()">
+              {{ device().battery }}%
+            </span>
+          </div>
+        } @else {
+          <div
+            class="flex items-center gap-1 text-[11px] font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/80 border border-slate-800 text-slate-400"
+            title="Zasilanie stałe 230V AC"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">power</mat-icon>
+            <span>230V</span>
+          </div>
+        }
       </div>
 
-      <!-- Pomiary główne: Duża temperatura i wilgotność -->
-      <div class="grid grid-cols-2 gap-3 mb-4">
-        
-        <!-- Kafelek Temperatura -->
-        <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
-          <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
-            <mat-icon class="text-cyan-400 text-xs !w-3.5 !h-3.5">thermostat</mat-icon>
-            <span>Temperatura</span>
+      <!-- SEKCJA GŁÓWNA KAFELKA W ZALEŻNOŚCI OD TYPU URZĄDZENIA -->
+
+      <!-- 1. GŁOWICA TERMOSTATYCZNA (Sonoff TRVZB / TRVZB Gen 2) -->
+      @if (category() === 'climate') {
+        <div class="space-y-3 mb-4">
+          <!-- Główny panel nastawy temperatury z przyciskami +/- -->
+          <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                <mat-icon class="text-rose-400 text-xs !w-3.5 !h-3.5">thermostat</mat-icon>
+                <span>Nastawa zadana</span>
+              </div>
+              <div class="flex items-baseline gap-1 mt-0.5">
+                <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
+                  {{ setpointTemp() }}
+                </span>
+                <span class="text-xs font-mono text-rose-400">°C</span>
+              </div>
+            </div>
+
+            <!-- Przyciski regulacji nastawy o 0.5°C -->
+            <div class="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-800">
+              <button
+                (click)="adjustSetpoint(-0.5, $event)"
+                class="w-7 h-7 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center font-bold text-sm transition-colors cursor-pointer"
+                title="Zmniejsz temperaturę o 0.5°C"
+              >
+                -
+              </button>
+              <button
+                (click)="adjustSetpoint(0.5, $event)"
+                class="w-7 h-7 rounded-md bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center font-bold text-sm transition-colors cursor-pointer shadow-sm shadow-rose-950"
+                title="Zwiększ temperaturę o 0.5°C"
+              >
+                +
+              </button>
+            </div>
           </div>
-          <div class="flex items-baseline gap-1">
-            @if (hasTemp()) {
-              <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
-                {{ formattedTemp() }}
-              </span>
-              <span class="text-xs font-mono text-cyan-400">°C</span>
-            } @else {
-              <span class="text-xs font-medium font-mono text-slate-500 italic">brak danych</span>
-            }
+
+          <!-- Pomiary dodatkowe: Temperatura bieżąca, stan grzania, tryb -->
+          <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+            <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+              <span class="text-slate-400 text-[11px]">Bieżąca:</span>
+              <span class="text-white font-bold">{{ measuredTemp() }}°C</span>
+            </div>
+
+            <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+              <span class="text-slate-400 text-[11px]">Stan:</span>
+              @if (device().running_state === 'heat') {
+                <span class="text-orange-400 font-bold flex items-center gap-1">
+                  <mat-icon class="text-xs !w-3 !h-3 text-orange-400">local_fire_department</mat-icon>
+                  Grzeje
+                </span>
+              } @else {
+                <span class="text-slate-400">Czuwanie</span>
+              }
+            </div>
+          </div>
+
+          <!-- Przełącznik trybu TRV: Heat / Auto / Off oraz blokada rodzicielska -->
+          <div class="flex items-center justify-between gap-2 pt-1">
+            <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[10px] font-semibold">
+              <button
+                (click)="setSystemMode('heat', $event)"
+                class="px-2 py-0.5 rounded transition-colors cursor-pointer"
+                [class.bg-rose-600]="device().system_mode === 'heat'"
+                [class.text-white]="device().system_mode === 'heat'"
+                [class.text-slate-400]="device().system_mode !== 'heat'"
+              >
+                Heat
+              </button>
+              <button
+                (click)="setSystemMode('auto', $event)"
+                class="px-2 py-0.5 rounded transition-colors cursor-pointer"
+                [class.bg-cyan-600]="device().system_mode === 'auto'"
+                [class.text-white]="device().system_mode === 'auto'"
+                [class.text-slate-400]="device().system_mode !== 'auto'"
+              >
+                Auto
+              </button>
+              <button
+                (click)="setSystemMode('off', $event)"
+                class="px-2 py-0.5 rounded transition-colors cursor-pointer"
+                [class.bg-slate-700]="device().system_mode === 'off'"
+                [class.text-white]="device().system_mode === 'off'"
+                [class.text-slate-400]="device().system_mode !== 'off'"
+              >
+                Off
+              </button>
+            </div>
+
+            <button
+              (click)="toggleChildLock($event)"
+              class="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300 hover:text-white transition-colors cursor-pointer"
+              [title]="device().child_lock === 'LOCK' ? 'Blokada rodzicielska włączona (kliknij aby odblokować)' : 'Blokada wyłączona (kliknij aby zablokować)'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5" [class.text-amber-400]="device().child_lock === 'LOCK'">
+                {{ device().child_lock === 'LOCK' ? 'lock' : 'lock_open' }}
+              </mat-icon>
+              <span class="text-[10px] font-mono">{{ device().child_lock === 'LOCK' ? 'Zablok.' : 'Odblok.' }}</span>
+            </button>
           </div>
         </div>
+      }
 
-        <!-- Kafelek Wilgotność -->
-        <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
-          <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
-            <mat-icon class="text-blue-400 text-xs !w-3.5 !h-3.5">water_drop</mat-icon>
-            <span>Wilgotność</span>
+      <!-- 2. INTELIGENTNE GNIAZDKO (Sonoff S26R2ZB / S40ZB / Tuya TS011F) -->
+      @else if (category() === 'plug') {
+        <div class="space-y-3 mb-4">
+          <!-- Duży przycisk ON/OFF zasilania gniazdka -->
+          <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-[11px] font-medium text-slate-400">Status gniazdka 16A</div>
+              <div class="text-base font-bold font-mono tracking-tight mt-0.5" [class.text-emerald-400]="isStateOn()" [class.text-slate-500]="!isStateOn()">
+                {{ isStateOn() ? 'WŁĄCZONE (ON)' : 'WYŁĄCZONE (OFF)' }}
+              </div>
+            </div>
+
+            <button
+              (click)="togglePowerState($event)"
+              class="px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+              [class.bg-emerald-600]="isStateOn()"
+              [class.hover:bg-emerald-500]="isStateOn()"
+              [class.text-white]="isStateOn()"
+              [class.shadow-emerald-950/60]="isStateOn()"
+              [class.bg-slate-800]="!isStateOn()"
+              [class.hover:bg-slate-700]="!isStateOn()"
+              [class.text-slate-300]="!isStateOn()"
+              title="Przełącz stan zasilania"
+            >
+              <mat-icon class="text-sm !w-4 !h-4">power_settings_new</mat-icon>
+              <span>{{ isStateOn() ? 'WYŁĄCZ' : 'WŁĄCZ' }}</span>
+            </button>
           </div>
-          <div class="flex items-baseline gap-1">
-            @if (hasHum()) {
-              <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
-                {{ formattedHum() }}
-              </span>
-              <span class="text-xs font-mono text-blue-400">%</span>
-            } @else {
-              <span class="text-xs font-medium font-mono text-slate-500 italic">brak danych</span>
-            }
+
+          <!-- Pomiary telemetryczne energii: Moc (W), Napięcie (V), Zużycie (kWh) -->
+          <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+            <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+              <div class="text-slate-400 text-[10px]">Moc</div>
+              <div class="text-white font-bold text-sm mt-0.5">{{ device().power !== undefined && device().power !== null ? device().power + ' W' : '0 W' }}</div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+              <div class="text-slate-400 text-[10px]">Napięcie</div>
+              <div class="text-cyan-300 font-bold text-sm mt-0.5">{{ device().voltage !== undefined && device().voltage !== null ? device().voltage + ' V' : '230 V' }}</div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+              <div class="text-slate-400 text-[10px]">Energia</div>
+              <div class="text-emerald-300 font-bold text-sm mt-0.5">{{ device().energy !== undefined && device().energy !== null ? device().energy + ' kWh' : '0 kWh' }}</div>
+            </div>
           </div>
         </div>
+      }
 
-      </div>
+      <!-- 3. WYŁĄCZNIK / PRZEKAŹNIK (Sonoff ZBMINIR2 / ZBMINI / Tuya Switch) -->
+      @else if (category() === 'switch') {
+        <div class="space-y-3 mb-4">
+          <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-[11px] font-medium text-slate-400">Przekaźnik obwodu</div>
+              <div class="text-base font-bold font-mono tracking-tight mt-0.5" [class.text-emerald-400]="isStateOn()" [class.text-slate-500]="!isStateOn()">
+                {{ isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}
+              </div>
+            </div>
+
+            <button
+              (click)="togglePowerState($event)"
+              class="px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+              [class.bg-emerald-600]="isStateOn()"
+              [class.hover:bg-emerald-500]="isStateOn()"
+              [class.text-white]="isStateOn()"
+              [class.bg-slate-800]="!isStateOn()"
+              [class.hover:bg-slate-700]="!isStateOn()"
+              [class.text-slate-300]="!isStateOn()"
+              title="Przełącz przekaźnik"
+            >
+              <mat-icon class="text-sm !w-4 !h-4">toggle_on</mat-icon>
+              <span>{{ isStateOn() ? 'ROZŁĄCZ' : 'ZAŁĄCZ' }}</span>
+            </button>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs font-mono text-slate-400 flex items-center justify-between">
+            <span>Sterowanie zdalne / bistabilne:</span>
+            <span class="text-cyan-400 font-semibold">ZBMINIR2 Zigbee 3.0</span>
+          </div>
+        </div>
+      }
+
+      <!-- 4. CZUJNIK KONTAKTRONOWY DRZWI / OKIEN (Sonoff SNZB-04) -->
+      @else if (category() === 'contact') {
+        <div class="p-4 rounded-xl bg-slate-950/90 border border-slate-800 mb-4 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div
+              class="w-10 h-10 rounded-xl flex items-center justify-center"
+              [class.bg-emerald-950]="device().contact"
+              [class.text-emerald-400]="device().contact"
+              [class.bg-amber-950]="!device().contact"
+              [class.text-amber-400]="!device().contact"
+            >
+              <mat-icon class="text-xl">{{ device().contact ? 'door_front' : 'meeting_room' }}</mat-icon>
+            </div>
+            <div>
+              <div class="text-[11px] text-slate-400 font-medium">Stan kontaktronu</div>
+              <div class="text-base font-bold font-mono" [class.text-emerald-400]="device().contact" [class.text-amber-400]="!device().contact">
+                {{ device().contact ? 'ZAMKNIĘTE' : 'OTWARTE!' }}
+              </div>
+            </div>
+          </div>
+          <span class="text-xs font-mono text-slate-500">Magnetyczny</span>
+        </div>
+      }
+
+      <!-- 5. CZUJNIK OBECNOŚCI / RUCHU (Sonoff SNZB-03 / Tuya mmWave) -->
+      @else if (category() === 'occupancy') {
+        <div class="p-4 rounded-xl bg-slate-950/90 border border-slate-800 mb-4 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div
+              class="w-10 h-10 rounded-xl flex items-center justify-center"
+              [class.bg-cyan-950]="device().occupancy"
+              [class.text-cyan-400]="device().occupancy"
+              [class.bg-slate-950]="!device().occupancy"
+              [class.text-slate-500]="!device().occupancy"
+            >
+              <mat-icon class="text-xl">{{ device().occupancy ? 'directions_walk' : 'person_off' }}</mat-icon>
+            </div>
+            <div>
+              <div class="text-[11px] text-slate-400 font-medium">Detekcja ruchu / radar mmWave</div>
+              <div class="text-base font-bold font-mono" [class.text-cyan-400]="device().occupancy" [class.text-slate-400]="!device().occupancy">
+                {{ device().occupancy ? 'WYKRYTO RUCH' : 'BRAK OBECNOŚCI' }}
+              </div>
+            </div>
+          </div>
+          @if (device().illuminance !== undefined && device().illuminance !== null) {
+            <div class="text-xs font-mono text-amber-400 flex items-center gap-1">
+              <mat-icon class="text-xs !w-3.5 !h-3.5">light_mode</mat-icon>
+              <span>{{ device().illuminance }} lux</span>
+            </div>
+          }
+        </div>
+      }
+
+      <!-- 6. CZUJNIK ZALANIA WODĄ (Sonoff SNZB-05 / Tuya Water) -->
+      @else if (category() === 'water_leak') {
+        <div class="p-4 rounded-xl bg-slate-950/90 border border-slate-800 mb-4 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div
+              class="w-10 h-10 rounded-xl flex items-center justify-center"
+              [class.bg-rose-950]="device().water_leak"
+              [class.text-rose-400]="device().water_leak"
+              [class.bg-emerald-950]="!device().water_leak"
+              [class.text-emerald-400]="!device().water_leak"
+            >
+              <mat-icon class="text-xl">{{ device().water_leak ? 'water_damage' : 'water_drop' }}</mat-icon>
+            </div>
+            <div>
+              <div class="text-[11px] text-slate-400 font-medium">Czujnik sondy zalania</div>
+              <div class="text-base font-bold font-mono" [class.text-rose-400]="device().water_leak" [class.text-emerald-400]="!device().water_leak">
+                {{ device().water_leak ? 'ALARM ZALANIA!' : 'SUCHO / BEZPIECZNIE' }}
+              </div>
+            </div>
+          </div>
+          <span class="text-xs font-mono text-slate-500">Sonda IP67</span>
+        </div>
+      }
+
+      <!-- 7. STANDARDOWY CZUJNIK TEMPERATURY I WILGOTNOŚCI (SNZB-02D / LCD) -->
+      @else {
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <!-- Kafelek Temperatura -->
+          <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
+            <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
+              <mat-icon class="text-cyan-400 text-xs !w-3.5 !h-3.5">thermostat</mat-icon>
+              <span>Temperatura</span>
+            </div>
+            <div class="flex items-baseline gap-1">
+              @if (hasTemp()) {
+                <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
+                  {{ formattedTemp() }}
+                </span>
+                <span class="text-xs font-mono text-cyan-400">°C</span>
+              } @else {
+                <span class="text-xs font-medium font-mono text-slate-500 italic">brak danych</span>
+              }
+            </div>
+          </div>
+
+          <!-- Kafelek Wilgotność -->
+          <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
+            <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
+              <mat-icon class="text-blue-400 text-xs !w-3.5 !h-3.5">water_drop</mat-icon>
+              <span>Wilgotność</span>
+            </div>
+            <div class="flex items-baseline gap-1">
+              @if (hasHum()) {
+                <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
+                  {{ formattedHum() }}
+                </span>
+                <span class="text-xs font-mono text-blue-400">%</span>
+              } @else {
+                <span class="text-xs font-medium font-mono text-slate-500 italic">brak danych</span>
+              }
+            </div>
+          </div>
+        </div>
+      }
 
       <!-- Stopka kafelka: Znacznik czasu oraz jakość sygnału (LQI) -->
       <div class="flex items-center justify-between text-[11px] text-slate-400 pt-3 border-t border-slate-800/60">
@@ -127,6 +413,73 @@ export class DeviceCard {
   readonly device = input.required<Device>();
   readonly cardClicked = output<Device>();
   readonly renameRequested = output<Device>();
+  readonly commandRequested = output<{ device: Device; command: Record<string, unknown> }>();
+
+  readonly category = computed<DeviceCategory>(() => {
+    const d = this.device();
+    if (d.category) return d.category;
+    const m = (d.model || '').toLowerCase();
+    if (m.includes('trv') || m.includes('thermostat') || d.current_heating_setpoint !== undefined) return 'climate';
+    if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || d.power !== undefined) return 'plug';
+    if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || (d.state !== undefined && d.power === undefined)) return 'switch';
+    if (m.includes('snzb-04') || m.includes('contact') || d.contact !== undefined) return 'contact';
+    if (m.includes('snzb-03') || m.includes('motion') || m.includes('pir') || d.occupancy !== undefined) return 'occupancy';
+    if (m.includes('snzb-05') || m.includes('water') || d.water_leak !== undefined) return 'water_leak';
+    return 'sensor';
+  });
+
+  readonly categoryBadgeLabel = computed(() => {
+    switch (this.category()) {
+      case 'climate':
+        return 'Głowica TRVZB';
+      case 'plug':
+        return 'Gniazdko 16A';
+      case 'switch':
+        return 'Wyłącznik';
+      case 'contact':
+        return 'Kontaktron';
+      case 'occupancy':
+        return 'Obecność / PIR';
+      case 'water_leak':
+        return 'Czujnik Zalania';
+      default:
+        return 'Sensor Temp/Wilg';
+    }
+  });
+
+  readonly categoryBadgeClass = computed(() => {
+    switch (this.category()) {
+      case 'climate':
+        return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+      case 'plug':
+        return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+      case 'switch':
+        return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
+      case 'contact':
+        return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
+      case 'occupancy':
+        return 'bg-purple-500/10 text-purple-400 border-purple-500/20';
+      case 'water_leak':
+        return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+      default:
+        return 'bg-slate-800 text-slate-300 border-slate-700';
+    }
+  });
+
+  readonly isStateOn = computed(() => {
+    const s = this.device().state;
+    return s === 'ON' || s === 'true' || s === '1';
+  });
+
+  readonly setpointTemp = computed(() => {
+    const s = this.device().current_heating_setpoint;
+    return s !== undefined && s !== null ? s.toFixed(1) : '21.0';
+  });
+
+  readonly measuredTemp = computed(() => {
+    const t = this.device().local_temperature ?? this.device().last_temperature;
+    return t !== undefined && t !== null ? t.toFixed(1) : 'brak danych';
+  });
 
   readonly hasTemp = computed(() => {
     const t = this.device().last_temperature;
@@ -195,5 +548,41 @@ export class DeviceCard {
   onRenameClick(event: MouseEvent): void {
     event.stopPropagation();
     this.renameRequested.emit(this.device());
+  }
+
+  togglePowerState(event: MouseEvent): void {
+    event.stopPropagation();
+    const nextState = this.isStateOn() ? 'OFF' : 'ON';
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { state: nextState },
+    });
+  }
+
+  adjustSetpoint(delta: number, event: MouseEvent): void {
+    event.stopPropagation();
+    const current = this.device().current_heating_setpoint ?? 21.0;
+    const next = Math.min(30, Math.max(5, parseFloat((current + delta).toFixed(1))));
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { current_heating_setpoint: next },
+    });
+  }
+
+  setSystemMode(mode: 'heat' | 'auto' | 'off', event: MouseEvent): void {
+    event.stopPropagation();
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { system_mode: mode },
+    });
+  }
+
+  toggleChildLock(event: MouseEvent): void {
+    event.stopPropagation();
+    const nextLock = this.device().child_lock === 'LOCK' ? 'UNLOCK' : 'LOCK';
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { child_lock: nextLock },
+    });
   }
 }
