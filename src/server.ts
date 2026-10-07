@@ -13,7 +13,7 @@ import { Socket } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import mqtt, { MqttClient } from 'mqtt';
 
-// Wykrywanie katalogu zasobów statycznych przeglądarki (CSS, JS, Fonts)
+// Wykrywanie katalogu zasobow statycznych przegladarki (CSS, JS, Fonts)
 let browserDistFolder = join(import.meta.dirname, '../browser');
 if (!existsSync(browserDistFolder)) {
   const fallbackPaths = [
@@ -32,7 +32,7 @@ if (!existsSync(browserDistFolder)) {
 const app = express();
 app.use(express.json());
 
-// Modele danych urządzeń i telemetrii dla Sonoff (TRVZB, S26R2, ZBMINI), Tuya oraz Götze & Jensen GOW 007
+// Modele danych urzadzen i telemetrii dla Sonoff (TRVZB, S26R2, ZBMINI), Tuya oraz Götze & Jensen GOW 007
 type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
 
 interface Device {
@@ -49,17 +49,17 @@ interface Device {
   // Wentylator kolumnowy Tuya / Gotze & Jensen GOW 007 7w1 (WiFi / Tuya)
   fan_speed?: number | string | null;       // 1 - 12 (biegi nawiewu)
   fan_mode?: string | null;                 // normal / natural / sleep / auto
-  fan_oscillation?: boolean | null;         // Oscylacja / obrót
-  fan_timer?: number | null;                // Timer wyłączenia (h)
+  fan_oscillation?: boolean | null;         // Oscylacja / obrot
+  fan_timer?: number | null;                // Timer wylaczenia (h)
   fan_ionizer?: boolean | null;             // Jonizacja powietrza (7w1)
-  fan_humidifier?: boolean | null;          // Nawilżacz ultradźwiękowy (7w1)
-  fan_uv?: boolean | null;                  // Lampa UV sterylizująca (7w1)
+  fan_humidifier?: boolean | null;          // Nawilzacz ultradzwiekowy (7w1)
+  fan_uv?: boolean | null;                  // Lampa UV sterylizujaca (7w1)
 
-  // Czujniki temperatury i wilgotności
+  // Czujniki temperatury i wilgotnosci
   last_temperature: number | null;
   last_humidity: number | null;
 
-  // Głowice termostatyczne Sonoff TRVZB / TRVZB Gen 2
+  // Glowice termostatyczne Sonoff TRVZB / TRVZB Gen 2
   current_heating_setpoint?: number | null;
   local_temperature?: number | null;
   system_mode?: string | null;
@@ -67,7 +67,7 @@ interface Device {
   child_lock?: string | null;
   open_window?: boolean | null;
 
-  // Włączniki i gniazdka sterowane (Sonoff S26R2ZB, ZBMINIR2, Tuya Smart Plug)
+  // Wlaczniki i gniazdka sterowane (Sonoff S26R2ZB, ZBMINIR2, Tuya Smart Plug)
   state?: string | null;
   power?: number | null;
   voltage?: number | null;
@@ -172,7 +172,7 @@ let dongleMaxConfig: DongleMaxConfig = {
   web_console_url: 'http://Dongle-M.local',
 };
 
-// Czysty rejestr urządzeń i historii (BEZ SYNTETYZOWANYCH DANYCH)
+// Czysty rejestr urzadzen i historii (BEZ SYNTETYZOWANYCH DANYCH)
 const devices = new Map<string, Device>();
 const telemetryStore = new Map<string, TelemetryPoint[]>();
 let currentId = 1;
@@ -256,7 +256,7 @@ function checkBatteryLevelAndNotify(ieee: string, battery: number, friendlyName?
   return item;
 }
 
-// Inicjalizacja połączenia z brokerem Mosquitto MQTT
+// Inicjalizacja polaczenia z brokerem Mosquitto MQTT
 function connectMqtt(customUrl?: string) {
   if (customUrl) {
     mqttStatus.url = customUrl;
@@ -270,7 +270,7 @@ function connectMqtt(customUrl?: string) {
   }
 
   try {
-    console.log(`[MQTT] Łączenie z brokerem: ${mqttStatus.url}...`);
+    console.log(`[MQTT] Laczenie z brokerem: ${mqttStatus.url}...`);
     mqttClient = mqtt.connect(mqttStatus.url, {
       reconnectPeriod: 5000,
       connectTimeout: 5000,
@@ -280,9 +280,9 @@ function connectMqtt(customUrl?: string) {
     mqttClient.on('connect', () => {
       mqttStatus.connected = true;
       mqttStatus.last_error = null;
-      console.log(`[MQTT] Połączono pomyślnie z brokerem ${mqttStatus.url}`);
+      console.log(`[MQTT] Polaczono pomyslnie z brokerem ${mqttStatus.url}`);
       mqttClient?.subscribe(`${mqttStatus.topic_prefix}/#`, (err) => {
-        if (err) console.error('[MQTT] Błąd subskrypcji:', err);
+        if (err) console.error('[MQTT] Blad subskrypcji:', err);
       });
       broadcastEvent({ type: 'mqtt_status', data: mqttStatus });
     });
@@ -290,7 +290,7 @@ function connectMqtt(customUrl?: string) {
     mqttClient.on('error', (err) => {
       mqttStatus.connected = false;
       mqttStatus.last_error = err.message;
-      console.warn(`[MQTT] Błąd połączenia: ${err.message}`);
+      console.warn(`[MQTT] Blad polaczenia: ${err.message}`);
       broadcastEvent({ type: 'mqtt_status', data: mqttStatus });
     });
 
@@ -309,7 +309,7 @@ function connectMqtt(customUrl?: string) {
 
       const subtopic = topic.slice(prefix.length).replace(/^\//, '');
 
-      // 1. Obsługa stanu mostka Zigbee2MQTT
+      // 1. Obsluga stanu mostka Zigbee2MQTT
       if (subtopic === 'bridge/state') {
         let stateStr = message.toString().trim();
         try {
@@ -326,7 +326,7 @@ function connectMqtt(customUrl?: string) {
         return;
       }
 
-      // 2. Informacje o mostku (wersja, kanał, koordynator)
+      // 2. Informacje o mostku (wersja, kanal, koordynator)
       if (subtopic === 'bridge/info') {
         try {
           const info = JSON.parse(message.toString());
@@ -384,7 +384,7 @@ interface Z2mDeviceItem {
   modelId?: string;
 }
 
-      // 4. Obsługa listy urządzeń wykrytych przez Zigbee2MQTT
+      // 4. Obsluga listy urzadzen wykrytych przez Zigbee2MQTT
       if (subtopic === 'bridge/devices') {
         try {
           const list = JSON.parse(message.toString());
@@ -433,7 +433,7 @@ interface Z2mDeviceItem {
       try {
         const payload = JSON.parse(message.toString());
         if (typeof payload === 'object' && payload !== null) {
-          // Znajdź lub utwórz urządzenie
+          // Znajdz lub utworz urzadzenie
           let dev: Device | undefined = undefined;
           for (const d of devices.values()) {
             if (d.friendly_name === subtopic || d.ieee_address === subtopic) {
@@ -484,7 +484,7 @@ interface Z2mDeviceItem {
           if (payload.fan_humidifier !== undefined) dev.fan_humidifier = Boolean(payload.fan_humidifier);
           if (payload.fan_uv !== undefined) dev.fan_uv = Boolean(payload.fan_uv);
 
-          // Pola dla głowic termostatycznych Sonoff TRVZB / TRVZB Gen 2
+          // Pola dla glowic termostatycznych Sonoff TRVZB / TRVZB Gen 2
           if (payload.current_heating_setpoint !== undefined && payload.current_heating_setpoint !== null) {
             dev.current_heating_setpoint = parseFloat(payload.current_heating_setpoint);
           }
@@ -497,14 +497,14 @@ interface Z2mDeviceItem {
           if (payload.child_lock !== undefined) dev.child_lock = String(payload.child_lock);
           if (payload.open_window !== undefined) dev.open_window = Boolean(payload.open_window);
 
-          // Pola dla włączników i inteligentnych gniazdek (Sonoff S26R2, ZBMINIR2, Tuya Plug)
+          // Pola dla wlacznikow i inteligentnych gniazdek (Sonoff S26R2, ZBMINIR2, Tuya Plug)
           if (payload.state !== undefined) dev.state = String(payload.state);
           if (payload.power !== undefined && payload.power !== null) dev.power = parseFloat(payload.power);
           if (payload.voltage !== undefined && payload.voltage !== null) dev.voltage = parseFloat(payload.voltage);
           if (payload.current !== undefined && payload.current !== null) dev.current = parseFloat(payload.current);
           if (payload.energy !== undefined && payload.energy !== null) dev.energy = parseFloat(payload.energy);
 
-          // Pola dla czujników otwarcia, ruchu, zalania (Sonoff SNZB-04/03/05, Tuya mmWave)
+          // Pola dla czujnikow otwarcia, ruchu, zalania (Sonoff SNZB-04/03/05, Tuya mmWave)
           if (payload.contact !== undefined) dev.contact = Boolean(payload.contact);
           if (payload.occupancy !== undefined) dev.occupancy = Boolean(payload.occupancy);
           if (payload.water_leak !== undefined) dev.water_leak = Boolean(payload.water_leak);
@@ -544,7 +544,7 @@ interface Z2mDeviceItem {
           }
         }
       } catch {
-        // Ignoruj wiadomości niebędące JSON
+        // Ignoruj wiadomosci niebedace JSON
       }
     });
   } catch (err: unknown) {
@@ -552,7 +552,7 @@ interface Z2mDeviceItem {
   }
 }
 
-// Automatyczne załadowanie wykrytych wcześniej urządzeń z pliku bazy Z2M jeśli istnieje
+// Automatyczne zaladowanie wykrytych wczesniej urzadzen z pliku bazy Z2M jesli istnieje
 function tryLoadExistingZ2mDevices() {
   const possiblePaths = [
     '/opt/zigbee2mqtt/data/database.db',
@@ -588,7 +588,7 @@ function tryLoadExistingZ2mDevices() {
           }
         }
       } catch (err) {
-        console.debug('[Z2M DB] Błąd czytania bazy:', err);
+        console.debug('[Z2M DB] Blad czytania bazy:', err);
       }
     }
   }
@@ -596,12 +596,12 @@ function tryLoadExistingZ2mDevices() {
 
 tryLoadExistingZ2mDevices();
 
-// Uruchomienie połączenia MQTT
+// Uruchomienie polaczenia MQTT
 connectMqtt();
 
 // --- REST API ENDPOINTS ---
 
-// 1. Pobierz listę wszystkich czujników
+// 1. Pobierz liste wszystkich czujnikow
 app.get('/api/devices', (_req: Request, res: Response) => {
   const devList = Array.from(devices.values());
   res.json({ devices: devList });
@@ -618,7 +618,7 @@ app.get('/api/devices/:ieee', (req: Request, res: Response) => {
   res.json({ device: dev });
 });
 
-// 3. Pobierz historię z agregacją dla zakresów: 6h, 24h, 7d, 30d, 90d, 360d, 720d
+// 3. Pobierz historie z agregacja dla zakresow: 6h, 24h, 7d, 30d, 90d, 360d, 720d
 app.get('/api/devices/:ieee/history', (req: Request, res: Response) => {
   const ieee = String(req.params['ieee'] || '');
   const range = typeof req.query['range'] === 'string' ? req.query['range'] : '24h';
@@ -637,7 +637,7 @@ app.get('/api/devices/:ieee/history', (req: Request, res: Response) => {
   const cutoff = now - msLimit;
   const filtered = allPoints.filter((p) => new Date(p.timestamp).getTime() >= cutoff);
 
-  // Downsampling jeśli liczba punktów przekracza 120 (dla płynnego renderowania wykresów)
+  // Downsampling jesli liczba punktow przekracza 120 (dla plynnego renderowania wykresow)
   let result = filtered;
   if (filtered.length > 120) {
     const step = Math.ceil(filtered.length / 100);
@@ -645,7 +645,7 @@ app.get('/api/devices/:ieee/history', (req: Request, res: Response) => {
     for (let i = 0; i < filtered.length; i += step) {
       result.push(filtered[i]);
     }
-    // Zawsze dołącz najświeższy punkt
+    // Zawsze dolacz najswiezszy punkt
     if (result[result.length - 1] !== filtered[filtered.length - 1]) {
       result.push(filtered[filtered.length - 1]);
     }
@@ -719,7 +719,7 @@ app.post('/api/devices/:ieee/rename', (req: Request, res: Response) => {
     friendly_name,
   });
 
-  // Przekaż żądanie zmiany nazwy do Zigbee2MQTT jeśli broker jest podłączony
+  // Przekaz zadanie zmiany nazwy do Zigbee2MQTT jesli broker jest podlaczony
   if (mqttClient?.connected) {
     try {
       mqttClient.publish(
@@ -727,7 +727,7 @@ app.post('/api/devices/:ieee/rename', (req: Request, res: Response) => {
         JSON.stringify({ from: oldName || ieee, to: friendly_name }),
       );
     } catch (e) {
-      console.warn('[MQTT] Błąd publikacji rename:', e);
+      console.warn('[MQTT] Blad publikacji rename:', e);
     }
   }
 
@@ -745,7 +745,7 @@ app.post('/api/permit-join', (req: Request, res: Response) => {
     expires_at: permitJoinExpiresAt,
   });
 
-  // Przekaż żądanie permit_join do Zigbee2MQTT przez MQTT na oba oficjalne tematy (kompatybilność Z2M v1 i v2)
+  // Przekaz zadanie permit_join do Zigbee2MQTT przez MQTT na oba oficjalne tematy (kompatybilnosc Z2M v1 i v2)
   if (mqttClient?.connected) {
     try {
       mqttClient.publish(
@@ -757,14 +757,14 @@ app.post('/api/permit-join', (req: Request, res: Response) => {
         JSON.stringify({ value: true, time: duration }),
       );
     } catch (e) {
-      console.warn('[MQTT] Błąd publikacji permit_join:', e);
+      console.warn('[MQTT] Blad publikacji permit_join:', e);
     }
   }
 
   res.json({ status: 'ok', duration, expires_at: permitJoinExpiresAt });
 });
 
-// 5a. Sterowanie urządzeniem (TRVZB nastawa/tryb, Smart Plug ON/OFF, Przekaźnik ZBMINIR2)
+// 5a. Sterowanie urzadzeniem (TRVZB nastawa/tryb, Smart Plug ON/OFF, Przekaznik ZBMINIR2)
 app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   const ieee = String(req.params['ieee'] || '');
   const dev = devices.get(ieee);
@@ -779,7 +779,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     return;
   }
 
-  // Zastosowanie natychmiastowe w pamięci serwera (optimistic update)
+  // Zastosowanie natychmiastowe w pamieci serwera (optimistic update)
   if (cmd.state !== undefined) dev.state = String(cmd.state);
   if (cmd.current_heating_setpoint !== undefined) dev.current_heating_setpoint = parseFloat(cmd.current_heating_setpoint);
   if (cmd.system_mode !== undefined) dev.system_mode = String(cmd.system_mode);
@@ -801,9 +801,9 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     const targetTopic = `${mqttStatus.topic_prefix}/${dev.friendly_name || ieee}/set`;
     try {
       mqttClient.publish(targetTopic, JSON.stringify(cmd));
-      console.log(`[MQTT SET] Wysłano do ${targetTopic}:`, JSON.stringify(cmd));
+      console.log(`[MQTT SET] Wyslano do ${targetTopic}:`, JSON.stringify(cmd));
     } catch (e) {
-      console.warn(`[MQTT SET] Błąd publikacji do ${targetTopic}:`, e);
+      console.warn(`[MQTT SET] Blad publikacji do ${targetTopic}:`, e);
     }
   }
 
@@ -832,7 +832,7 @@ app.post('/api/demo-device', (_req: Request, res: Response) => {
   };
   devices.set(sampleIeee, sampleDev);
 
-  // Wygeneruj 12 punktów historii dla wykresów
+  // Wygeneruj 12 punktow historii dla wykresow
   const historyList: TelemetryPoint[] = [];
   for (let i = 12; i >= 0; i--) {
     const ptTime = new Date(now.getTime() - i * 15 * 60 * 1000).toISOString();
@@ -858,7 +858,7 @@ app.post('/api/demo-device', (_req: Request, res: Response) => {
   res.json({ success: true, device: sampleDev });
 });
 
-// 5c. Załadowanie pełnego ekosystemu Sonoff (TRVZB, S26R2ZB, ZBMINIR2, kontaktrony) oraz Tuya
+// 5c. Zaladowanie pelnego ekosystemu Sonoff (TRVZB, S26R2ZB, ZBMINIR2, kontaktrony) oraz Tuya
 app.post('/api/demo-catalog', (_req: Request, res: Response) => {
   const now = new Date();
   const demoList: Device[] = [
@@ -918,7 +918,7 @@ app.post('/api/demo-catalog', (_req: Request, res: Response) => {
     {
       ieee_address: '0x00124b002b11aa04',
       friendly_name: 'Korytarz - Sonoff ZBMINIR2 Switch',
-      model: 'ZBMINIR2 (Przekaźnik dopuszkowy)',
+      model: 'ZBMINIR2 (Przekaznik dopuszkowy)',
       category: 'switch',
       vendor: 'SONOFF',
       last_seen: now.toISOString(),
@@ -943,8 +943,8 @@ app.post('/api/demo-catalog', (_req: Request, res: Response) => {
     },
     {
       ieee_address: '0x00124b002b11aa06',
-      friendly_name: 'Łazienka - Sonoff SNZB-05',
-      model: 'SNZB-05 (Czujnik zalania wodą)',
+      friendly_name: 'Lazienka - Sonoff SNZB-05',
+      model: 'SNZB-05 (Czujnik zalania woda)',
       category: 'water_leak',
       vendor: 'SONOFF',
       last_seen: now.toISOString(),
@@ -957,7 +957,7 @@ app.post('/api/demo-catalog', (_req: Request, res: Response) => {
     {
       ieee_address: '0x00124b002b11aa07',
       friendly_name: 'Biuro - Tuya mmWave Radar TS0601',
-      model: 'TS0601 (Radar obecności człowieka)',
+      model: 'TS0601 (Radar obecnosci czlowieka)',
       category: 'occupancy',
       vendor: 'Tuya',
       last_seen: now.toISOString(),
@@ -1024,7 +1024,7 @@ app.post('/api/demo-catalog', (_req: Request, res: Response) => {
   demoList.forEach((d) => {
     devices.set(d.ieee_address, d);
 
-    // Wygeneruj historię punktów
+    // Wygeneruj historie punktow
     const historyList: TelemetryPoint[] = [];
     for (let i = 12; i >= 0; i--) {
       const ptTime = new Date(now.getTime() - i * 15 * 60 * 1000).toISOString();
@@ -1055,23 +1055,23 @@ app.get('/api/catalog', (_req: Request, res: Response) => {
     brands: ['Sonoff', 'Tuya'],
     supported_categories: ['climate', 'plug', 'switch', 'sensor', 'contact', 'occupancy', 'water_leak'],
     featured: [
-      { id: 'trvzb-gen2', brand: 'Sonoff', name: 'TRVZB Gen 2', type: 'climate', desc: 'Głowica termostatyczna nowej generacji z silnikiem krokowym i PID' },
-      { id: 'trvzb', brand: 'Sonoff', name: 'TRVZB', type: 'climate', desc: 'Inteligentna głowica grzejnikowa Zigbee 3.0 M30x1.5' },
-      { id: 's26r2zb', brand: 'Sonoff', name: 'S26R2ZB', type: 'plug', desc: 'Gniazdko sterowane 16A 4000W z funkcją routera Zigbee' },
-      { id: 's40zb', brand: 'Sonoff', name: 'S40ZB / S31', type: 'plug', desc: 'Gniazdko z pomiarem mocy chwilowej (W) i zużycia energii (kWh)' },
-      { id: 'zbminir2', brand: 'Sonoff', name: 'ZBMINIR2', type: 'switch', desc: 'Kompaktowy przekaźnik dopuszkowy Zigbee 3.0 do puszek podtynkowych' },
-      { id: 'zbmini-l2', brand: 'Sonoff', name: 'ZBMINI-L2', type: 'switch', desc: 'Przekaźnik dopuszkowy bez przewodu neutralnego N' },
+      { id: 'trvzb-gen2', brand: 'Sonoff', name: 'TRVZB Gen 2', type: 'climate', desc: 'Glowica termostatyczna nowej generacji z silnikiem krokowym i PID' },
+      { id: 'trvzb', brand: 'Sonoff', name: 'TRVZB', type: 'climate', desc: 'Inteligentna glowica grzejnikowa Zigbee 3.0 M30x1.5' },
+      { id: 's26r2zb', brand: 'Sonoff', name: 'S26R2ZB', type: 'plug', desc: 'Gniazdko sterowane 16A 4000W z funkcja routera Zigbee' },
+      { id: 's40zb', brand: 'Sonoff', name: 'S40ZB / S31', type: 'plug', desc: 'Gniazdko z pomiarem mocy chwilowej (W) i zuzycia energii (kWh)' },
+      { id: 'zbminir2', brand: 'Sonoff', name: 'ZBMINIR2', type: 'switch', desc: 'Kompaktowy przekaznik dopuszkowy Zigbee 3.0 do puszek podtynkowych' },
+      { id: 'zbmini-l2', brand: 'Sonoff', name: 'ZBMINI-L2', type: 'switch', desc: 'Przekaznik dopuszkowy bez przewodu neutralnego N' },
       { id: 'snzb-04', brand: 'Sonoff', name: 'SNZB-04', type: 'contact', desc: 'Kontaktron magnetyczny do drzwi i okien' },
       { id: 'snzb-03', brand: 'Sonoff', name: 'SNZB-03', type: 'occupancy', desc: 'Bezprzewodowy czujnik ruchu PIR 110°' },
-      { id: 'snzb-05', brand: 'Sonoff', name: 'SNZB-05', type: 'water_leak', desc: 'Czujnik zalania wodą ze złotą sondą IP67' },
-      { id: 'snzb-02d', brand: 'Sonoff', name: 'SNZB-02D', type: 'sensor', desc: 'Czujnik temperatury i wilgotności z ekranem LCD' },
-      { id: 'ts011f', brand: 'Tuya', name: 'TS011F Smart Plug', type: 'plug', desc: 'Gniazdko Tuya 16A z dokładnym licznikiem energii elektrycznej' },
-      { id: 'ts0601-radar', brand: 'Tuya', name: 'TS0601 Radar mmWave', type: 'occupancy', desc: 'Radar mikrofalowy 24GHz do wykrywania obecności i oddechu' },
+      { id: 'snzb-05', brand: 'Sonoff', name: 'SNZB-05', type: 'water_leak', desc: 'Czujnik zalania woda ze zlota sonda IP67' },
+      { id: 'snzb-02d', brand: 'Sonoff', name: 'SNZB-02D', type: 'sensor', desc: 'Czujnik temperatury i wilgotnosci z ekranem LCD' },
+      { id: 'ts011f', brand: 'Tuya', name: 'TS011F Smart Plug', type: 'plug', desc: 'Gniazdko Tuya 16A z dokladnym licznikiem energii elektrycznej' },
+      { id: 'ts0601-radar', brand: 'Tuya', name: 'TS0601 Radar mmWave', type: 'occupancy', desc: 'Radar mikrofalowy 24GHz do wykrywania obecnosci i oddechu' },
     ],
   });
 });
 
-// 6. Symulacja wstrzyknięcia pomiaru (Testing Console)
+// 6. Symulacja wstrzykniecia pomiaru (Testing Console)
 app.post('/api/simulate', (req: Request, res: Response) => {
   const { device_ieee, temperature, humidity, battery, linkquality } = req.body;
   if (!device_ieee) {
@@ -1129,7 +1129,7 @@ app.post('/api/simulate', (req: Request, res: Response) => {
   res.json({ status: 'simulated', record });
 });
 
-// 7. Pobierz listę powiadomień i alertów (bateria < 15%, etc.)
+// 7. Pobierz liste powiadomien i alertow (bateria < 15%, etc.)
 app.get('/api/notifications', (_req: Request, res: Response) => {
   res.json({ notifications });
 });
@@ -1146,7 +1146,7 @@ app.post('/api/notifications/:id/acknowledge', (req: Request, res: Response) => 
   }
 });
 
-// 9. Punkt końcowy do wywołania/przetestowania alertu poziomu baterii
+// 9. Punkt koncowy do wywolania/przetestowania alertu poziomu baterii
 app.post('/api/alerts/battery', (req: Request, res: Response) => {
   const { device_ieee, battery } = req.body;
   if (!device_ieee || battery === undefined) {
@@ -1193,7 +1193,7 @@ app.post('/api/dongle-max/config', (req: Request, res: Response) => {
   res.json({ status: 'ok', config: dongleMaxConfig });
 });
 
-// 12. Test aktywnego połączenia TCP z Sonoff Dongle Max na porcie 6638
+// 12. Test aktywnego polaczenia TCP z Sonoff Dongle Max na porcie 6638
 app.post('/api/dongle-max/test-connection', (req: Request, res: Response) => {
   const host = String(req.body?.host || dongleMaxConfig.host || 'Dongle-M.local');
   const port = parseInt(req.body?.port || dongleMaxConfig.port || 6638, 10);
@@ -1221,26 +1221,26 @@ app.post('/api/dongle-max/test-connection', (req: Request, res: Response) => {
 
   socket.on('connect', () => {
     const latency = Date.now() - startTime;
-    done(true, `Połączono pomyślnie z gniazdem sieciowym Sonoff Dongle Max (${host}:${port})!`, latency);
+    done(true, `Polaczono pomyslnie z gniazdem sieciowym Sonoff Dongle Max (${host}:${port})!`, latency);
   });
 
   socket.on('timeout', () => {
-    done(false, `Przekroczono limit czasu (3500ms). Sprawdź czy Dongle Max jest włączony i podłączony do tej samej podsieci LAN.`);
+    done(false, `Przekroczono limit czasu (3500ms). Sprawdz czy Dongle Max jest wlaczony i podlaczony do tej samej podsieci LAN.`);
   });
 
   socket.on('error', (err: Error) => {
-    done(false, `Błąd połączenia TCP (${host}:${port}): ${err.message}. W trybie laboratoryjnym lub bez fizycznego dongla w sieci port nie odpowiada.`);
+    done(false, `Blad polaczenia TCP (${host}:${port}): ${err.message}. W trybie laboratoryjnym lub bez fizycznego dongla w sieci port nie odpowiada.`);
   });
 
   try {
     socket.connect(port, host);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    done(false, `Błąd inicjalizacji gniazda: ${errorMsg}`);
+    done(false, `Blad inicjalizacji gniazda: ${errorMsg}`);
   }
 });
 
-// 13. Szczegółowy status sprzętowy Sonoff Dongle Max (wg https://dongle.sonoff.tech/guide/dongle-m/)
+// 13. Szczegolowy status sprzetowy Sonoff Dongle Max (wg https://dongle.sonoff.tech/guide/dongle-m/)
 app.get('/api/dongle-max/status', (_req: Request, res: Response) => {
   res.json({
     device: 'ITEAD Sonoff Dongle Max (Dongle-M / PMG24)',
@@ -1254,7 +1254,7 @@ app.get('/api/dongle-max/status', (_req: Request, res: Response) => {
   });
 });
 
-// 14. Resetowanie wszystkich danych (powrót do czystego stanu bez danych)
+// 14. Resetowanie wszystkich danych (powrot do czystego stanu bez danych)
 app.post('/api/reset-data', (_req: Request, res: Response) => {
   devices.clear();
   telemetryStore.clear();
@@ -1263,10 +1263,10 @@ app.post('/api/reset-data', (_req: Request, res: Response) => {
 
   broadcastEvent({
     type: 'data_reset',
-    message: 'Wszystkie dane zostały wyczyszczone. System w stanie czystym bez danych.',
+    message: 'Wszystkie dane zostaly wyczyszczone. System w stanie czystym bez danych.',
   });
 
-  res.json({ status: 'ok', message: 'Wszystkie dane zostały wyczyszczone' });
+  res.json({ status: 'ok', message: 'Wszystkie dane zostaly wyczyszczone' });
 });
 
 // 15. Status brokera MQTT i mostka Zigbee2MQTT
@@ -1286,14 +1286,14 @@ app.get('/api/mqtt/status', (_req: Request, res: Response) => {
   });
 });
 
-// 16. Ponowne połączenie z brokerem MQTT (lub zmiana URL)
+// 16. Ponowne polaczenie z brokerem MQTT (lub zmiana URL)
 app.post('/api/mqtt/reconnect', (req: Request, res: Response) => {
   const url = req.body?.url ? String(req.body.url) : undefined;
   connectMqtt(url);
   res.json({ status: 'reconnecting', target_url: url || mqttStatus.url });
 });
 
-// 8. Server-Sent Events (SSE) dla pewnego streamingu na żywo
+// 8. Server-Sent Events (SSE) dla pewnego streamingu na zywo
 app.get('/api/events', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -1309,7 +1309,7 @@ app.get('/api/events', (req: Request, res: Response) => {
   });
 });
 
-// 17. Audyt zainstalowanych usług i weryfikacja poprawności konfiguracji
+// 17. Audyt zainstalowanych uslug i weryfikacja poprawnosci konfiguracji
 app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
   const servicesReport: {
     service: string;
@@ -1347,9 +1347,9 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
       const has1883 = content.includes('1883');
       const hasAnon = content.includes('allow_anonymous true');
       mosqValid = has1883 && hasAnon;
-      mosqSummary = `Port 1883: ${has1883 ? 'TAK' : 'NIE'}, Dostęp anonimowy: ${hasAnon ? 'TAK' : 'NIE'}`;
+      mosqSummary = `Port 1883: ${has1883 ? 'TAK' : 'NIE'}, Dostep anonimowy: ${hasAnon ? 'TAK' : 'NIE'}`;
     } catch {
-      mosqSummary = 'Brak możliwości odczytu pliku conf';
+      mosqSummary = 'Brak mozliwosci odczytu pliku conf';
     }
   }
 
@@ -1362,7 +1362,7 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
     config_exists: mosqConfExists,
     config_valid: mosqValid,
     config_summary: mosqSummary || 'Wymaga: listener 1883 oraz allow_anonymous true',
-    recommendation: mosqValid ? 'Konfiguracja prawidłowa' : 'Zalecane utworzenie /etc/mosquitto/conf.d/iot-zigbee.conf',
+    recommendation: mosqValid ? 'Konfiguracja prawidlowa' : 'Zalecane utworzenie /etc/mosquitto/conf.d/iot-zigbee.conf',
   });
 
   // B. Zigbee2MQTT
@@ -1387,10 +1387,13 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
       const hasEmber = yaml.includes('adapter: ember');
       const hasPort = yaml.includes('port:') && (yaml.includes('6638') || yaml.includes('ttyACM'));
       const hasBase = yaml.includes('base_topic: zigbee2mqtt');
-      z2mValid = hasEmber && hasBase;
-      z2mSummary = `Adapter ember (EFR32MG24): ${hasEmber ? 'TAK' : 'NIE'}, Port: ${hasPort ? 'OK' : 'Sprawdź'}`;
+      const frontendPortMatch = yaml.match(/frontend:[\s\S]*?port:\s*([^\r\n]+)/);
+      const frontendPortValid = !frontendPortMatch || /^\s*\d+\s*$/.test(frontendPortMatch[1]);
+      
+      z2mValid = hasEmber && hasBase && frontendPortValid;
+      z2mSummary = `Adapter ember: ${hasEmber ? 'TAK' : 'NIE'}, Port: ${hasPort ? 'OK' : 'Sprawdz'}, Frontend port 8080: ${frontendPortValid ? 'OK' : 'BLAD (musi byc liczba)'}`;
     } catch {
-      z2mSummary = 'Błąd odczytu configuration.yaml';
+      z2mSummary = 'Blad odczytu configuration.yaml';
     }
   }
 
@@ -1403,10 +1406,10 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
     config_exists: z2mConfExists,
     config_valid: z2mValid,
     config_summary: z2mSummary || 'Wymaga adaptera ember oraz poprawnego portu koordynatora',
-    recommendation: z2mValid ? 'Konfiguracja zgodna z Sonoff Dongle-M' : 'Upewnij się, że w configuration.yaml ustawiono adapter: ember',
+    recommendation: z2mValid ? 'Konfiguracja zgodna z Sonoff Dongle-M' : 'Upewnij sie, ze w configuration.yaml ustawiono adapter: ember',
   });
 
-  // C. Usługa Panelu SimpleHomeTelemetry
+  // C. Usluga Panelu SimpleHomeTelemetry
   const panelDir = '/opt/zigbee-telemetry-panel';
   let panelActive = true;
   try {
@@ -1424,8 +1427,8 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
     config_path: '/etc/systemd/system/iot-telemetry.service',
     config_exists: existsSync('/etc/systemd/system/iot-telemetry.service'),
     config_valid: true,
-    config_summary: 'Port: 3000, Usługa Node.js / Angular SSR',
-    recommendation: 'Usługa panelu działa poprawnie',
+    config_summary: 'Port: 3000, Usluga Node.js / Angular SSR',
+    recommendation: 'Usluga panelu dziala poprawnie',
   });
 
   res.json({
@@ -1470,8 +1473,8 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
       current_commit: afterCommit,
       remote_commit: afterCommit,
       message: updated
-        ? `Pomyślnie zaktualizowano z commita ${beforeCommit} do ${afterCommit}!`
-        : 'Repozytorium jest już w najnowszej wersji (Already up to date).',
+        ? `Pomyslnie zaktualizowano z commita ${beforeCommit} do ${afterCommit}!`
+        : 'Repozytorium jest juz w najnowszej wersji (Already up to date).',
       output: pullOutput,
     });
   } catch (err: unknown) {
@@ -1479,13 +1482,13 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       updated: false,
-      message: `Błąd podczas git pull: ${msg}`,
+      message: `Blad podczas git pull: ${msg}`,
       output: msg,
     });
   }
 });
 
-// 19. Ręczne dodanie lub powiązanie wentylatora Gotze & Jensen GOW 007 (Tuya WiFi)
+// 19. Reczne dodanie lub powiazanie wentylatora Gotze & Jensen GOW 007 (Tuya WiFi)
 app.post('/api/devices/tuya-fan/add', (req: Request, res: Response) => {
   const { name, ip_address, device_id } = req.body || {};
   const fanIeee = device_id ? `tuya_gow007_${device_id}` : `tuya_gow007_${Date.now().toString().slice(-6)}`;
@@ -1526,7 +1529,7 @@ app.post('/api/devices/tuya-fan/add', (req: Request, res: Response) => {
   });
 });
 
-// 9. API do pobierania / odczytu plików źródłowych wygenerowanych dla użytkownika
+// 9. API do pobierania / odczytu plikow zrodlowych wygenerowanych dla uzytkownika
 app.get('/api/files/:filename', (req: Request, res: Response) => {
   const allowed = [
     'install.sh',
@@ -1566,7 +1569,7 @@ app.get('/api/files/:filename', (req: Request, res: Response) => {
   }
 });
 
-// Obsługa plików statycznych z /browser
+// Obsluga plikow statycznych z /browser
 app.use(
   express.static(browserDistFolder, {
     maxAge: '1y',
@@ -1575,14 +1578,21 @@ app.use(
   }),
 );
 
-// Catch-all renderujący aplikację Angular
+// Catch-all renderujacy aplikacje Angular
 const angularApp = new AngularNodeAppEngine();
 app.use((req, res, next) => {
-  // 1. Spróbuj wyrenderować przez Angular SSR Engine
+  // Normalizacja naglowka Host dla Angular SSR w lokalnej sieci LAN (np. 10.0.0.21:3000)
+  const incomingHost = req.headers['host'];
+  if (incomingHost && !incomingHost.startsWith('localhost') && !incomingHost.startsWith('127.0.0.1')) {
+    req.headers['x-forwarded-host'] = incomingHost;
+    req.headers['host'] = `localhost:${process.env['PORT'] || 3000}`;
+  }
+
+  // 1. Sprobuj wyrenderowac przez Angular SSR Engine
   angularApp
     .handle(req)
     .then((response) => {
-      if (response) {
+      if (response && response.status >= 200 && response.status < 400) {
         writeResponseToNodeResponse(response, res);
       } else {
         // Fallback do index.html (Client-Side Rendering)
@@ -1598,7 +1608,7 @@ app.use((req, res, next) => {
       }
     })
     .catch((_err) => {
-      // W razie błędu SSR (np. SSRF Header Host check na IP wewnętrznym), zaserwuj index.html
+      // W razie bledu SSR, zaserwuj index.html (CSR)
       const indexPath = join(browserDistFolder, 'index.html');
       const csrPath = join(browserDistFolder, 'index.csr.html');
       if (existsSync(indexPath)) {

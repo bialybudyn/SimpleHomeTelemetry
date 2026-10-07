@@ -1,8 +1,8 @@
 """
-backend_native.py - Natywna implementacja backendu IoT bezpośrednio komunikująca się z koordynatorem
-Sonoff Dongle-M (układ Silicon Labs EFR32MG24) z wykorzystaniem biblioteki zigpy oraz bellows (EZSP/Ember).
-Działa w 100% bez Home Assistanta i bez brokera MQTT!
-Odbiera atrybuty klastrów ZCL (temperatura, wilgotność, bateria), zapisuje do SQLite i streamuje do WebSockets.
+backend_native.py - Natywna implementacja backendu IoT bezposrednio komunikujaca sie z koordynatorem
+Sonoff Dongle-M (uklad Silicon Labs EFR32MG24) z wykorzystaniem biblioteki zigpy oraz bellows (EZSP/Ember).
+Dziala w 100% bez Home Assistanta i bez brokera MQTT!
+Odbiera atrybuty klastrow ZCL (temperatura, wilgotnosc, bateria), zapisuje do SQLite i streamuje do WebSockets.
 """
 
 import os
@@ -25,11 +25,11 @@ import database
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("backend_native")
 
-# Konfiguracja połączenia z koordynatorem Sonoff Dongle Max (Dongle-M / EFR32MG24)
+# Konfiguracja polaczenia z koordynatorem Sonoff Dongle Max (Dongle-M / EFR32MG24)
 # Oficjalna dokumentacja Sonoff: https://dongle.sonoff.tech/guide/dongle-m/
-# 1. Połączenie sieciowe TCP (Ethernet / PoE / Wi-Fi) — zalecane dla Dongle Max:
+# 1. Polaczenie sieciowe TCP (Ethernet / PoE / Wi-Fi) — zalecane dla Dongle Max:
 #    ZIGBEE_PORT="socket://Dongle-M.local:6638" lub "socket://192.168.1.120:6638"
-# 2. Połączenie lokalne USB:
+# 2. Polaczenie lokalne USB:
 #    Linux: /dev/ttyACM0 lub /dev/serial/by-id/...
 #    Windows: COM3, COM4
 SERIAL_PORT = os.environ.get("ZIGBEE_PORT", "socket://Dongle-M.local:6638")
@@ -37,7 +37,7 @@ SERIAL_BAUDRATE = int(os.environ.get("ZIGBEE_BAUDRATE", "115200"))
 FLOW_CONTROL = os.environ.get("ZIGBEE_FLOW_CONTROL", "none") # hardware / software / none
 HTTP_PORT = int(os.environ.get("PORT", "8000"))
 
-# Menadżer połączeń WebSocket
+# Menadzer polaczen WebSocket
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
@@ -45,11 +45,11 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)
-        logger.info(f"Klient WebSocket połączony. Łącznie aktywnych: {len(self.active_connections)}")
+        logger.info(f"Klient WebSocket polaczony. Lacznie aktywnych: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
-        logger.info(f"Klient WebSocket rozłączony. Pozostało: {len(self.active_connections)}")
+        logger.info(f"Klient WebSocket rozlaczony. Pozostalo: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
         if not self.active_connections:
@@ -68,16 +68,16 @@ manager = ConnectionManager()
 zigpy_app = None
 main_loop: Optional[asyncio.AbstractEventLoop] = None
 
-# Pamięć podręczna ostatnich stanów urządzeń dla agregacji atrybutów
+# Pamiec podreczna ostatnich stanow urzadzen dla agregacji atrybutow
 device_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def handle_attribute_updated(device_ieee: str, cluster_id: int, attribute_id: int, value: Any):
     """
-    Callback wywoływany przez klastry ZCL zigpy przy odebraniu raportu atrybutu od czujnika.
+    Callback wywolywany przez klastry ZCL zigpy przy odebraniu raportu atrybutu od czujnika.
     Klastry:
-      - 0x0402 (TemperatureMeasurement): Atrybut 0x0000 = zmierzona wartość w 0.01 °C (np. 2150 = 21.50 °C)
-      - 0x0405 (RelativeHumidity): Atrybut 0x0000 = zmierzona wartość w 0.01 % (np. 4520 = 45.20 %)
+      - 0x0402 (TemperatureMeasurement): Atrybut 0x0000 = zmierzona wartosc w 0.01 °C (np. 2150 = 21.50 °C)
+      - 0x0405 (RelativeHumidity): Atrybut 0x0000 = zmierzona wartosc w 0.01 % (np. 4520 = 45.20 %)
       - 0x0001 (PowerConfiguration): Atrybut 0x0021 = BatteryPercentageRemaining w jednostkach 0.5% (np. 180 = 90%)
     """
     if device_ieee not in device_cache:
@@ -96,19 +96,19 @@ def handle_attribute_updated(device_ieee: str, cluster_id: int, attribute_id: in
         dev_data["temperature"] = round(float(value) / 100.0, 2)
         updated = True
 
-    # Wilgotność względna (ZCL 0x0405)
+    # Wilgotnosc wzgledna (ZCL 0x0405)
     elif cluster_id == 0x0405 and attribute_id == 0x0000:
         dev_data["humidity"] = round(float(value) / 100.0, 2)
         updated = True
 
     # Poziom baterii (ZCL 0x0001, BatteryPercentageRemaining)
     elif cluster_id == 0x0001 and attribute_id == 0x0021:
-        # Wartość 0-200 oznacza 0-100% (skok o 0.5%)
+        # Wartosc 0-200 oznacza 0-100% (skok o 0.5%)
         battery_pct = int(min(100, max(0, int(value) // 2)))
         dev_data["battery"] = battery_pct
         updated = True
 
-    # Jeśli mamy odczyt temperatury i wilgotności, zapisz do bazy i rozgłoś przez WebSocket
+    # Jesli mamy odczyt temperatury i wilgotnosci, zapisz do bazy i rozglos przez WebSocket
     if updated and dev_data.get("temperature") is not None and dev_data.get("humidity") is not None:
         now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         record = {
@@ -130,7 +130,7 @@ def handle_attribute_updated(device_ieee: str, cluster_id: int, attribute_id: in
             timestamp=now_str
         )
 
-        # Wyślij powiadomienie przez WebSocket
+        # Wyslij powiadomienie przez WebSocket
         if main_loop and not main_loop.is_closed():
             asyncio.run_coroutine_threadsafe(
                 manager.broadcast({
@@ -141,7 +141,7 @@ def handle_attribute_updated(device_ieee: str, cluster_id: int, attribute_id: in
                 main_loop
             )
 
-            # System powiadomień o baterii: jeśli poziom spadnie poniżej 15%
+            # System powiadomien o baterii: jesli poziom spadnie ponizej 15%
             if record["battery"] is not None and record["battery"] <= 15:
                 asyncio.run_coroutine_threadsafe(
                     manager.broadcast({
@@ -149,7 +149,7 @@ def handle_attribute_updated(device_ieee: str, cluster_id: int, attribute_id: in
                         "device_ieee": device_ieee,
                         "friendly_name": device_ieee,
                         "battery": record["battery"],
-                        "message": f"Ostrzeżenie: Bateria czujnika {device_ieee} spadła do {record['battery']}%! Wymagana wymiana.",
+                        "message": f"Ostrzezenie: Bateria czujnika {device_ieee} spadla do {record['battery']}%! Wymagana wymiana.",
                         "timestamp": now_str
                     }),
                     main_loop
@@ -157,7 +157,7 @@ def handle_attribute_updated(device_ieee: str, cluster_id: int, attribute_id: in
 
 
 async def init_native_zigpy():
-    """Inicjalizuje stos Zigbee z obsługą protokołu EZSP/Ember dla układu EFR32MG24."""
+    """Inicjalizuje stos Zigbee z obsluga protokolu EZSP/Ember dla ukladu EFR32MG24."""
     global zigpy_app
     try:
         import bellows.zigbee.application
@@ -177,17 +177,17 @@ async def init_native_zigpy():
             }
         }
 
-        logger.info(f"Nawiązywanie połączenia z donglem Sonoff (EFR32MG24) na porcie {SERIAL_PORT}...")
+        logger.info(f"Nawiazywanie polaczenia z donglem Sonoff (EFR32MG24) na porcie {SERIAL_PORT}...")
         zigpy_app = await bellows.zigbee.application.ControllerApplication.new(config)
         await zigpy_app.startup(auto_form=True)
-        logger.info(f"Koordynator Zigbee uruchomiony pomyślnie. IEEE: {zigpy_app.state.node_info.ieee}")
+        logger.info(f"Koordynator Zigbee uruchomiony pomyslnie. IEEE: {zigpy_app.state.node_info.ieee}")
 
-        # Podpięcie listenerów dla zarejestrowanych i nowych urządzeń
+        # Podpiecie listenerow dla zarejestrowanych i nowych urzadzen
         for dev in zigpy_app.devices.values():
             register_device_listeners(dev)
 
         def on_device_joined(device):
-            logger.info(f"Nowe urządzenie dołączyło do sieci Zigbee: IEEE {device.ieee}")
+            logger.info(f"Nowe urzadzenie dolaczylo do sieci Zigbee: IEEE {device.ieee}")
             register_device_listeners(device)
             if main_loop:
                 asyncio.run_coroutine_threadsafe(
@@ -202,13 +202,13 @@ async def init_native_zigpy():
         zigpy_app.add_listener("device_joined", on_device_joined)
 
     except ImportError:
-        logger.warning("Pakiet bellows/zigpy nie jest zainstalowany. Backend działa w trybie symulacji REST/WebSocket.")
+        logger.warning("Pakiet bellows/zigpy nie jest zainstalowany. Backend dziala w trybie symulacji REST/WebSocket.")
     except Exception as e:
-        logger.warning(f"Nie udało się połączyć z donglem sprzętowym na {SERIAL_PORT}: {e}. Działa tryb REST/WebSocket.")
+        logger.warning(f"Nie udalo sie polaczyc z donglem sprzetowym na {SERIAL_PORT}: {e}. Dziala tryb REST/WebSocket.")
 
 
 def register_device_listeners(device):
-    """Rejestruje nasłuchiwanie raportów atrybutów dla klastrów czujnika."""
+    """Rejestruje nasluchiwanie raportow atrybutow dla klastrow czujnika."""
     ieee_str = str(device.ieee)
     for endpoint in device.endpoints.values():
         if hasattr(endpoint, "in_clusters"):
@@ -227,7 +227,7 @@ async def lifespan(app: FastAPI):
     main_loop = asyncio.get_running_loop()
     database.init_db()
 
-    # Uruchomienie wątku koordynatora w tle
+    # Uruchomienie watku koordynatora w tle
     asyncio.create_task(init_native_zigpy())
 
     yield
@@ -332,14 +332,14 @@ async def rename_device(device_ieee: str, payload: RenameRequest):
 
 @app.post("/api/permit-join")
 async def permit_join(payload: PermitJoinRequest = PermitJoinRequest()):
-    """Włącza parowanie (permit_join) bezpośrednio w koordynatorze zigpy."""
+    """Wlacza parowanie (permit_join) bezposrednio w koordynatorze zigpy."""
     duration = max(10, min(240, payload.duration))
     if zigpy_app:
         try:
             await zigpy_app.permit(duration)
-            logger.info(f"Koordynator zezwolił na parowanie przez {duration} sekund.")
+            logger.info(f"Koordynator zezwolil na parowanie przez {duration} sekund.")
         except Exception as e:
-            logger.error(f"Błąd uruchamiania parowania w koordynatorze: {e}")
+            logger.error(f"Blad uruchamiania parowania w koordynatorze: {e}")
 
     await manager.broadcast({
         "type": "permit_join",
@@ -351,7 +351,7 @@ async def permit_join(payload: PermitJoinRequest = PermitJoinRequest()):
 
 @app.get("/api/notifications")
 async def get_notifications(limit: int = 50):
-    """Pobiera listę powiadomień systemowych, w tym alerty baterii < 15%."""
+    """Pobiera liste powiadomien systemowych, w tym alerty baterii < 15%."""
     loop = asyncio.get_running_loop()
     notifs = await loop.run_in_executor(None, database.get_notifications, limit)
     return {"notifications": notifs}
@@ -367,7 +367,7 @@ async def acknowledge_notification(notification_id: int):
 
 @app.post("/api/alerts/battery")
 async def trigger_battery_alert(device_ieee: str, battery: int):
-    """Wywołanie powiadomienia o niskim stanie baterii."""
+    """Wywolanie powiadomienia o niskim stanie baterii."""
     loop = asyncio.get_running_loop()
     alert = await loop.run_in_executor(None, database.check_and_create_battery_alert, device_ieee, battery)
     if alert:
@@ -411,7 +411,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         await websocket.send_text(json.dumps({
             "type": "system_hello",
-            "message": "Połączono z natywnym backendem Zigpy Sonoff Dongle-M",
+            "message": "Polaczono z natywnym backendem Zigpy Sonoff Dongle-M",
             "timestamp": datetime.utcnow().isoformat()
         }))
         while True:

@@ -1,7 +1,7 @@
 """
-database.py - Obsługa bazy danych SQLite (telemetry.db) dla systemu monitoringu Zigbee.
-Przechowuje rejestr urządzeń oraz historię pomiarów środowiskowych (temperatura, wilgotność, bateria, LQI).
-Zawiera zoptymalizowane zapytania agregujące dla długich zakresów czasowych (6h, 24h, 7d, 30d, 90d, 360d, 720d).
+database.py - Obsluga bazy danych SQLite (telemetry.db) dla systemu monitoringu Zigbee.
+Przechowuje rejestr urzadzen oraz historie pomiarow srodowiskowych (temperatura, wilgotnosc, bateria, LQI).
+Zawiera zoptymalizowane zapytania agregujace dla dlugich zakresow czasowych (6h, 24h, 7d, 30d, 90d, 360d, 720d).
 """
 
 import sqlite3
@@ -13,21 +13,21 @@ DB_FILE = os.environ.get("SQLITE_DB_PATH", "telemetry.db")
 
 
 def get_db_connection(db_path: str = DB_FILE) -> sqlite3.Connection:
-    """Tworzy połączenie z bazą SQLite w trybie WAL dla wysokiej współbieżności zapisu/odczytu."""
+    """Tworzy polaczenie z baza SQLite w trybie WAL dla wysokiej wspolbieznosci zapisu/odczytu."""
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    # Włączenie trybu WAL (Write-Ahead Logging) dla bezpiecznego zapisu asynchronicznego
+    # Wlaczenie trybu WAL (Write-Ahead Logging) dla bezpiecznego zapisu asynchronicznego
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA synchronous = NORMAL;")
     return conn
 
 
 def init_db(db_path: str = DB_FILE) -> None:
-    """Inicjalizuje schemat tabel i indeksów w bazie SQLite."""
+    """Inicjalizuje schemat tabel i indeksow w bazie SQLite."""
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
 
-        # Tabela urządzeń Zigbee
+        # Tabela urzadzen Zigbee
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS devices (
                 ieee_address TEXT PRIMARY KEY,
@@ -55,7 +55,7 @@ def init_db(db_path: str = DB_FILE) -> None:
             );
         """)
 
-        # Tabela powiadomień i alertów (w tym alerty niskiego stanu baterii < 15%)
+        # Tabela powiadomien i alertow (w tym alerty niskiego stanu baterii < 15%)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,7 +70,7 @@ def init_db(db_path: str = DB_FILE) -> None:
             );
         """)
 
-        # Indeksy wydajnościowe dla zapytań czasowych
+        # Indeksy wydajnosciowe dla zapytan czasowych
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_telemetry_device_time 
             ON telemetry(device_ieee, timestamp DESC);
@@ -93,14 +93,14 @@ def check_and_create_battery_alert(
     friendly_name: Optional[str] = None,
     db_path: str = DB_FILE
 ) -> Optional[Dict[str, Any]]:
-    """Sprawdza stan baterii. Jeśli <= 15%, tworzy powiadomienie alarmowe w SQLite (jeśli nie powstało w ciągu ostatnich 12h)."""
+    """Sprawdza stan baterii. Jesli <= 15%, tworzy powiadomienie alarmowe w SQLite (jesli nie powstalo w ciagu ostatnich 12h)."""
     if battery is None or battery > 15:
         return None
 
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         
-        # Pobierz nazwę urządzenia jeśli nie podano
+        # Pobierz nazwe urzadzenia jesli nie podano
         if not friendly_name:
             cursor.execute("SELECT friendly_name FROM devices WHERE ieee_address = ?", (device_ieee,))
             row = cursor.fetchone()
@@ -108,7 +108,7 @@ def check_and_create_battery_alert(
         else:
             dev_name = friendly_name
 
-        # Sprawdź czy w ciągu ostatnich 12 godzin nie wysłano już alertu dla tego urządzenia
+        # Sprawdz czy w ciagu ostatnich 12 godzin nie wyslano juz alertu dla tego urzadzenia
         twelve_hours_ago = (datetime.utcnow() - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("""
             SELECT id FROM notifications 
@@ -142,7 +142,7 @@ def check_and_create_battery_alert(
 
 
 def get_notifications(limit: int = 50, db_path: str = DB_FILE) -> List[Dict[str, Any]]:
-    """Pobiera listę powiadomień z bazy SQLite."""
+    """Pobiera liste powiadomien z bazy SQLite."""
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -174,7 +174,7 @@ def upsert_device(
     linkquality: Optional[int] = None,
     db_path: str = DB_FILE
 ) -> None:
-    """Aktualizuje lub rejestruje urządzenie Zigbee w tabeli devices."""
+    """Aktualizuje lub rejestruje urzadzenie Zigbee w tabeli devices."""
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -183,7 +183,7 @@ def upsert_device(
         existing = cursor.fetchone()
 
         if existing:
-            # Zachowaj istniejącą przyjazną nazwę jeśli nie podano nowej
+            # Zachowaj istniejaca przyjazna nazwe jesli nie podano nowej
             target_name = friendly_name if friendly_name else existing["friendly_name"]
             target_model = model if model else existing["model"]
             target_battery = battery if battery is not None else existing["battery"]
@@ -219,11 +219,11 @@ def record_telemetry(
     timestamp: Optional[str] = None,
     db_path: str = DB_FILE
 ) -> int:
-    """Pojedynczy zapis rekordu telemetrii do tabeli telemetry oraz aktualizacja statusu urządzenia."""
+    """Pojedynczy zapis rekordu telemetrii do tabeli telemetry oraz aktualizacja statusu urzadzenia."""
     if timestamp is None:
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Uaktualnij stan urządzenia w tabeli devices
+    # Uaktualnij stan urzadzenia w tabeli devices
     upsert_device(
         ieee_address=device_ieee,
         temperature=temperature,
@@ -233,7 +233,7 @@ def record_telemetry(
         db_path=db_path
     )
 
-    # Sprawdź alert niskiego poziomu baterii (< 15%)
+    # Sprawdz alert niskiego poziomu baterii (< 15%)
     if battery is not None and battery <= 15:
         check_and_create_battery_alert(device_ieee, battery, db_path=db_path)
 
@@ -249,7 +249,7 @@ def record_telemetry(
 
 
 def batch_record_telemetry(records: List[Dict[str, Any]], db_path: str = DB_FILE) -> int:
-    """Zoptymalizowany zapis bufora pomiarów (batch insert) z poziomu asynchronicznego workera."""
+    """Zoptymalizowany zapis bufora pomiarow (batch insert) z poziomu asynchronicznego workera."""
     if not records:
         return 0
 
@@ -268,7 +268,7 @@ def batch_record_telemetry(records: List[Dict[str, Any]], db_path: str = DB_FILE
 
             if ieee and temp is not None and hum is not None:
                 insert_rows.append((ieee, round(float(temp), 2), round(float(hum), 2), bat, lqi, ts))
-                # Uaktualnij cache urządzenia
+                # Uaktualnij cache urzadzenia
                 cursor.execute("""
                     INSERT INTO devices (ieee_address, friendly_name, model, last_seen, battery, last_temperature, last_humidity, linkquality)
                     VALUES (?, ?, 'Zigbee Sensor', ?, ?, ?, ?, ?)
@@ -288,7 +288,7 @@ def batch_record_telemetry(records: List[Dict[str, Any]], db_path: str = DB_FILE
 
         conn.commit()
 
-        # Sprawdź powiadomienia baterii dla zrzucanych rekordów
+        # Sprawdz powiadomienia baterii dla zrzucanych rekordow
         for r in records:
             b = r.get("battery")
             d_ieee = r.get("device_ieee")
@@ -299,7 +299,7 @@ def batch_record_telemetry(records: List[Dict[str, Any]], db_path: str = DB_FILE
 
 
 def get_devices(db_path: str = DB_FILE) -> List[Dict[str, Any]]:
-    """Zwraca listę wszystkich zarejestrowanych urządzeń wraz z ostatnimi pomiarami."""
+    """Zwraca liste wszystkich zarejestrowanych urzadzen wraz z ostatnimi pomiarami."""
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -312,7 +312,7 @@ def get_devices(db_path: str = DB_FILE) -> List[Dict[str, Any]]:
 
 
 def get_device(ieee_address: str, db_path: str = DB_FILE) -> Optional[Dict[str, Any]]:
-    """Pobiera pojedyncze urządzenie po adresie IEEE."""
+    """Pobiera pojedyncze urzadzenie po adresie IEEE."""
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -325,7 +325,7 @@ def get_device(ieee_address: str, db_path: str = DB_FILE) -> Optional[Dict[str, 
 
 
 def update_device_name(ieee_address: str, friendly_name: str, db_path: str = DB_FILE) -> bool:
-    """Zmienia przyjazną nazwę czujnika."""
+    """Zmienia przyjazna nazwe czujnika."""
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -336,22 +336,22 @@ def update_device_name(ieee_address: str, friendly_name: str, db_path: str = DB_
 
 
 def _parse_range_cutoff(range_str: str) -> tuple[datetime, Optional[str]]:
-    """Konwertuje zakres (6h, 24h, 7d, 30d, 90d, 360d, 720d) na datę odcięcia oraz interwał agregacji SQL."""
+    """Konwertuje zakres (6h, 24h, 7d, 30d, 90d, 360d, 720d) na date odciecia oraz interwal agregacji SQL."""
     now = datetime.utcnow()
     unit = range_str[-1].lower()
     val = int(range_str[:-1]) if range_str[:-1].isdigit() else 24
 
     if unit == 'h':
         delta = timedelta(hours=val)
-        downsample = None if val <= 6 else "%Y-%m-%d %H:%M" # dla 24h co parę minut
+        downsample = None if val <= 6 else "%Y-%m-%d %H:%M" # dla 24h co pare minut
     elif unit == 'd':
         delta = timedelta(days=val)
         if val <= 7:
-            downsample = "%Y-%m-%d %H:00" # co godzinę
+            downsample = "%Y-%m-%d %H:00" # co godzine
         elif val <= 30:
-            downsample = "%Y-%m-%d %H:00" # co godzinę
+            downsample = "%Y-%m-%d %H:00" # co godzine
         else:
-            downsample = "%Y-%m-%d" # co dzień
+            downsample = "%Y-%m-%d" # co dzien
     else:
         delta = timedelta(hours=24)
         downsample = None
@@ -367,10 +367,10 @@ def get_telemetry_history(
     db_path: str = DB_FILE
 ) -> List[Dict[str, Any]]:
     """
-    Pobiera historię pomiarów dla danego czujnika.
-    Dla krótkich zakresów (6h, 24h) zwraca surowe dane.
-    Dla długich zakresów (7d, 30d, 90d, 360d, 720d) wykonuje agregację SQL w locie,
-    zapewniając natychmiastowe ładowanie wykresów w Chart.js.
+    Pobiera historie pomiarow dla danego czujnika.
+    Dla krotkich zakresow (6h, 24h) zwraca surowe dane.
+    Dla dlugich zakresow (7d, 30d, 90d, 360d, 720d) wykonuje agregacje SQL w locie,
+    zapewniajac natychmiastowe ladowanie wykresow w Chart.js.
     """
     cutoff, downsample_fmt = _parse_range_cutoff(range_str)
     cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
@@ -379,7 +379,7 @@ def get_telemetry_history(
         cursor = conn.cursor()
 
         if downsample_fmt:
-            # Agregacja czasowa z użyciem strftime w SQLite
+            # Agregacja czasowa z uzyciem strftime w SQLite
             query = f"""
                 SELECT 
                     strftime('{downsample_fmt}', timestamp) AS bucket,
@@ -414,7 +414,7 @@ def get_telemetry_stats(
     range_str: str = "24h",
     db_path: str = DB_FILE
 ) -> Dict[str, Any]:
-    """Oblicza min, max, avg dla temperatury i wilgotności w wybranym przedziale czasowym."""
+    """Oblicza min, max, avg dla temperatury i wilgotnosci w wybranym przedziale czasowym."""
     cutoff, _ = _parse_range_cutoff(range_str)
     cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -440,4 +440,4 @@ def get_telemetry_stats(
 
 if __name__ == "__main__":
     init_db()
-    print("Baza danych telemetry.db zainicjalizowana pomyślnie.")
+    print("Baza danych telemetry.db zainicjalizowana pomyslnie.")

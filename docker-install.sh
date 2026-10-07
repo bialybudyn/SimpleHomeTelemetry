@@ -4,7 +4,7 @@
 # ==============================================================================
 set -e
 
-echo "=== Uruchamianie stosu kontenerów: Mosquitto + Zigbee2MQTT + IoT Panel ==="
+echo "=== Uruchamianie stosu kontenerow: Mosquitto + Zigbee2MQTT + IoT Panel ==="
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Instalacja Dockera..."
@@ -23,7 +23,7 @@ else
   docker-compose up -d
 fi
 
-echo "=== Stos kontenerów uruchomiony! ==="
+echo "=== Stos kontenerow uruchomiony! ==="
 echo "• Broker Mosquitto: localhost:1883"
 echo "• Zigbee2MQTT Frontend: http://localhost:8080"
 echo "• Panel Telemetrii: http://localhost:3000"

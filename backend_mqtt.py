@@ -26,7 +26,7 @@ import database
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("backend_mqtt")
 
-# Konfiguracja środowiskowa
+# Konfiguracja srodowiskowa
 MQTT_BROKER_HOST = os.environ.get("MQTT_BROKER_HOST", "localhost")
 MQTT_BROKER_PORT = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
 MQTT_TOPIC_PREFIX = os.environ.get("MQTT_TOPIC_PREFIX", "zigbee2mqtt")
@@ -35,10 +35,10 @@ MQTT_PASSWORD = os.environ.get("MQTT_PASSWORD", None)
 
 HTTP_PORT = int(os.environ.get("PORT", "8000"))
 
-# Kolejka asynchroniczna do buforowania zapisów bazy danych (SQLite batch worker)
+# Kolejka asynchroniczna do buforowania zapisow bazy danych (SQLite batch worker)
 telemetry_queue: asyncio.Queue = asyncio.Queue()
 
-# Menadżer aktywnych połączeń WebSocket
+# Menadzer aktywnych polaczen WebSocket
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
@@ -46,11 +46,11 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)
-        logger.info(f"Klient WebSocket połączony. Łącznie aktywnych: {len(self.active_connections)}")
+        logger.info(f"Klient WebSocket polaczony. Lacznie aktywnych: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
-        logger.info(f"Klient WebSocket rozłączony. Pozostało: {len(self.active_connections)}")
+        logger.info(f"Klient WebSocket rozlaczony. Pozostalo: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
         if not self.active_connections:
@@ -61,7 +61,7 @@ class ConnectionManager:
             try:
                 await connection.send_text(msg_str)
             except Exception as e:
-                logger.warning(f"Błąd wysyłania do WebSocket: {e}")
+                logger.warning(f"Blad wysylania do WebSocket: {e}")
                 dead_connections.add(connection)
         for dead in dead_connections:
             self.active_connections.discard(dead)
@@ -71,9 +71,9 @@ mqtt_client: Optional[mqtt.Client] = None
 main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-# Worker buforujący zapisy do SQLite
+# Worker buforujacy zapisy do SQLite
 async def sqlite_batch_worker():
-    """Asynchroniczny proces zbierający rekordy z kolejki i wykonujący okresowy batch insert."""
+    """Asynchroniczny proces zbierajacy rekordy z kolejki i wykonujacy okresowy batch insert."""
     logger.info("Uruchomiono SQLite batch worker.")
     buffer = []
     last_flush = asyncio.get_event_loop().time()
@@ -89,11 +89,11 @@ async def sqlite_batch_worker():
                 pass
 
             now = asyncio.get_event_loop().time()
-            # Zrzucaj bufor jeśli zebrało się >= 20 wpisów lub minęły 2 sekundy od ostatniego zrzutu
+            # Zrzucaj bufor jesli zebralo sie >= 20 wpisow lub minely 2 sekundy od ostatniego zrzutu
             if buffer and (len(buffer) >= 20 or (now - last_flush) >= 2.0):
                 loop = asyncio.get_running_loop()
                 count = await loop.run_in_executor(None, database.batch_record_telemetry, buffer.copy())
-                logger.debug(f"Zapisano w batchu {count} rekordów do SQLite.")
+                logger.debug(f"Zapisano w batchu {count} rekordow do SQLite.")
                 buffer.clear()
                 last_flush = now
 
@@ -102,33 +102,33 @@ async def sqlite_batch_worker():
                 database.batch_record_telemetry(buffer)
             break
         except Exception as e:
-            logger.error(f"Nieoczekiwany błąd w sqlite_batch_worker: {e}", exc_info=True)
+            logger.error(f"Nieoczekiwany blad w sqlite_batch_worker: {e}", exc_info=True)
             await asyncio.sleep(1)
 
 
 # Callbacki klienta MQTT (Paho MQTT)
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
-        logger.info(f"Połączono z brokerem MQTT {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
+        logger.info(f"Polaczono z brokerem MQTT {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
         # Subskrypcja tematu Zigbee2MQTT
         sub_topic = f"{MQTT_TOPIC_PREFIX}/#"
         client.subscribe(sub_topic)
         logger.info(f"Subskrypcja tematu MQTT: {sub_topic}")
     else:
-        logger.error(f"Błąd połączenia z brokerem MQTT, kod: {rc}")
+        logger.error(f"Blad polaczenia z brokerem MQTT, kod: {rc}")
 
 
 def on_message(client, userdata, msg):
-    """Przetwarza przychodzące wiadomości z Zigbee2MQTT."""
+    """Przetwarza przychodzace wiadomosci z Zigbee2MQTT."""
     try:
         topic = msg.topic
         payload_str = msg.payload.decode("utf-8")
 
-        # 1. Ignoruj wiadomości systemowe Zigbee2MQTT
+        # 1. Ignoruj wiadomosci systemowe Zigbee2MQTT
         if topic.startswith(f"{MQTT_TOPIC_PREFIX}/bridge/"):
             return
 
-        # 2. Wyodrębnij identyfikator urządzenia (np. 'zigbee2mqtt/0x00124b002a...' -> '0x00124b002a...')
+        # 2. Wyodrebnij identyfikator urzadzenia (np. 'zigbee2mqtt/0x00124b002a...' -> '0x00124b002a...')
         parts = topic.split("/")
         if len(parts) < 2:
             return
@@ -139,13 +139,13 @@ def on_message(client, userdata, msg):
         if not isinstance(payload, dict):
             return
 
-        # Sprawdź czy to odczyt telemetrii z czujnika środowiskowego
+        # Sprawdz czy to odczyt telemetrii z czujnika srodowiskowego
         temperature = payload.get("temperature")
         humidity = payload.get("humidity")
         battery = payload.get("battery")
         linkquality = payload.get("linkquality")
 
-        # Jeśli brak kluczowych pomiarów (np. urządzenie innego typu), ignorujemy
+        # Jesli brak kluczowych pomiarow (np. urzadzenie innego typu), ignorujemy
         if temperature is None and humidity is None:
             return
 
@@ -160,7 +160,7 @@ def on_message(client, userdata, msg):
             "timestamp": now_str
         }
 
-        # 4. Przekaż do asynchronicznej kolejki i wyślij przez WebSocket do klientów
+        # 4. Przekaz do asynchronicznej kolejki i wyslij przez WebSocket do klientow
         if main_event_loop and not main_event_loop.is_closed():
             main_event_loop.call_soon_threadsafe(telemetry_queue.put_nowait, record)
 
@@ -171,14 +171,14 @@ def on_message(client, userdata, msg):
             }
             asyncio.run_coroutine_threadsafe(manager.broadcast(ws_payload), main_event_loop)
 
-            # System powiadomień o baterii: jeśli poziom spadnie poniżej 15%
+            # System powiadomien o baterii: jesli poziom spadnie ponizej 15%
             if battery is not None and int(battery) <= 15:
                 alert_payload = {
                     "type": "battery_alert",
                     "device_ieee": device_identifier,
                     "friendly_name": device_identifier,
                     "battery": int(battery),
-                    "message": f"Ostrzeżenie: Bateria czujnika {device_identifier} spadła do {battery}%! Wymagana wymiana.",
+                    "message": f"Ostrzezenie: Bateria czujnika {device_identifier} spadla do {battery}%! Wymagana wymiana.",
                     "timestamp": now_str
                 }
                 asyncio.run_coroutine_threadsafe(manager.broadcast(alert_payload), main_event_loop)
@@ -186,7 +186,7 @@ def on_message(client, userdata, msg):
     except json.JSONDecodeError:
         pass
     except Exception as e:
-        logger.error(f"Błąd przetwarzania wiadomości MQTT: {e}")
+        logger.error(f"Blad przetwarzania wiadomosci MQTT: {e}")
 
 
 @asynccontextmanager
@@ -196,7 +196,7 @@ async def lifespan(app: FastAPI):
     database.init_db()
     main_event_loop = asyncio.get_running_loop()
 
-    # 2. Uruchomienie workera buforującego
+    # 2. Uruchomienie workera buforujacego
     worker_task = asyncio.create_task(sqlite_batch_worker())
 
     # 3. Inicjalizacja klienta MQTT
@@ -208,13 +208,13 @@ async def lifespan(app: FastAPI):
         mqtt_client.on_message = on_message
         mqtt_client.connect_async(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
         mqtt_client.loop_start()
-        logger.info(f"Uruchomiono pętlę MQTT w tle ({MQTT_BROKER_HOST}:{MQTT_BROKER_PORT})")
+        logger.info(f"Uruchomiono petle MQTT w tle ({MQTT_BROKER_HOST}:{MQTT_BROKER_PORT})")
     except Exception as e:
-        logger.warning(f"Nie udało się połączyć z MQTT brokerem podczas startu: {e}. Działa tryb REST API/WebSocket.")
+        logger.warning(f"Nie udalo sie polaczyc z MQTT brokerem podczas startu: {e}. Dziala tryb REST API/WebSocket.")
 
     yield
 
-    # Sprzątanie
+    # Sprzatanie
     if mqtt_client:
         mqtt_client.loop_stop()
         mqtt_client.disconnect()
@@ -258,7 +258,7 @@ class TelemetrySimulateRequest(BaseModel):
 # REST API Endpoints
 @app.get("/api/system/status")
 async def get_system_status():
-    """Zwraca status działania backendu, połączenia z brokerem MQTT i liczbę klientów WebSocket."""
+    """Zwraca status dzialania backendu, polaczenia z brokerem MQTT i liczbe klientow WebSocket."""
     mqtt_connected = mqtt_client.is_connected() if mqtt_client else False
     return {
         "status": "online",
@@ -273,7 +273,7 @@ async def get_system_status():
 
 @app.get("/api/devices")
 async def get_devices():
-    """Zwraca listę wszystkich czujników wraz z ostatnimi odczytami."""
+    """Zwraca liste wszystkich czujnikow wraz z ostatnimi odczytami."""
     loop = asyncio.get_running_loop()
     devices = await loop.run_in_executor(None, database.get_devices)
     return {"devices": devices}
@@ -281,7 +281,7 @@ async def get_devices():
 
 @app.get("/api/devices/{device_ieee}")
 async def get_device(device_ieee: str):
-    """Pobiera szczegóły pojedynczego czujnika."""
+    """Pobiera szczegoly pojedynczego czujnika."""
     loop = asyncio.get_running_loop()
     device = await loop.run_in_executor(None, database.get_device, device_ieee)
     if not device:
@@ -295,9 +295,9 @@ async def get_device_history(
     range: str = Query("24h", regex="^(6h|24h|7d|30d|90d|360d|720d)$")
 ):
     """
-    Zwraca historię pomiarów dla wybranego zakresu czasowego:
+    Zwraca historie pomiarow dla wybranego zakresu czasowego:
     (6h, 24h, 7d, 30d, 90d, 360d, 720d).
-    Dla długich zakresów dane są zoptymalizowane i zagregowane w SQLite.
+    Dla dlugich zakresow dane sa zoptymalizowane i zagregowane w SQLite.
     """
     loop = asyncio.get_running_loop()
     history = await loop.run_in_executor(None, database.get_telemetry_history, device_ieee, range)
@@ -313,13 +313,13 @@ async def get_device_history(
 
 @app.post("/api/devices/{device_ieee}/rename")
 async def rename_device(device_ieee: str, payload: RenameRequest):
-    """Zmienia przyjazną nazwę czujnika w bazie SQLite."""
+    """Zmienia przyjazna nazwe czujnika w bazie SQLite."""
     loop = asyncio.get_running_loop()
     success = await loop.run_in_executor(None, database.update_device_name, device_ieee, payload.friendly_name)
     if not success:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    # Powiadom podłączone frontendy przez WebSocket
+    # Powiadom podlaczone frontendy przez WebSocket
     await manager.broadcast({
         "type": "device_renamed",
         "device_ieee": device_ieee,
@@ -330,15 +330,15 @@ async def rename_device(device_ieee: str, payload: RenameRequest):
 
 @app.post("/api/permit-join")
 async def permit_join(payload: PermitJoinRequest = PermitJoinRequest()):
-    """Włącza tryb parowania nowych urządzeń w Zigbee2MQTT przez publikację na temat bridge."""
+    """Wlacza tryb parowania nowych urzadzen w Zigbee2MQTT przez publikacje na temat bridge."""
     duration = max(10, min(240, payload.duration))
     if mqtt_client and mqtt_client.is_connected():
         topic = f"{MQTT_TOPIC_PREFIX}/bridge/request/permit_join"
         msg = json.dumps({"value": True, "time": duration})
         mqtt_client.publish(topic, msg)
-        logger.info(f"Wysłano żądanie permit_join ({duration}s) do Zigbee2MQTT.")
+        logger.info(f"Wyslano zadanie permit_join ({duration}s) do Zigbee2MQTT.")
     
-    # Rozgłoś zdarzenie do frontendów, aby uruchomić licznik
+    # Rozglos zdarzenie do frontendow, aby uruchomic licznik
     await manager.broadcast({
         "type": "permit_join",
         "duration": duration,
@@ -349,7 +349,7 @@ async def permit_join(payload: PermitJoinRequest = PermitJoinRequest()):
 
 @app.get("/api/notifications")
 async def get_notifications(limit: int = 50):
-    """Pobiera listę powiadomień systemowych, w tym alerty baterii < 15%."""
+    """Pobiera liste powiadomien systemowych, w tym alerty baterii < 15%."""
     loop = asyncio.get_running_loop()
     notifs = await loop.run_in_executor(None, database.get_notifications, limit)
     return {"notifications": notifs}
@@ -365,7 +365,7 @@ async def acknowledge_notification(notification_id: int):
 
 @app.post("/api/alerts/battery")
 async def trigger_battery_alert(device_ieee: str, battery: int):
-    """Ręczne lub zdalne wywołanie powiadomienia o niskim stanie baterii."""
+    """Reczne lub zdalne wywolanie powiadomienia o niskim stanie baterii."""
     loop = asyncio.get_running_loop()
     alert = await loop.run_in_executor(None, database.check_and_create_battery_alert, device_ieee, battery)
     if alert:
@@ -378,7 +378,7 @@ async def trigger_battery_alert(device_ieee: str, battery: int):
 
 @app.post("/api/simulate")
 async def simulate_telemetry(payload: TelemetrySimulateRequest):
-    """Punkt końcowy do symulacji i testowania odczytów środowiskowych."""
+    """Punkt koncowy do symulacji i testowania odczytow srodowiskowych."""
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     record = {
         "device_ieee": payload.device_ieee,
@@ -409,17 +409,17 @@ async def simulate_telemetry(payload: TelemetrySimulateRequest):
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """Streaming pomiarów telemetrii w czasie rzeczywistym do przeglądarki i aplikacji Android."""
+    """Streaming pomiarow telemetrii w czasie rzeczywistym do przegladarki i aplikacji Android."""
     await manager.connect(websocket)
     try:
-        # Wyślij powitanie ze statusem
+        # Wyslij powitanie ze statusem
         await websocket.send_text(json.dumps({
             "type": "system_hello",
-            "message": "Połączono ze strumieniem telemetrycznym Zigbee Sonoff Dongle-M",
+            "message": "Polaczono ze strumieniem telemetrycznym Zigbee Sonoff Dongle-M",
             "timestamp": datetime.utcnow().isoformat()
         }))
 
-        # Pętla nasłuchująca wiadomości od klienta (np. ping-pong)
+        # Petla nasluchujaca wiadomosci od klienta (np. ping-pong)
         while True:
             data = await websocket.receive_text()
             try:
@@ -431,11 +431,11 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
-        logger.warning(f"Błąd sesji WebSocket: {e}")
+        logger.warning(f"Blad sesji WebSocket: {e}")
         manager.disconnect(websocket)
 
 
-# Obsługa plików statycznych frontendu (jeśli katalog static/ istnieje)
+# Obsluga plikow statycznych frontendu (jesli katalog static/ istnieje)
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
