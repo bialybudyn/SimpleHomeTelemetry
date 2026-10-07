@@ -1578,10 +1578,37 @@ app.use(
 // Catch-all renderujący aplikację Angular
 const angularApp = new AngularNodeAppEngine();
 app.use((req, res, next) => {
+  // 1. Spróbuj wyrenderować przez Angular SSR Engine
   angularApp
     .handle(req)
-    .then((response) => (response ? writeResponseToNodeResponse(response, res) : next()))
-    .catch(next);
+    .then((response) => {
+      if (response) {
+        writeResponseToNodeResponse(response, res);
+      } else {
+        // Fallback do index.html (Client-Side Rendering)
+        const indexPath = join(browserDistFolder, 'index.html');
+        const csrPath = join(browserDistFolder, 'index.csr.html');
+        if (existsSync(indexPath)) {
+          res.sendFile(indexPath);
+        } else if (existsSync(csrPath)) {
+          res.sendFile(csrPath);
+        } else {
+          next();
+        }
+      }
+    })
+    .catch((_err) => {
+      // W razie błędu SSR (np. SSRF Header Host check na IP wewnętrznym), zaserwuj index.html
+      const indexPath = join(browserDistFolder, 'index.html');
+      const csrPath = join(browserDistFolder, 'index.csr.html');
+      if (existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else if (existsSync(csrPath)) {
+        res.sendFile(csrPath);
+      } else {
+        next(_err);
+      }
+    });
 });
 
 // WebSocket Server

@@ -219,11 +219,17 @@ if [ -f "$Z2M_CONF" ]; then
     fi
   fi
 
-  # Sprawdź port
-  if ! grep -q "port:" "$Z2M_CONF"; then
-    sed -i "/serial:/a \  port: ${DONGLE_PORT}" "$Z2M_CONF"
+  # Zawsze uaktualnij port koordynatora na wybrany DONGLE_PORT
+  if grep -q "port:" "$Z2M_CONF"; then
+    sed -i "s|port:.*|port: '${DONGLE_PORT}'|" "$Z2M_CONF"
+  else
+    if grep -q "serial:" "$Z2M_CONF"; then
+      sed -i "/serial:/a \  port: '${DONGLE_PORT}'" "$Z2M_CONF"
+    else
+      echo -e "\nserial:\n  port: '${DONGLE_PORT}'\n  adapter: ember\n  baudrate: 115200" >> "$Z2M_CONF"
+    fi
   fi
-  echo -e "${GREEN}[OK] Konfiguracja Zigbee2MQTT zweryfikowana i zaktualizowana.${NC}"
+  echo -e "${GREEN}[OK] Konfiguracja Zigbee2MQTT zweryfikowana i zaktualizowana (${DONGLE_PORT}).${NC}"
 else
   echo -e "${CYAN}Tworzenie nowej zoptymalizowanej konfiguracji Zigbee2MQTT...${NC}"
   cat << EOF > "$Z2M_CONF"
@@ -235,7 +241,7 @@ mqtt:
   server: 'mqtt://localhost:1883'
 
 serial:
-  port: ${DONGLE_PORT}
+  port: '${DONGLE_PORT}'
   adapter: ember
   baudrate: 115200
 
