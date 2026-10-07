@@ -240,6 +240,84 @@ const devices = new Map<string, Device>();
 const telemetryStore = new Map<string, TelemetryPoint[]>();
 let currentId = 1;
 
+// --- PERSISTENT CACHE PERSISTENCE FOR DEVICES & TELEMETRY ---
+const devicesCachePath = join(process.cwd(), 'devices_cache.json');
+const telemetryCachePath = join(process.cwd(), 'telemetry_cache.json');
+
+function saveDevicesCache() {
+  try {
+    const list = Array.from(devices.entries());
+    writeFileSync(devicesCachePath, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[CACHE] Blad zapisu devices_cache.json:', err);
+  }
+}
+
+function saveTelemetryCache() {
+  try {
+    const list = Array.from(telemetryStore.entries());
+    // Trimming to keep last 200 points to keep file sizes very compact
+    const trimmed = list.map(([ieee, points]) => [ieee, points.slice(-200)]);
+    writeFileSync(telemetryCachePath, JSON.stringify(trimmed, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[CACHE] Blad zapisu telemetry_cache.json:', err);
+  }
+}
+
+let saveDevicesTimeout: ReturnType<typeof setTimeout> | null = null;
+function triggerSaveDevices() {
+  if (saveDevicesTimeout) return;
+  saveDevicesTimeout = setTimeout(() => {
+    saveDevicesCache();
+    saveDevicesTimeout = null;
+  }, 2000);
+}
+
+let saveTelemetryTimeout: ReturnType<typeof setTimeout> | null = null;
+function triggerSaveTelemetry() {
+  if (saveTelemetryTimeout) return;
+  saveTelemetryTimeout = setTimeout(() => {
+    saveTelemetryCache();
+    saveTelemetryTimeout = null;
+  }, 5000);
+}
+
+function loadCache() {
+  if (existsSync(devicesCachePath)) {
+    try {
+      const data = readFileSync(devicesCachePath, 'utf-8');
+      const entries = JSON.parse(data);
+      if (Array.isArray(entries)) {
+        entries.forEach(([key, val]) => {
+          devices.set(key, val);
+        });
+        console.log(`[CACHE] Zaladowano ${devices.size} urzadzen z devices_cache.json`);
+      }
+    } catch (err) {
+      console.warn('[CACHE] Blad odczytu devices_cache.json:', err);
+    }
+  }
+
+  if (existsSync(telemetryCachePath)) {
+    try {
+      const data = readFileSync(telemetryCachePath, 'utf-8');
+      const entries = JSON.parse(data);
+      if (Array.isArray(entries)) {
+        let count = 0;
+        entries.forEach(([key, val]) => {
+          telemetryStore.set(key, val);
+          count += val.length;
+        });
+        console.log(`[CACHE] Zaladowano ${count} punktow historii z telemetry_cache.json`);
+      }
+    } catch (err) {
+      console.warn('[CACHE] Blad odczytu telemetry_cache.json:', err);
+    }
+  }
+}
+
+loadCache();
+
 const notifications: NotificationItem[] = [];
 let notifIdCounter = 1;
 
@@ -646,6 +724,7 @@ function connectMqtt(customUrl?: string) {
                 });
                 mqttStatus.devices_discovered = devices.size;
                 broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+                triggerSaveDevices();
               }
             }
           }
@@ -737,6 +816,8 @@ interface Z2mDeviceItem {
             mqttStatus.devices_discovered = devices.size;
             if (updated > 0) {
               broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+              triggerSaveDevices();
+              triggerSaveTelemetry();
             }
           }
         } catch {
@@ -977,6 +1058,9 @@ interface Z2mDeviceItem {
             device: dev,
           });
 
+          triggerSaveDevices();
+          triggerSaveTelemetry();
+
           if (dev.battery !== null && dev.battery <= 15) {
             checkBatteryLevelAndNotify(targetIeee, dev.battery, dev.friendly_name);
           }
@@ -1179,6 +1263,7 @@ app.post('/api/devices/:ieee/rename', (req: Request, res: Response) => {
     device_ieee: ieee,
     friendly_name,
   });
+  triggerSaveDevices();
 
   // Przekaz zadanie zmiany nazwy do Zigbee2MQTT jesli broker jest podlaczony
   if (mqttClient?.connected) {
@@ -1505,6 +1590,8 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     device: dev,
   });
 
+  triggerSaveDevices();
+
   res.json({ status: 'ok', device: dev, sent_to_mqtt: !!mqttClient?.connected });
 });
 
@@ -1586,6 +1673,8 @@ app.post('/api/notifications/test-telegram', async (req: Request, res: Response)
 app.post('/api/devices/reset', (_req: Request, res: Response) => {
   devices.clear();
   telemetryStore.clear();
+  saveDevicesCache();
+  saveTelemetryCache();
   broadcastEvent({ type: 'devices_updated', devices: [] });
   res.json({ success: true, message: 'Rejestr urzadzen zresetowany. Oczekiwanie na rzeczywiste transmisje MQTT/Zigbee.' });
 });
@@ -1656,6 +1745,9 @@ app.post('/api/simulate', (req: Request, res: Response) => {
   const list = telemetryStore.get(device_ieee) || [];
   list.push(record);
   telemetryStore.set(device_ieee, list);
+
+  triggerSaveDevices();
+  triggerSaveTelemetry();
 
   broadcastEvent({
     type: 'telemetry',
