@@ -162,7 +162,7 @@
         (click)="triggerPairing()"
         [disabled]="telemetry.isPairing()"
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 text-white shadow-md shadow-cyan-900/30 transition-all cursor-pointer"
-        title="Włącz tryb parowania Zigbee permit-join na 60 sekund"
+        title="Włącz tryb parowania Zigbee permit-join na 160 sekund"
       >
         <mat-icon
           class="text-sm !w-4 !h-4"
@@ -351,25 +351,9 @@
         </div>
         <div class="text-slate-500">·</div>
         <div class="text-slate-400">
-          <span>Urządzenia:</span>
+          <span>Urządzenia w sieci:</span>
           <span class="text-white font-bold ml-1">{{ telemetry.devices().length }}</span>
         </div>
-        <button
-          (click)="addTuyaFanDevice()"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
-          title="Dodaj wentylator kolumnowy Gotze & Jensen GOW 007 7w1 (Tuya WiFi)"
-        >
-          <mat-icon class="text-xs !w-3.5 !h-3.5">mode_fan</mat-icon>
-          <span>+ Wentylator GOW 007</span>
-        </button>
-        <button
-          (click)="loadFullDemoCatalog()"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
-          title="Załaduj próbki urządzeń Sonoff (TRVZB, S26R2, ZBMINIR2) i Tuya"
-        >
-          <mat-icon class="text-xs !w-3.5 !h-3.5">auto_awesome</mat-icon>
-          <span>Demo Sonoff & Tuya</span>
-        </button>
       </div>
     </div>
 
@@ -503,7 +487,7 @@
               <h4 class="text-xs font-bold text-white">Włącz tryb parowania</h4>
             </div>
             <p class="text-[11px] text-slate-400 leading-relaxed">
-              Kliknij przycisk <strong class="text-slate-200">"Włącz parowanie (60s)"</strong>. Koordynator Sonoff Dongle Max otworzy sieć radiową dla nowych urządzeń.
+              Kliknij przycisk <strong class="text-slate-200">"Włącz parowanie (160s)"</strong>. Koordynator Sonoff Dongle Max otworzy sieć radiową dla nowych urządzeń.
             </p>
           </div>
 
@@ -537,14 +521,6 @@
           >
             <mat-icon class="text-base !w-4 !h-4">{{ telemetry.isPairing() ? 'refresh' : 'sensors' }}</mat-icon>
             <span>{{ telemetry.isPairing() ? 'Parowanie aktywne (' + telemetry.pairingRemainingSeconds() + 's)' : 'Włącz tryb parowania (60s)' }}</span>
-          </button>
-
-          <button
-            (click)="loadFullDemoCatalog()"
-            class="flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-950/40 transition-colors cursor-pointer"
-          >
-            <mat-icon class="text-base !w-4 !h-4">auto_awesome</mat-icon>
-            <span>Załaduj zestaw Sonoff & Tuya (Demo)</span>
           </button>
 
           <button

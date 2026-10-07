@@ -130,6 +130,9 @@ function detectDeviceCategory(model: string, payload?: Record<string, unknown>):
   if (m.includes('snzb-05') || m.includes('water') || m.includes('leak') || payload?.['water_leak'] !== undefined) {
     return 'water_leak';
   }
+  if (m.includes('snzb-02d') || m.includes('snzb-02') || m.includes('temp') || m.includes('humidity')) {
+    return 'sensor';
+  }
   return 'sensor';
 }
 
@@ -746,9 +749,9 @@ app.post('/api/devices/:ieee/rename', (req: Request, res: Response) => {
   res.json({ status: 'ok', device_ieee: ieee, friendly_name });
 });
 
-// 5. Tryb parowania (Permit-Join 60s)
+// 5. Tryb parowania (Permit-Join 160s)
 app.post('/api/permit-join', (req: Request, res: Response) => {
-  const duration = req.body?.duration ? parseInt(req.body.duration, 10) : 60;
+  const duration = req.body?.duration ? parseInt(req.body.duration, 10) : 160;
   permitJoinExpiresAt = Date.now() + duration * 1000;
 
   broadcastEvent({
@@ -827,241 +830,15 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   res.json({ status: 'ok', device: dev, sent_to_mqtt: !!mqttClient?.connected });
 });
 
-// 5b. Dodanie czujnika demonstracyjnego / testowego (Demo Sensor)
-app.post('/api/demo-device', (_req: Request, res: Response) => {
-  const sampleIeee = '0x00124b002a99bcde';
-  const now = new Date();
-  const sampleDev: Device = {
-    ieee_address: sampleIeee,
-    friendly_name: 'Salon - Sonoff SNZB-02D (Demo)',
-    model: 'SNZB-02D (EFR32MG24)',
-    category: 'sensor',
-    last_seen: now.toISOString(),
-    battery: 92,
-    last_temperature: 21.8,
-    last_humidity: 48.5,
-    linkquality: 114,
-  };
-  devices.set(sampleIeee, sampleDev);
-
-  // Wygeneruj 12 punktow historii dla wykresow
-  const historyList: TelemetryPoint[] = [];
-  for (let i = 12; i >= 0; i--) {
-    const ptTime = new Date(now.getTime() - i * 15 * 60 * 1000).toISOString();
-    historyList.push({
-      id: currentId++,
-      device_ieee: sampleIeee,
-      temperature: parseFloat((21.2 + Math.sin(i / 2) * 0.8).toFixed(1)),
-      humidity: parseFloat((48.0 + Math.cos(i / 2) * 1.5).toFixed(1)),
-      battery: 92,
-      linkquality: 110 + Math.floor(Math.random() * 10),
-      timestamp: ptTime,
-    });
-  }
-  telemetryStore.set(sampleIeee, historyList);
-
-  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
-  broadcastEvent({
-    type: 'telemetry',
-    device_ieee: sampleIeee,
-    data: historyList[historyList.length - 1],
-  });
-
-  res.json({ success: true, device: sampleDev });
+// 5b. Endpoint czyszczenia / restartu urzadzen (Reset do stanu czystego)
+app.post('/api/devices/reset', (_req: Request, res: Response) => {
+  devices.clear();
+  telemetryStore.clear();
+  broadcastEvent({ type: 'devices_updated', devices: [] });
+  res.json({ success: true, message: 'Rejestr urzadzen zresetowany. Oczekiwanie na rzeczywiste transmisje MQTT/Zigbee.' });
 });
 
-// 5c. Zaladowanie pelnego ekosystemu Sonoff (TRVZB, S26R2ZB, ZBMINIR2, kontaktrony) oraz Tuya
-app.post('/api/demo-catalog', (_req: Request, res: Response) => {
-  const now = new Date();
-  const demoList: Device[] = [
-    {
-      ieee_address: '0x00124b002b11aa01',
-      friendly_name: 'Salon - Sonoff TRVZB Gen 2',
-      model: 'TRVZB Gen 2 (Termostat Zigbee 3.0)',
-      category: 'climate',
-      vendor: 'SONOFF',
-      last_seen: now.toISOString(),
-      battery: 94,
-      last_temperature: 21.6,
-      local_temperature: 21.6,
-      current_heating_setpoint: 22.5,
-      system_mode: 'heat',
-      running_state: 'heat',
-      child_lock: 'UNLOCK',
-      open_window: false,
-      last_humidity: 47.0,
-      linkquality: 135,
-    },
-    {
-      ieee_address: '0x00124b002b11aa02',
-      friendly_name: 'Sypialnia - Sonoff TRVZB',
-      model: 'TRVZB (Smart Radiator Valve)',
-      category: 'climate',
-      vendor: 'SONOFF',
-      last_seen: now.toISOString(),
-      battery: 86,
-      last_temperature: 20.2,
-      local_temperature: 20.2,
-      current_heating_setpoint: 20.0,
-      system_mode: 'auto',
-      running_state: 'idle',
-      child_lock: 'LOCK',
-      open_window: false,
-      last_humidity: 51.5,
-      linkquality: 118,
-    },
-    {
-      ieee_address: '0x00124b002b11aa03',
-      friendly_name: 'Kuchnia - Sonoff S26R2ZB Plug',
-      model: 'S26R2ZB (Gniazdko Zigbee 16A)',
-      category: 'plug',
-      vendor: 'SONOFF',
-      last_seen: now.toISOString(),
-      battery: null,
-      state: 'ON',
-      power: 1420.5,
-      voltage: 231.4,
-      current: 6.14,
-      energy: 4.82,
-      last_temperature: null,
-      last_humidity: null,
-      linkquality: 142,
-    },
-    {
-      ieee_address: '0x00124b002b11aa04',
-      friendly_name: 'Korytarz - Sonoff ZBMINIR2 Switch',
-      model: 'ZBMINIR2 (Przekaznik dopuszkowy)',
-      category: 'switch',
-      vendor: 'SONOFF',
-      last_seen: now.toISOString(),
-      battery: null,
-      state: 'ON',
-      last_temperature: null,
-      last_humidity: null,
-      linkquality: 128,
-    },
-    {
-      ieee_address: '0x00124b002b11aa05',
-      friendly_name: 'Drzwi - Sonoff SNZB-04',
-      model: 'SNZB-04 (Kontaktron drzwi/okien)',
-      category: 'contact',
-      vendor: 'SONOFF',
-      last_seen: now.toISOString(),
-      battery: 91,
-      contact: true,
-      last_temperature: null,
-      last_humidity: null,
-      linkquality: 110,
-    },
-    {
-      ieee_address: '0x00124b002b11aa06',
-      friendly_name: 'Lazienka - Sonoff SNZB-05',
-      model: 'SNZB-05 (Czujnik zalania woda)',
-      category: 'water_leak',
-      vendor: 'SONOFF',
-      last_seen: now.toISOString(),
-      battery: 98,
-      water_leak: false,
-      last_temperature: null,
-      last_humidity: null,
-      linkquality: 122,
-    },
-    {
-      ieee_address: '0x00124b002b11aa07',
-      friendly_name: 'Biuro - Tuya mmWave Radar TS0601',
-      model: 'TS0601 (Radar obecnosci czlowieka)',
-      category: 'occupancy',
-      vendor: 'Tuya',
-      last_seen: now.toISOString(),
-      battery: null,
-      occupancy: true,
-      illuminance: 380,
-      last_temperature: null,
-      last_humidity: null,
-      linkquality: 148,
-    },
-    {
-      ieee_address: '0x00124b002b11aa08',
-      friendly_name: 'Pralka - Tuya Smart Plug TS011F',
-      model: 'TS011F (Gniazdo z licznikiem energii)',
-      category: 'plug',
-      vendor: 'Tuya',
-      last_seen: now.toISOString(),
-      battery: null,
-      state: 'OFF',
-      power: 0.0,
-      voltage: 232.1,
-      current: 0.0,
-      energy: 28.65,
-      last_temperature: null,
-      last_humidity: null,
-      linkquality: 130,
-    },
-    {
-      ieee_address: '0x00124b002b11aa09',
-      friendly_name: 'Salon - Sonoff SNZB-02D LCD',
-      model: 'SNZB-02D (Termohigrometr LCD)',
-      category: 'sensor',
-      vendor: 'SONOFF',
-      last_seen: now.toISOString(),
-      battery: 89,
-      last_temperature: 21.8,
-      last_humidity: 48.2,
-      linkquality: 140,
-    },
-    {
-      ieee_address: 'tuya_gow007_wifi_fan',
-      friendly_name: 'Salon - Gotze & Jensen GOW 007 7w1',
-      model: 'GOW 007 7w1 (Wentylator kolumnowy WiFi Tuya)',
-      category: 'fan',
-      vendor: 'Tuya',
-      last_seen: now.toISOString(),
-      battery: null,
-      state: 'ON',
-      fan_speed: 6,
-      fan_mode: 'natural',
-      fan_oscillation: true,
-      fan_timer: 2,
-      fan_ionizer: true,
-      fan_humidifier: true,
-      fan_uv: true,
-      power: 45.0,
-      voltage: 230.0,
-      last_temperature: 22.1,
-      last_humidity: 52.0,
-      linkquality: 155,
-    },
-  ];
-
-  demoList.forEach((d) => {
-    devices.set(d.ieee_address, d);
-
-    // Wygeneruj historie punktow
-    const historyList: TelemetryPoint[] = [];
-    for (let i = 12; i >= 0; i--) {
-      const ptTime = new Date(now.getTime() - i * 15 * 60 * 1000).toISOString();
-      historyList.push({
-        id: currentId++,
-        device_ieee: d.ieee_address,
-        temperature: d.last_temperature !== null ? parseFloat((d.last_temperature + Math.sin(i / 2) * 0.4).toFixed(1)) : null,
-        humidity: d.last_humidity !== null ? parseFloat((d.last_humidity + Math.cos(i / 2) * 1.2).toFixed(1)) : null,
-        battery: d.battery,
-        linkquality: d.linkquality,
-        power: d.power !== undefined ? d.power : null,
-        energy: d.energy !== undefined ? d.energy : null,
-        setpoint: d.current_heating_setpoint !== undefined ? d.current_heating_setpoint : null,
-        state: d.state !== undefined ? d.state : null,
-        timestamp: ptTime,
-      });
-    }
-    telemetryStore.set(d.ieee_address, historyList);
-  });
-
-  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
-  res.json({ success: true, count: demoList.length, devices: demoList });
-});
-
-// 5d. Oficjalna lista wspieranych modeli Sonoff & Tuya
+// 5d. Oficjalna lista wspieranych modeli Sonoff & Tuya (katalog statyczny)
 app.get('/api/catalog', (_req: Request, res: Response) => {
   res.json({
     brands: ['Sonoff', 'Tuya'],
@@ -1498,47 +1275,6 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
       output: msg,
     });
   }
-});
-
-// 19. Reczne dodanie lub powiazanie wentylatora Gotze & Jensen GOW 007 (Tuya WiFi)
-app.post('/api/devices/tuya-fan/add', (req: Request, res: Response) => {
-  const { name, ip_address, device_id } = req.body || {};
-  const fanIeee = device_id ? `tuya_gow007_${device_id}` : `tuya_gow007_${Date.now().toString().slice(-6)}`;
-  const now = new Date();
-
-  const fanDevice: Device = {
-    ieee_address: fanIeee,
-    friendly_name: name || 'Gotze & Jensen GOW 007 7w1',
-    model: 'GOW 007 7w1 (Tuya WiFi Fan)',
-    category: 'fan',
-    vendor: 'Tuya',
-    last_seen: now.toISOString(),
-    battery: null,
-    state: 'ON',
-    fan_speed: 4,
-    fan_mode: 'normal',
-    fan_oscillation: false,
-    fan_timer: 0,
-    fan_ionizer: true,
-    fan_humidifier: true,
-    fan_uv: true,
-    power: 38.5,
-    voltage: 230.0,
-    last_temperature: 22.0,
-    last_humidity: 50.0,
-    linkquality: 160,
-  };
-
-  devices.set(fanIeee, fanDevice);
-
-  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
-  broadcastEvent({ type: 'device_updated', device: fanDevice });
-
-  res.json({
-    success: true,
-    device: fanDevice,
-    note: `Dodano wentylator GOW 007 (IP: ${ip_address || 'lokalny auto-discovery'}). Gotowy do sterowania.`,
-  });
 });
 
 // 9. API do pobierania / odczytu plikow zrodlowych wygenerowanych dla uzytkownika

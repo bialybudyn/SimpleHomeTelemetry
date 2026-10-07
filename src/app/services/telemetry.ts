@@ -189,7 +189,7 @@ export class Telemetry {
     });
   }
 
-  triggerPermitJoin(duration = 60): void {
+  triggerPermitJoin(duration = 160): void {
     this.http.post<{ status: string; duration: number }>('/api/permit-join', { duration }).subscribe({
       next: (res) => {
         this.startPairingCountdown(res.duration || duration);
@@ -317,21 +317,6 @@ export class Telemetry {
     });
   }
 
-  loadDemoCatalog(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; devices: Device[] }>('/api/demo-catalog', {}).subscribe({
-        next: (res) => {
-          if (res?.devices) {
-            this.devices.set(res.devices);
-            this.lastTransmissionTime.set(new Date().toLocaleTimeString());
-          }
-          resolve(true);
-        },
-        error: () => resolve(false),
-      });
-    });
-  }
-
   inspectServices(): Promise<ServicesInspectionReport | null> {
     this.isInspectingServices.set(true);
     return new Promise((resolve) => {
@@ -375,37 +360,9 @@ export class Telemetry {
     });
   }
 
-  addTuyaFan(name?: string, ip?: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; device: Device }>('/api/devices/tuya-fan/add', { name, ip_address: ip }).subscribe({
-        next: (res) => {
-          if (res?.device) {
-            this.fetchDevices();
-          }
-          resolve(true);
-        },
-        error: () => resolve(false),
-      });
-    });
-  }
-
-  addDemoDevice(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; device: Device }>('/api/demo-device', {}).subscribe({
-        next: (res) => {
-          if (res?.device) {
-            this.fetchDevices();
-          }
-          resolve(true);
-        },
-        error: () => resolve(false),
-      });
-    });
-  }
-
   resetAllData(): Promise<boolean> {
     return new Promise((resolve) => {
-      this.http.post('/api/reset-data', {}).subscribe({
+      this.http.post('/api/devices/reset', {}).subscribe({
         next: () => {
           this.devices.set([]);
           this.notifications.set([]);

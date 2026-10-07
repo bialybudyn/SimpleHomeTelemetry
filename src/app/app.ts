@@ -104,10 +104,6 @@ export class App {
     this.selectedCategoryFilter.set(filter);
   }
 
-  addTuyaFanDevice(): void {
-    this.telemetry.addTuyaFan();
-  }
-
   openAnalytics(device: Device): void {
     this.selectedDeviceForModal.set(device);
   }
@@ -139,19 +135,11 @@ export class App {
   }
 
   triggerPairing(): void {
-    this.telemetry.triggerPermitJoin(60);
+    this.telemetry.triggerPermitJoin(160);
   }
 
   handleDeviceCommand(event: { device: Device; command: Record<string, unknown> }): void {
     this.telemetry.sendDeviceCommand(event.device.ieee_address, event.command);
-  }
-
-  addDemoSensor(): void {
-    this.telemetry.addDemoDevice();
-  }
-
-  loadFullDemoCatalog(): void {
-    this.telemetry.loadDemoCatalog();
   }
 
   resetData(): void {

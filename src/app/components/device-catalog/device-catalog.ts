@@ -32,11 +32,12 @@ import { DeviceCatalogItem } from '../../models/telemetry.models';
         <!-- Szybkie akcje -->
         <div class="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
-            (click)="loadDemoFamily()"
-            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-950/40 transition-all cursor-pointer"
+            (click)="telemetry.triggerPermitJoin(160)"
+            [disabled]="telemetry.isPairing()"
+            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 text-white text-xs font-semibold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
           >
-            <mat-icon class="text-sm !w-4 !h-4">add_circle</mat-icon>
-            <span>Załaduj zestaw demonstracyjny (Sonoff & Tuya)</span>
+            <mat-icon class="text-sm !w-4 !h-4">{{ telemetry.isPairing() ? 'refresh' : 'sensors' }}</mat-icon>
+            <span>{{ telemetry.isPairing() ? 'Parowanie (' + telemetry.pairingRemainingSeconds() + 's)' : 'Włącz tryb parowania (160s)' }}</span>
           </button>
           <a
             href="https://sonoff.tech/pl-pl"
@@ -293,6 +294,17 @@ export class DeviceCatalog {
       pairingGuide: 'Przytrzymaj przycisk parowania z tyłu obudowy przez 5 sekund, aż ikona sygnału na ekranie zacznie migać.',
     },
     {
+      id: 'sonoff-snzb-02',
+      brand: 'Sonoff',
+      model: 'SNZB-02',
+      name: 'Sonoff SNZB-02 Czujnik Temp. i Wilgotności v1 (Bez LCD)',
+      category: 'sensor',
+      description: 'Klasyczny miniaturowy czujnik temperatury i wilgotności Zigbee 3.0 v1 (wersja bez wyświetlacza LCD). Dyskretny, zasilany baterią CR2450, idealny do schowania w pomieszczeniach.',
+      features: ['Pomiar temperatury (°C)', 'Pomiar wilgotności (%RH)', 'Raport poziomu baterii', 'Kompaktowa obudowa', 'Protokół Zigbee 3.0'],
+      batteryPowered: true,
+      pairingGuide: 'Wciśnij szpilką przycisk reset na bocznej krawędzi obudowy przez 5 sekund, aż czerwona dioda LED zamiga 3 razy.',
+    },
+    {
       id: 'tuya-ts011f',
       brand: 'Tuya',
       model: 'TS011F',
@@ -329,12 +341,12 @@ export class DeviceCatalog {
       id: 'gotze-jensen-gow007',
       brand: 'Tuya',
       model: 'GOW 007 7w1',
-      name: 'Götze & Jensen GOW 007 7w1 (Wentylator Kolumnowy WiFi Tuya)',
+      name: 'Götze & Jensen GOW 007 7w1 (Wentylator Kolumnowy Wi-Fi Tuya)',
       category: 'fan',
-      description: 'Zaawansowany wentylator kolumnowy 7w1 łączący się przez sieć Wi-Fi z ekosystemem Tuya Smart / Smart Life. Posiada 12 prędkości nawiewu, oscylację, jonizację powietrza, nawilżacz mgiełkowy, lampę UV sterylizującą, timer oraz tryby nocny i naturalnego wiatru.',
-      features: ['12 biegów prędkości', 'Jonizator powietrza (Ion)', 'Nawilżacz ultradźwiękowy', 'Lampa UV sterylizująca', 'Oscylacja pozioma 70°', 'Timer do 12h', 'Protokół Tuya WiFi'],
+      description: 'Wentylator 7w1 sterowany przez domową sieć Wi-Fi w ekosystemie Tuya Smart / Smart Life (nie wymaga bramki Zigbee). Posiada 12 prędkości nawiewu, oscylację 70°, jonizację powietrza, nawilżacz mgiełkowy, lampę UV sterylizującą oraz timer.',
+      features: ['12 biegów prędkości', 'Jonizator powietrza (Ion)', 'Nawilżacz ultradźwiękowy', 'Lampa UV sterylizująca', 'Oscylacja pozioma 70°', 'Timer do 12h', 'Komunikacja Wi-Fi (Tuya Cloud / Local)'],
       batteryPowered: false,
-      pairingGuide: 'Podłącz do 230V, przytrzymaj przycisk Wi-Fi / Zasilania na panelu wentylatora przez 5 sekund aż ikona Wi-Fi zacznie szybko mrugać (tryb Tuya EZ/AP pairing).',
+      pairingGuide: 'Urządzenie sieciowe Wi-Fi (nie wymaga parowania Zigbee permit-join). Podłącz do 230V, przytrzymaj przycisk Wi-Fi/Zasilania przez 5 s aż ikona Wi-Fi zamiga, a następnie sparuj w aplikacji Tuya / Smart Life w domowej sieci Wi-Fi.',
     },
   ];
 
@@ -342,10 +354,6 @@ export class DeviceCatalog {
     const brand = this.selectedBrand();
     if (brand === 'all') return this.catalogItems;
     return this.catalogItems.filter((i) => i.brand === brand);
-  }
-
-  loadDemoFamily(): void {
-    this.telemetry.loadDemoCatalog();
   }
 
   getCategoryIcon(cat: string): string {
