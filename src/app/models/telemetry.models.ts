@@ -1,4 +1,4 @@
-export type DeviceCategory = 'climate' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
+export type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
 
 export interface Device {
   ieee_address: string;
@@ -10,6 +10,15 @@ export interface Device {
   battery: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
+
+  // Wentylator kolumnowy Tuya / Gotze & Jensen GOW 007 7w1 (WiFi / Tuya)
+  fan_speed?: number | string | null;       // 1 - 12 (biegi nawiewu)
+  fan_mode?: 'normal' | 'natural' | 'sleep' | 'auto' | string | null;
+  fan_oscillation?: boolean | null;         // Oscylacja pozioma / obrót
+  fan_timer?: number | null;                // Timer wyłączenia (h)
+  fan_ionizer?: boolean | null;             // Jonizacja powietrza (7w1)
+  fan_humidifier?: boolean | null;          // Nawilżacz ultradźwiękowy (7w1)
+  fan_uv?: boolean | null;                  // Lampa UV sterylizująca (7w1)
 
   // Czujniki temperatury i wilgotności (Sonoff SNZB-02 / SNZB-02D / Tuya TS0201)
   last_temperature: number | null;
@@ -154,4 +163,44 @@ export interface MqttStatusResponse {
     systemd_zigbee2mqtt: string;
     restart_command: string;
   };
+}
+
+export interface ServiceInspectionResult {
+  service: string;
+  name: string;
+  installed: boolean;
+  active: boolean;
+  config_path?: string;
+  config_exists: boolean;
+  config_valid: boolean;
+  config_summary?: string;
+  notes?: string;
+  recommendation?: string;
+}
+
+export interface ServicesInspectionReport {
+  timestamp: string;
+  overall_status: 'ok' | 'needs_attention' | 'missing';
+  services: ServiceInspectionResult[];
+  environment: {
+    node_version: string;
+    os_info?: string;
+    current_dir: string;
+  };
+}
+
+export interface GitUpdateResult {
+  success: boolean;
+  message: string;
+  current_commit?: string;
+  remote_commit?: string;
+  updated: boolean;
+  output: string;
+}
+
+export interface TuyaFanConfig {
+  device_id: string;
+  local_key?: string;
+  ip_address: string;
+  protocol_version: '3.3' | '3.4' | '3.5';
 }

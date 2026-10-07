@@ -48,6 +48,24 @@ elif [ -f "$USER_HOME/SimpleHomeTelemetry/src/server.ts" ]; then
   PANEL_SOURCE="$USER_HOME/SimpleHomeTelemetry"
 fi
 
+# ==============================================================================
+# 0. Czyszczenie środowiska ze starych, zawieszonych procesów i konfliktów
+# (Z zachowaniem bazy danych sparowanych urządzeń /opt/zigbee2mqtt/data/database.db)
+# ==============================================================================
+echo -e "${YELLOW}[CZYSZCZENIE] Zatrzymywanie usług i zwalnianie portów (1883, 8080, 3000)...${NC}"
+systemctl stop iot-telemetry.service 2>/dev/null || true
+systemctl stop zigbee2mqtt.service 2>/dev/null || true
+
+# Bezpieczne zakończenie ew. zawieszonych procesów node lub mosquitto
+pkill -f "dist/app/server/server.mjs" 2>/dev/null || true
+pkill -f "opt/zigbee-telemetry-panel" 2>/dev/null || true
+
+# Zabezpieczenie bazy danych Zigbee2MQTT przed czyszczeniem
+if [ -f "/opt/zigbee2mqtt/data/database.db" ]; then
+  echo -e "${GREEN}[BEZPIECZEŃSTWO] Zachowano bazę sparowanych urządzeń Zigbee: /opt/zigbee2mqtt/data/database.db${NC}"
+  cp /opt/zigbee2mqtt/data/database.db /opt/zigbee2mqtt/data/database.db.autobak 2>/dev/null || true
+fi
+
 echo -e "${YELLOW}[1/7] Aktualizacja repozytoriów systemowych i instalacja narzędzi bazowych...${NC}"
 apt-get update -y
 apt-get install -y curl wget git gnupg gpg ca-certificates build-essential sqlite3 libsqlite3-dev socat ufw avahi-daemon libnss-mdns
@@ -141,40 +159,74 @@ elif [ "$DONGLE_CHOICE" -eq 2 ]; then
   usermod -aG dialout "$REAL_USER" || true
 else
   read -rp "Podaj pełny ciąg połączenia (np. tcp://192.168.1.50:6638): " CUSTOM_PORT
-  DONGLE_PORT=${CUSTOM_PORT:-"tcp://Dongle-M.local:6638"}
+  CUSTOM_PORT=${CUSTOM_PORT:-"tcp://Dongle-M.local:6638"}
+  # Jeśli użytkownik podał sam IP:port (np. 10.0.0.2:6638), dodaj automatycznie prefiks tcp://
+  if [[ ! "$CUSTOM_PORT" =~ ^/dev/ ]] && [[ ! "$CUSTOM_PORT" =~ ^tcp:// ]]; then
+    CUSTOM_PORT="tcp://${CUSTOM_PORT}"
+  fi
+  DONGLE_PORT="$CUSTOM_PORT"
 fi
 
 echo -e "${GREEN}[OK] Wybrano port koordynatora: ${DONGLE_PORT}${NC}"
 
-# 5. Instalacja Zigbee2MQTT w /opt/zigbee2mqtt
-echo -e "\n${YELLOW}[5/7] Instalacja Zigbee2MQTT w katalogu /opt/zigbee2mqtt...${NC}"
+# 5. Instalacja lub weryfikacja istniejącego Zigbee2MQTT w /opt/zigbee2mqtt
+echo -e "\n${YELLOW}[5/7] Sprawdzanie i konfiguracja Zigbee2MQTT w /opt/zigbee2mqtt...${NC}"
 
-# Instalacja pnpm (oficjalny menedżer pakietów dla Zigbee2MQTT v2)
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo -e "${CYAN}Instalacja menedżera pnpm (rekomendowany przez Zigbee2MQTT)...${NC}"
-  npm install -g pnpm || true
-fi
-
-mkdir -p /opt/zigbee2mqtt
-chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
-
-if [ ! -d "/opt/zigbee2mqtt/.git" ]; then
-  git clone --depth 1 https://github.com/Koenkk/zigbee2mqtt.git /opt/zigbee2mqtt
-fi
-
-chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
-cd /opt/zigbee2mqtt
-
-echo -e "${CYAN}Pobieranie i instalacja zależności Zigbee2MQTT...${NC}"
-if command -v pnpm >/dev/null 2>&1; then
-  sudo -u "$REAL_USER" pnpm install --frozen-lockfile || sudo -u "$REAL_USER" pnpm install
+if [ -f "/opt/zigbee2mqtt/index.js" ]; then
+  echo -e "${GREEN}[OK] Wykryto już zainstalowaną instancję Zigbee2MQTT w /opt/zigbee2mqtt.${NC}"
+  echo -e "${CYAN}Weryfikacja konfiguracji koordynatora Sonoff Dongle-M (adapter: ember, port: ${DONGLE_PORT})...${NC}"
 else
-  sudo -u "$REAL_USER" npm install --no-audit --no-fund
+  # Instalacja pnpm (oficjalny menedżer pakietów dla Zigbee2MQTT v2)
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo -e "${CYAN}Instalacja menedżera pnpm (rekomendowany przez Zigbee2MQTT)...${NC}"
+    npm install -g pnpm || true
+  fi
+
+  mkdir -p /opt/zigbee2mqtt
+  chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
+
+  if [ ! -d "/opt/zigbee2mqtt/.git" ]; then
+    git clone --depth 1 https://github.com/Koenkk/zigbee2mqtt.git /opt/zigbee2mqtt
+  fi
+
+  chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
+  cd /opt/zigbee2mqtt
+
+  echo -e "${CYAN}Pobieranie i instalacja zależności Zigbee2MQTT...${NC}"
+  if command -v pnpm >/dev/null 2>&1; then
+    sudo -u "$REAL_USER" pnpm install --frozen-lockfile || sudo -u "$REAL_USER" pnpm install
+  else
+    sudo -u "$REAL_USER" npm install --no-audit --no-fund
+  fi
 fi
 
-# Przygotowanie konfiguracji Zigbee2MQTT
+# Przygotowanie lub aktualizacja konfiguracji Zigbee2MQTT
 mkdir -p /opt/zigbee2mqtt/data
-cat << EOF > /opt/zigbee2mqtt/data/configuration.yaml
+Z2M_CONF="/opt/zigbee2mqtt/data/configuration.yaml"
+
+if [ -f "$Z2M_CONF" ]; then
+  echo -e "${CYAN}Wykryto istniejący plik configuration.yaml. Sprawdzanie parametrów...${NC}"
+  # Wykonaj kopię zapasową przed modyfikacją
+  cp "$Z2M_CONF" "${Z2M_CONF}.bak" 2>/dev/null || true
+
+  # Sprawdź czy jest zdefiniowany adapter: ember (dla układu EFR32MG24)
+  if ! grep -q "adapter:.*ember" "$Z2M_CONF"; then
+    echo -e "${YELLOW}[INFO] Aktualizacja adaptera na 'ember' dla układu EFR32MG24...${NC}"
+    if grep -q "serial:" "$Z2M_CONF"; then
+      sed -i '/serial:/a \  adapter: ember' "$Z2M_CONF"
+    else
+      echo -e "\nserial:\n  port: ${DONGLE_PORT}\n  adapter: ember\n  baudrate: 115200" >> "$Z2M_CONF"
+    fi
+  fi
+
+  # Sprawdź port
+  if ! grep -q "port:" "$Z2M_CONF"; then
+    sed -i "/serial:/a \  port: ${DONGLE_PORT}" "$Z2M_CONF"
+  fi
+  echo -e "${GREEN}[OK] Konfiguracja Zigbee2MQTT zweryfikowana i zaktualizowana.${NC}"
+else
+  echo -e "${CYAN}Tworzenie nowej zoptymalizowanej konfiguracji Zigbee2MQTT...${NC}"
+  cat << EOF > "$Z2M_CONF"
 homeassistant: false
 permit_join: false
 
@@ -198,6 +250,7 @@ advanced:
   channel: 15
   log_level: info
 EOF
+fi
 
 chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt/data
 
@@ -253,12 +306,14 @@ echo -e "${CYAN}Instalacja zależności panelu w $APP_DIR...${NC}"
 cat << 'EOF' > "$APP_DIR/.npmrc"
 ignored-builds=[]
 side-effects-cache=true
+auto-install-peers=true
 EOF
 chown "$REAL_USER":"$REAL_USER" "$APP_DIR/.npmrc" 2>/dev/null || true
 
+# W pnpm v10/v11 parametr --config.ignored-builds='[]' lub flaga --ignore-scripts / --no-frozen-lockfile
 if command -v pnpm >/dev/null 2>&1; then
-  # Uruchom pnpm install z zezwoleniem na skrypty kompilacji natywnych zależności (np. esbuild)
-  sudo -u "$REAL_USER" pnpm install --config.ignored-builds='[]' || sudo -u "$REAL_USER" pnpm install || sudo -u "$REAL_USER" npm install --no-audit --no-fund
+  sudo -u "$REAL_USER" pnpm config set ignored-builds '[]' 2>/dev/null || true
+  sudo -u "$REAL_USER" pnpm install --no-frozen-lockfile --ignore-scripts || sudo -u "$REAL_USER" pnpm install || ( rm -rf node_modules package-lock.json && sudo -u "$REAL_USER" npm install --no-audit --no-fund )
 else
   sudo -u "$REAL_USER" npm install --no-audit --no-fund
 fi

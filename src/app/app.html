@@ -355,6 +355,14 @@
           <span class="text-white font-bold ml-1">{{ telemetry.devices().length }}</span>
         </div>
         <button
+          (click)="addTuyaFanDevice()"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
+          title="Dodaj wentylator kolumnowy Gotze & Jensen GOW 007 7w1 (Tuya WiFi)"
+        >
+          <mat-icon class="text-xs !w-3.5 !h-3.5">mode_fan</mat-icon>
+          <span>+ Wentylator GOW 007</span>
+        </button>
+        <button
           (click)="loadFullDemoCatalog()"
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
           title="Załaduj próbki urządzeń Sonoff (TRVZB, S26R2, ZBMINIR2) i Tuya"
@@ -376,6 +384,19 @@
           [class.text-slate-400]="selectedCategoryFilter() !== 'all'"
         >
           Wszystkie ({{ telemetry.devices().length }})
+        </button>
+
+        <button
+          (click)="setCategoryFilter('fan')"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+          [class.bg-cyan-500/20]="selectedCategoryFilter() === 'fan'"
+          [class.text-cyan-300]="selectedCategoryFilter() === 'fan'"
+          [class.border]="selectedCategoryFilter() === 'fan'"
+          [class.border-cyan-500/30]="selectedCategoryFilter() === 'fan'"
+          [class.text-slate-400]="selectedCategoryFilter() !== 'fan'"
+        >
+          <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">mode_fan</mat-icon>
+          <span>Wentylatory 7w1 ({{ fanCount() }})</span>
         </button>
 
         <button

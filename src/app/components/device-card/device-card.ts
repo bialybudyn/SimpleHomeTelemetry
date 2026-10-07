@@ -185,6 +185,133 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
         </div>
       }
 
+      <!-- 1b. WENTYLATOR KOLUMNOWY 7w1 (Gotze & Jensen GOW 007 Tuya WiFi) -->
+      @else if (category() === 'fan') {
+        <div class="space-y-3 mb-4">
+          <!-- Górny pasek wentylatora: Zasilanie + Bieg nawiewu (1-12) -->
+          <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+                <mat-icon class="text-cyan-400 text-xs !w-3.5 !h-3.5" [class.animate-spin]="isStateOn()">mode_fan</mat-icon>
+                <span>Bieg nawiewu (1-12)</span>
+              </div>
+              <div class="flex items-baseline gap-1 mt-0.5">
+                <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
+                  {{ isStateOn() ? (device().fan_speed ?? 1) : 'OFF' }}
+                </span>
+                @if (isStateOn()) {
+                  <span class="text-xs font-mono text-cyan-400">/ 12</span>
+                }
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-800">
+              <button
+                (click)="adjustFanSpeed(-1, $event)"
+                class="w-7 h-7 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center font-bold text-sm transition-colors cursor-pointer"
+                title="Zmniejsz bieg wentylatora"
+              >
+                -
+              </button>
+              <button
+                (click)="adjustFanSpeed(1, $event)"
+                class="w-7 h-7 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white flex items-center justify-center font-bold text-sm transition-colors cursor-pointer shadow-sm shadow-cyan-950"
+                title="Zwiększ bieg wentylatora"
+              >
+                +
+              </button>
+              <button
+                (click)="togglePowerState($event)"
+                class="px-2.5 h-7 rounded-md font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer ml-1"
+                [class.bg-emerald-600]="isStateOn()"
+                [class.text-white]="isStateOn()"
+                [class.bg-slate-800]="!isStateOn()"
+                [class.text-slate-400]="!isStateOn()"
+                title="Włącz / Wyłącz wentylator"
+              >
+                <mat-icon class="text-xs !w-3.5 !h-3.5">power_settings_new</mat-icon>
+                <span>{{ isStateOn() ? 'ON' : 'OFF' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Funkcje 7w1: Jonizacja, Nawilżacz, Lampa UV, Oscylacja -->
+          <div class="grid grid-cols-4 gap-1.5 text-[10px] font-mono">
+            <button
+              (click)="toggleFanFeature('fan_oscillation', $event)"
+              class="p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer"
+              [class.bg-cyan-950/60]="device().fan_oscillation"
+              [class.border-cyan-700/80]="device().fan_oscillation"
+              [class.text-cyan-300]="device().fan_oscillation"
+              [class.bg-slate-950]="!device().fan_oscillation"
+              [class.border-slate-800]="!device().fan_oscillation"
+              [class.text-slate-400]="!device().fan_oscillation"
+              title="Oscylacja obrotowa"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">sync</mat-icon>
+              <span>Obrót</span>
+            </button>
+
+            <button
+              (click)="toggleFanFeature('fan_ionizer', $event)"
+              class="p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer"
+              [class.bg-emerald-950/60]="device().fan_ionizer"
+              [class.border-emerald-700/80]="device().fan_ionizer"
+              [class.text-emerald-300]="device().fan_ionizer"
+              [class.bg-slate-950]="!device().fan_ionizer"
+              [class.border-slate-800]="!device().fan_ionizer"
+              [class.text-slate-400]="!device().fan_ionizer"
+              title="Jonizator powietrza 7w1"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">air</mat-icon>
+              <span>Jonizator</span>
+            </button>
+
+            <button
+              (click)="toggleFanFeature('fan_humidifier', $event)"
+              class="p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer"
+              [class.bg-blue-950/60]="device().fan_humidifier"
+              [class.border-blue-700/80]="device().fan_humidifier"
+              [class.text-blue-300]="device().fan_humidifier"
+              [class.bg-slate-950]="!device().fan_humidifier"
+              [class.border-slate-800]="!device().fan_humidifier"
+              [class.text-slate-400]="!device().fan_humidifier"
+              title="Nawilżacz ultradźwiękowy 7w1"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">water_drop</mat-icon>
+              <span>Nawilżacz</span>
+            </button>
+
+            <button
+              (click)="toggleFanFeature('fan_uv', $event)"
+              class="p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer"
+              [class.bg-purple-950/60]="device().fan_uv"
+              [class.border-purple-700/80]="device().fan_uv"
+              [class.text-purple-300]="device().fan_uv"
+              [class.bg-slate-950]="!device().fan_uv"
+              [class.border-slate-800]="!device().fan_uv"
+              [class.text-slate-400]="!device().fan_uv"
+              title="Lampa UV sterylizująca 7w1"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">wb_iridescent</mat-icon>
+              <span>Lampa UV</span>
+            </button>
+          </div>
+
+          <!-- Pomiary telemetryczne wentylatora (Moc, Temperatura otoczenia) -->
+          <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+            <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+              <span class="text-slate-400 text-[11px]">Moc pobierana:</span>
+              <span class="text-emerald-400 font-bold">{{ device().power ?? 45 }} W</span>
+            </div>
+            <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+              <span class="text-slate-400 text-[11px]">Tryb:</span>
+              <span class="text-cyan-300 font-bold capitalize">{{ device().fan_mode ?? 'normal' }}</span>
+            </div>
+          </div>
+        </div>
+      }
+
       <!-- 2. INTELIGENTNE GNIAZDKO (Sonoff S26R2ZB / S40ZB / Tuya TS011F) -->
       @else if (category() === 'plug') {
         <div class="space-y-3 mb-4">
@@ -419,6 +546,7 @@ export class DeviceCard {
     const d = this.device();
     if (d.category) return d.category;
     const m = (d.model || '').toLowerCase();
+    if (m.includes('gow') || m.includes('gow 007') || m.includes('fan') || m.includes('wentylator') || d.fan_speed !== undefined) return 'fan';
     if (m.includes('trv') || m.includes('thermostat') || d.current_heating_setpoint !== undefined) return 'climate';
     if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || d.power !== undefined) return 'plug';
     if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || (d.state !== undefined && d.power === undefined)) return 'switch';
@@ -430,6 +558,8 @@ export class DeviceCard {
 
   readonly categoryBadgeLabel = computed(() => {
     switch (this.category()) {
+      case 'fan':
+        return 'Wentylator 7w1';
       case 'climate':
         return 'Głowica TRVZB';
       case 'plug':
@@ -449,6 +579,8 @@ export class DeviceCard {
 
   readonly categoryBadgeClass = computed(() => {
     switch (this.category()) {
+      case 'fan':
+        return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
       case 'climate':
         return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
       case 'plug':
@@ -583,6 +715,25 @@ export class DeviceCard {
     this.commandRequested.emit({
       device: this.device(),
       command: { child_lock: nextLock },
+    });
+  }
+
+  adjustFanSpeed(delta: number, event: MouseEvent): void {
+    event.stopPropagation();
+    const current = Number(this.device().fan_speed ?? 1);
+    const next = Math.min(12, Math.max(1, current + delta));
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { fan_speed: next, state: 'ON' },
+    });
+  }
+
+  toggleFanFeature(feature: 'fan_oscillation' | 'fan_ionizer' | 'fan_humidifier' | 'fan_uv', event: MouseEvent): void {
+    event.stopPropagation();
+    const currentVal = Boolean(this.device()[feature]);
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { [feature]: !currentVal },
     });
   }
 }

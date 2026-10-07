@@ -5,9 +5,11 @@ import {
   Device,
   DongleMaxConfig,
   DongleMaxTestResult,
+  GitUpdateResult,
   HistoryResponse,
   MqttStatus,
   MqttStatusResponse,
+  ServicesInspectionReport,
   SystemNotification,
   SystemStatus,
   TelemetryPoint,
@@ -43,6 +45,12 @@ export class Telemetry {
   // Powiadomienia systemowe (w tym alerty baterii < 15%)
   readonly notifications = signal<SystemNotification[]>([]);
   readonly batteryAlertToast = signal<SystemNotification | null>(null);
+
+  // Inspekcja usług i aktualizacja Git
+  readonly servicesReport = signal<ServicesInspectionReport | null>(null);
+  readonly isInspectingServices = signal<boolean>(false);
+  readonly isUpdatingGit = signal<boolean>(false);
+  readonly gitUpdateResult = signal<GitUpdateResult | null>(null);
 
   // Progi alarmowe
   readonly tempMaxLimit = signal<number>(28.0);
@@ -316,6 +324,63 @@ export class Telemetry {
           if (res?.devices) {
             this.devices.set(res.devices);
             this.lastTransmissionTime.set(new Date().toLocaleTimeString());
+          }
+          resolve(true);
+        },
+        error: () => resolve(false),
+      });
+    });
+  }
+
+  inspectServices(): Promise<ServicesInspectionReport | null> {
+    this.isInspectingServices.set(true);
+    return new Promise((resolve) => {
+      this.http.get<ServicesInspectionReport>('/api/system/inspect-services').subscribe({
+        next: (rep) => {
+          this.servicesReport.set(rep);
+          this.isInspectingServices.set(false);
+          resolve(rep);
+        },
+        error: (err) => {
+          console.error('Błąd inspekcji usług:', err);
+          this.isInspectingServices.set(false);
+          resolve(null);
+        },
+      });
+    });
+  }
+
+  runGitUpdate(): Promise<GitUpdateResult | null> {
+    this.isUpdatingGit.set(true);
+    return new Promise((resolve) => {
+      this.http.post<GitUpdateResult>('/api/system/git-update', {}).subscribe({
+        next: (res) => {
+          this.gitUpdateResult.set(res);
+          this.isUpdatingGit.set(false);
+          resolve(res);
+        },
+        error: (err) => {
+          console.error('Błąd git pull:', err);
+          const failRes: GitUpdateResult = {
+            success: false,
+            updated: false,
+            message: 'Błąd połączenia z serwerem podczas aktualizacji Git',
+            output: String(err?.message || err),
+          };
+          this.gitUpdateResult.set(failRes);
+          this.isUpdatingGit.set(false);
+          resolve(failRes);
+        },
+      });
+    });
+  }
+
+  addTuyaFan(name?: string, ip?: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; device: Device }>('/api/devices/tuya-fan/add', { name, ip_address: ip }).subscribe({
+        next: (res) => {
+          if (res?.device) {
+            this.fetchDevices();
           }
           resolve(true);
         },

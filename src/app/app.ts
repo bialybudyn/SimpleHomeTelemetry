@@ -40,7 +40,7 @@ export class App {
   readonly telemetry = inject(Telemetry);
 
   readonly activeTab = signal<'dashboard' | 'installer' | 'catalog' | 'dongle-max' | 'analytics' | 'code' | 'android' | 'simulator'>('dashboard');
-  readonly selectedCategoryFilter = signal<'all' | 'climate' | 'plug' | 'switch' | 'sensor'>('all');
+  readonly selectedCategoryFilter = signal<'all' | 'fan' | 'climate' | 'plug' | 'switch' | 'sensor'>('all');
 
   readonly selectedDeviceForModal = signal<Device | null>(null);
   readonly renamingDevice = signal<Device | null>(null);
@@ -53,12 +53,17 @@ export class App {
 
     return list.filter((d) => {
       const cat = d.category || this.inferCategory(d);
+      if (filter === 'fan') return cat === 'fan';
       if (filter === 'climate') return cat === 'climate';
       if (filter === 'plug') return cat === 'plug';
       if (filter === 'switch') return cat === 'switch';
       if (filter === 'sensor') return cat === 'sensor' || cat === 'contact' || cat === 'occupancy' || cat === 'water_leak';
       return true;
     });
+  });
+
+  readonly fanCount = computed(() => {
+    return this.telemetry.devices().filter((d) => (d.category || this.inferCategory(d)) === 'fan').length;
   });
 
   readonly climateCount = computed(() => {
@@ -95,8 +100,12 @@ export class App {
     this.activeTab.set(tab);
   }
 
-  setCategoryFilter(filter: 'all' | 'climate' | 'plug' | 'switch' | 'sensor'): void {
+  setCategoryFilter(filter: 'all' | 'fan' | 'climate' | 'plug' | 'switch' | 'sensor'): void {
     this.selectedCategoryFilter.set(filter);
+  }
+
+  addTuyaFanDevice(): void {
+    this.telemetry.addTuyaFan();
   }
 
   openAnalytics(device: Device): void {

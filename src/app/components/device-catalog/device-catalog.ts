@@ -84,7 +84,7 @@ import { DeviceCatalogItem } from '../../models/telemetry.models';
             [class.text-slate-400]="selectedBrand() !== 'Tuya'"
           >
             <span class="w-2 h-2 rounded-full bg-cyan-500"></span>
-            <span>Tuya (3)</span>
+            <span>Tuya & WiFi (4)</span>
           </button>
         </div>
 
@@ -325,6 +325,17 @@ export class DeviceCatalog {
       batteryPowered: false,
       pairingGuide: 'Użyj przycisku reset i przytrzymaj przez 5 sekund do szybkiego migania diody.',
     },
+    {
+      id: 'gotze-jensen-gow007',
+      brand: 'Tuya',
+      model: 'GOW 007 7w1',
+      name: 'Götze & Jensen GOW 007 7w1 (Wentylator Kolumnowy WiFi Tuya)',
+      category: 'fan',
+      description: 'Zaawansowany wentylator kolumnowy 7w1 łączący się przez sieć Wi-Fi z ekosystemem Tuya Smart / Smart Life. Posiada 12 prędkości nawiewu, oscylację, jonizację powietrza, nawilżacz mgiełkowy, lampę UV sterylizującą, timer oraz tryby nocny i naturalnego wiatru.',
+      features: ['12 biegów prędkości', 'Jonizator powietrza (Ion)', 'Nawilżacz ultradźwiękowy', 'Lampa UV sterylizująca', 'Oscylacja pozioma 70°', 'Timer do 12h', 'Protokół Tuya WiFi'],
+      batteryPowered: false,
+      pairingGuide: 'Podłącz do 230V, przytrzymaj przycisk Wi-Fi / Zasilania na panelu wentylatora przez 5 sekund aż ikona Wi-Fi zacznie szybko mrugać (tryb Tuya EZ/AP pairing).',
+    },
   ];
 
   filteredCatalog(): DeviceCatalogItem[] {
@@ -339,6 +350,8 @@ export class DeviceCatalog {
 
   getCategoryIcon(cat: string): string {
     switch (cat) {
+      case 'fan':
+        return 'mode_fan';
       case 'climate':
         return 'thermostat';
       case 'plug':
@@ -358,6 +371,8 @@ export class DeviceCatalog {
 
   getCategoryIconBg(cat: string): string {
     switch (cat) {
+      case 'fan':
+        return 'bg-cyan-950/60 text-cyan-400 border-cyan-800/80';
       case 'climate':
         return 'bg-rose-950/60 text-rose-400 border-rose-800/80';
       case 'plug':

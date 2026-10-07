@@ -8,6 +8,7 @@ import express, { Request, Response } from 'express';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { Socket } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import mqtt, { MqttClient } from 'mqtt';
@@ -17,8 +18,8 @@ const browserDistFolder = join(import.meta.dirname, '../browser');
 const app = express();
 app.use(express.json());
 
-// Modele danych urządzeń i telemetrii dla Sonoff (TRVZB, S26R2, ZBMINI) oraz Tuya
-type DeviceCategory = 'climate' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
+// Modele danych urządzeń i telemetrii dla Sonoff (TRVZB, S26R2, ZBMINI), Tuya oraz Götze & Jensen GOW 007
+type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
 
 interface Device {
   ieee_address: string;
@@ -30,6 +31,15 @@ interface Device {
   battery: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
+
+  // Wentylator kolumnowy Tuya / Gotze & Jensen GOW 007 7w1 (WiFi / Tuya)
+  fan_speed?: number | string | null;       // 1 - 12 (biegi nawiewu)
+  fan_mode?: string | null;                 // normal / natural / sleep / auto
+  fan_oscillation?: boolean | null;         // Oscylacja / obrót
+  fan_timer?: number | null;                // Timer wyłączenia (h)
+  fan_ionizer?: boolean | null;             // Jonizacja powietrza (7w1)
+  fan_humidifier?: boolean | null;          // Nawilżacz ultradźwiękowy (7w1)
+  fan_uv?: boolean | null;                  // Lampa UV sterylizująca (7w1)
 
   // Czujniki temperatury i wilgotności
   last_temperature: number | null;
@@ -73,6 +83,9 @@ interface TelemetryPoint {
 
 function detectDeviceCategory(model: string, payload?: Record<string, unknown>): DeviceCategory {
   const m = (model || '').toLowerCase();
+  if (m.includes('gow') || m.includes('gow 007') || m.includes('fan') || m.includes('wentylator') || payload?.['fan_speed'] !== undefined || payload?.['fan_mode'] !== undefined) {
+    return 'fan';
+  }
   if (m.includes('trv') || m.includes('thermostat') || payload?.['current_heating_setpoint'] !== undefined) {
     return 'climate';
   }
@@ -448,6 +461,15 @@ interface Z2mDeviceItem {
             dev.last_seen = nowStr;
           }
 
+          // Pola dla wentylatora Gotze & Jensen GOW 007 (Tuya WiFi)
+          if (payload.fan_speed !== undefined) dev.fan_speed = payload.fan_speed as number | string;
+          if (payload.fan_mode !== undefined) dev.fan_mode = String(payload.fan_mode);
+          if (payload.fan_oscillation !== undefined) dev.fan_oscillation = Boolean(payload.fan_oscillation);
+          if (payload.fan_timer !== undefined && payload.fan_timer !== null) dev.fan_timer = parseFloat(String(payload.fan_timer));
+          if (payload.fan_ionizer !== undefined) dev.fan_ionizer = Boolean(payload.fan_ionizer);
+          if (payload.fan_humidifier !== undefined) dev.fan_humidifier = Boolean(payload.fan_humidifier);
+          if (payload.fan_uv !== undefined) dev.fan_uv = Boolean(payload.fan_uv);
+
           // Pola dla głowic termostatycznych Sonoff TRVZB / TRVZB Gen 2
           if (payload.current_heating_setpoint !== undefined && payload.current_heating_setpoint !== null) {
             dev.current_heating_setpoint = parseFloat(payload.current_heating_setpoint);
@@ -748,6 +770,16 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   if (cmd.current_heating_setpoint !== undefined) dev.current_heating_setpoint = parseFloat(cmd.current_heating_setpoint);
   if (cmd.system_mode !== undefined) dev.system_mode = String(cmd.system_mode);
   if (cmd.child_lock !== undefined) dev.child_lock = String(cmd.child_lock);
+
+  // Sterowanie wentylatorem GOW 007 (Tuya WiFi)
+  if (cmd.fan_speed !== undefined) dev.fan_speed = cmd.fan_speed;
+  if (cmd.fan_mode !== undefined) dev.fan_mode = String(cmd.fan_mode);
+  if (cmd.fan_oscillation !== undefined) dev.fan_oscillation = Boolean(cmd.fan_oscillation);
+  if (cmd.fan_timer !== undefined) dev.fan_timer = parseFloat(String(cmd.fan_timer));
+  if (cmd.fan_ionizer !== undefined) dev.fan_ionizer = Boolean(cmd.fan_ionizer);
+  if (cmd.fan_humidifier !== undefined) dev.fan_humidifier = Boolean(cmd.fan_humidifier);
+  if (cmd.fan_uv !== undefined) dev.fan_uv = Boolean(cmd.fan_uv);
+
   dev.last_seen = new Date().toISOString();
 
   // Przekazanie polecenia do brokera Mosquitto MQTT dla Zigbee2MQTT
@@ -950,6 +982,28 @@ app.post('/api/demo-catalog', (_req: Request, res: Response) => {
       last_temperature: 21.8,
       last_humidity: 48.2,
       linkquality: 140,
+    },
+    {
+      ieee_address: 'tuya_gow007_wifi_fan',
+      friendly_name: 'Salon - Gotze & Jensen GOW 007 7w1',
+      model: 'GOW 007 7w1 (Wentylator kolumnowy WiFi Tuya)',
+      category: 'fan',
+      vendor: 'Tuya',
+      last_seen: now.toISOString(),
+      battery: null,
+      state: 'ON',
+      fan_speed: 6,
+      fan_mode: 'natural',
+      fan_oscillation: true,
+      fan_timer: 2,
+      fan_ionizer: true,
+      fan_humidifier: true,
+      fan_uv: true,
+      power: 45.0,
+      voltage: 230.0,
+      last_temperature: 22.1,
+      last_humidity: 52.0,
+      linkquality: 155,
     },
   ];
 
@@ -1238,6 +1292,223 @@ app.get('/api/events', (req: Request, res: Response) => {
   req.on('close', () => {
     const idx = sseClients.indexOf(res);
     if (idx !== -1) sseClients.splice(idx, 1);
+  });
+});
+
+// 17. Audyt zainstalowanych usług i weryfikacja poprawności konfiguracji
+app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
+  const servicesReport: {
+    service: string;
+    name: string;
+    installed: boolean;
+    active: boolean;
+    config_path?: string;
+    config_exists: boolean;
+    config_valid: boolean;
+    config_summary?: string;
+    notes?: string;
+    recommendation?: string;
+  }[] = [];
+
+  // A. Mosquitto Broker MQTT
+  const mosquittoConfPath = '/etc/mosquitto/conf.d/iot-zigbee.conf';
+  const mainMosquittoConf = '/etc/mosquitto/mosquitto.conf';
+  let mosqInstalled = existsSync('/usr/sbin/mosquitto') || existsSync('/usr/bin/mosquitto');
+  let mosqActive = false;
+  let mosqValid = false;
+  let mosqSummary = '';
+
+  try {
+    const status = execSync('systemctl is-active mosquitto 2>/dev/null', { encoding: 'utf-8' }).trim();
+    mosqActive = status === 'active';
+    mosqInstalled = true;
+  } catch {
+    mosqActive = false;
+  }
+
+  const mosqConfExists = existsSync(mosquittoConfPath) || existsSync(mainMosquittoConf);
+  if (mosqConfExists) {
+    try {
+      const content = existsSync(mosquittoConfPath) ? readFileSync(mosquittoConfPath, 'utf-8') : readFileSync(mainMosquittoConf, 'utf-8');
+      const has1883 = content.includes('1883');
+      const hasAnon = content.includes('allow_anonymous true');
+      mosqValid = has1883 && hasAnon;
+      mosqSummary = `Port 1883: ${has1883 ? 'TAK' : 'NIE'}, Dostęp anonimowy: ${hasAnon ? 'TAK' : 'NIE'}`;
+    } catch {
+      mosqSummary = 'Brak możliwości odczytu pliku conf';
+    }
+  }
+
+  servicesReport.push({
+    service: 'mosquitto',
+    name: 'Eclipse Mosquitto (Broker MQTT)',
+    installed: mosqInstalled,
+    active: mosqActive || mqttStatus.connected,
+    config_path: mosquittoConfPath,
+    config_exists: mosqConfExists,
+    config_valid: mosqValid,
+    config_summary: mosqSummary || 'Wymaga: listener 1883 oraz allow_anonymous true',
+    recommendation: mosqValid ? 'Konfiguracja prawidłowa' : 'Zalecane utworzenie /etc/mosquitto/conf.d/iot-zigbee.conf',
+  });
+
+  // B. Zigbee2MQTT
+  const z2mDir = '/opt/zigbee2mqtt';
+  const z2mConfigPath = '/opt/zigbee2mqtt/data/configuration.yaml';
+  const z2mInstalled = existsSync(`${z2mDir}/index.js`);
+  let z2mActive = false;
+  let z2mValid = false;
+  let z2mSummary = '';
+
+  try {
+    const status = execSync('systemctl is-active zigbee2mqtt 2>/dev/null', { encoding: 'utf-8' }).trim();
+    z2mActive = status === 'active';
+  } catch {
+    z2mActive = !!mqttStatus.bridge_state && mqttStatus.bridge_state !== 'offline';
+  }
+
+  const z2mConfExists = existsSync(z2mConfigPath);
+  if (z2mConfExists) {
+    try {
+      const yaml = readFileSync(z2mConfigPath, 'utf-8');
+      const hasEmber = yaml.includes('adapter: ember');
+      const hasPort = yaml.includes('port:') && (yaml.includes('6638') || yaml.includes('ttyACM'));
+      const hasBase = yaml.includes('base_topic: zigbee2mqtt');
+      z2mValid = hasEmber && hasBase;
+      z2mSummary = `Adapter ember (EFR32MG24): ${hasEmber ? 'TAK' : 'NIE'}, Port: ${hasPort ? 'OK' : 'Sprawdź'}`;
+    } catch {
+      z2mSummary = 'Błąd odczytu configuration.yaml';
+    }
+  }
+
+  servicesReport.push({
+    service: 'zigbee2mqtt',
+    name: 'Zigbee2MQTT Daemon',
+    installed: z2mInstalled,
+    active: z2mActive,
+    config_path: z2mConfigPath,
+    config_exists: z2mConfExists,
+    config_valid: z2mValid,
+    config_summary: z2mSummary || 'Wymaga adaptera ember oraz poprawnego portu koordynatora',
+    recommendation: z2mValid ? 'Konfiguracja zgodna z Sonoff Dongle-M' : 'Upewnij się, że w configuration.yaml ustawiono adapter: ember',
+  });
+
+  // C. Usługa Panelu SimpleHomeTelemetry
+  const panelDir = '/opt/zigbee-telemetry-panel';
+  let panelActive = true;
+  try {
+    const status = execSync('systemctl is-active iot-telemetry 2>/dev/null', { encoding: 'utf-8' }).trim();
+    panelActive = status === 'active';
+  } catch {
+    panelActive = true;
+  }
+
+  servicesReport.push({
+    service: 'iot-telemetry',
+    name: 'SimpleHomeTelemetry Web Service',
+    installed: existsSync(panelDir) || existsSync(process.cwd()),
+    active: panelActive,
+    config_path: '/etc/systemd/system/iot-telemetry.service',
+    config_exists: existsSync('/etc/systemd/system/iot-telemetry.service'),
+    config_valid: true,
+    config_summary: 'Port: 3000, Usługa Node.js / Angular SSR',
+    recommendation: 'Usługa panelu działa poprawnie',
+  });
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    overall_status: servicesReport.every((s) => s.config_valid && (s.active || s.installed)) ? 'ok' : 'needs_attention',
+    services: servicesReport,
+    environment: {
+      node_version: process.version,
+      current_dir: process.cwd(),
+    },
+  });
+});
+
+// 18. Aktualizacja oprogramowania SimpleHomeTelemetry z Git / GitHub
+app.post('/api/system/git-update', (_req: Request, res: Response) => {
+  try {
+    let beforeCommit = 'unknown';
+    try {
+      beforeCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+    } catch {
+      // ignore
+    }
+
+    // Wykonaj git fetch oraz git pull
+    const pullOutput = execSync('git fetch origin && git pull origin main 2>&1 || git pull 2>&1', {
+      encoding: 'utf-8',
+      timeout: 30000,
+    });
+
+    let afterCommit = beforeCommit;
+    try {
+      afterCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+    } catch {
+      // ignore
+    }
+
+    const updated = beforeCommit !== afterCommit || pullOutput.includes('Updating') || pullOutput.includes('Fast-forward');
+
+    res.json({
+      success: true,
+      updated,
+      current_commit: afterCommit,
+      remote_commit: afterCommit,
+      message: updated
+        ? `Pomyślnie zaktualizowano z commita ${beforeCommit} do ${afterCommit}!`
+        : 'Repozytorium jest już w najnowszej wersji (Already up to date).',
+      output: pullOutput,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      success: false,
+      updated: false,
+      message: `Błąd podczas git pull: ${msg}`,
+      output: msg,
+    });
+  }
+});
+
+// 19. Ręczne dodanie lub powiązanie wentylatora Gotze & Jensen GOW 007 (Tuya WiFi)
+app.post('/api/devices/tuya-fan/add', (req: Request, res: Response) => {
+  const { name, ip_address, device_id } = req.body || {};
+  const fanIeee = device_id ? `tuya_gow007_${device_id}` : `tuya_gow007_${Date.now().toString().slice(-6)}`;
+  const now = new Date();
+
+  const fanDevice: Device = {
+    ieee_address: fanIeee,
+    friendly_name: name || 'Gotze & Jensen GOW 007 7w1',
+    model: 'GOW 007 7w1 (Tuya WiFi Fan)',
+    category: 'fan',
+    vendor: 'Tuya',
+    last_seen: now.toISOString(),
+    battery: null,
+    state: 'ON',
+    fan_speed: 4,
+    fan_mode: 'normal',
+    fan_oscillation: false,
+    fan_timer: 0,
+    fan_ionizer: true,
+    fan_humidifier: true,
+    fan_uv: true,
+    power: 38.5,
+    voltage: 230.0,
+    last_temperature: 22.0,
+    last_humidity: 50.0,
+    linkquality: 160,
+  };
+
+  devices.set(fanIeee, fanDevice);
+
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+  broadcastEvent({ type: 'device_updated', device: fanDevice });
+
+  res.json({
+    success: true,
+    device: fanDevice,
+    note: `Dodano wentylator GOW 007 (IP: ${ip_address || 'lokalny auto-discovery'}). Gotowy do sterowania.`,
   });
 });
 

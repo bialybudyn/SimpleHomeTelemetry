@@ -33,11 +33,29 @@ import { Telemetry } from '../../services/telemetry';
         <!-- Szybkie akcje -->
         <div class="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
+            (click)="triggerGitUpdate()"
+            [disabled]="telemetry.isUpdatingGit()"
+            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-950/40 transition-all cursor-pointer"
+            title="Aktualizuj kod z repozytorium GitHub (git pull)"
+          >
+            <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isUpdatingGit()">update</mat-icon>
+            <span>{{ telemetry.isUpdatingGit() ? 'Pobieranie aktualizacji...' : 'Aktualizuj z GitHub (Git Pull)' }}</span>
+          </button>
+          <button
+            (click)="inspectSystemServices()"
+            [disabled]="telemetry.isInspectingServices()"
+            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+            title="Weryfikuj stan i konfigurację zainstalowanych usług"
+          >
+            <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isInspectingServices()">policy</mat-icon>
+            <span>{{ telemetry.isInspectingServices() ? 'Audyt...' : 'Weryfikuj konfigurację usług' }}</span>
+          </button>
+          <button
             (click)="copyOneLiner()"
             class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
           >
             <mat-icon class="text-sm !w-4 !h-4">{{ copiedOneLiner() ? 'check' : 'content_copy' }}</mat-icon>
-            <span>{{ copiedOneLiner() ? 'Skopiowano komendę!' : 'Kopiuj komendę 1-Click (Linux)' }}</span>
+            <span>{{ copiedOneLiner() ? 'Skopiowano komendę!' : 'Kopiuj 1-Click' }}</span>
           </button>
           <button
             (click)="downloadFile('install.sh')"
@@ -48,6 +66,71 @@ import { Telemetry } from '../../services/telemetry';
           </button>
         </div>
       </div>
+
+      <!-- Wynik aktualizacji Git (jeśli wykonano) -->
+      @if (telemetry.gitUpdateResult(); as gitRes) {
+        <div
+          class="p-4 rounded-xl border flex items-start gap-3 transition-all"
+          [class.bg-emerald-950/40]="gitRes.success"
+          [class.border-emerald-800]="gitRes.success"
+          [class.bg-rose-950/40]="!gitRes.success"
+          [class.border-rose-800]="!gitRes.success"
+        >
+          <mat-icon [class.text-emerald-400]="gitRes.success" [class.text-rose-400]="!gitRes.success">
+            {{ gitRes.success ? 'cloud_done' : 'error' }}
+          </mat-icon>
+          <div class="space-y-1 text-xs flex-1">
+            <div class="font-bold" [class.text-emerald-300]="gitRes.success" [class.text-rose-300]="!gitRes.success">
+              {{ gitRes.message }}
+            </div>
+            <pre class="text-[11px] font-mono text-slate-400 bg-slate-950/80 p-2.5 rounded-lg overflow-x-auto border border-slate-800/80">{{ gitRes.output }}</pre>
+          </div>
+        </div>
+      }
+
+      <!-- Wynik audytu i inspekcji zainstalowanych usług -->
+      @if (telemetry.servicesReport(); as report) {
+        <div class="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <mat-icon class="text-cyan-400">verified</mat-icon>
+              <h3 class="text-sm font-bold text-white">Raport Weryfikacji Usług Systemowych i Plików Konfiguracyjnych</h3>
+            </div>
+            <span class="text-xs font-mono text-slate-400">
+              Sprawdzono: {{ report.timestamp | date:'HH:mm:ss' }}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            @for (srv of report.services; track srv.service) {
+              <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-xs text-white">{{ srv.name }}</span>
+                  <span
+                    class="text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold border"
+                    [class.bg-emerald-500/10]="srv.installed && srv.config_valid"
+                    [class.text-emerald-400]="srv.installed && srv.config_valid"
+                    [class.border-emerald-500/20]="srv.installed && srv.config_valid"
+                    [class.bg-amber-500/10]="!srv.installed || !srv.config_valid"
+                    [class.text-amber-400]="!srv.installed || !srv.config_valid"
+                    [class.border-amber-500/20]="!srv.installed || !srv.config_valid"
+                  >
+                    {{ srv.installed ? (srv.config_valid ? 'POPRAWNA' : 'WYMAGA ZMIAN') : 'NIE WYKRYTO' }}
+                  </span>
+                </div>
+                <div class="text-[11px] font-mono text-slate-400">
+                  <div>Status procesu: <strong class="text-white">{{ srv.active ? 'Aktywny (Running)' : 'Nieaktywny' }}</strong></div>
+                  <div>Plik conf: <strong class="text-slate-300">{{ srv.config_path || 'domyślny' }}</strong></div>
+                  <div class="text-slate-500 text-[10px] mt-1">{{ srv.config_summary }}</div>
+                </div>
+                <div class="pt-1.5 border-t border-slate-800/60 text-[10px] text-cyan-300">
+                  {{ srv.recommendation }}
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      }
 
       <!-- Kafelki statusu usług w tle (Real-time Service Health) -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -481,6 +564,14 @@ export class InstallerView {
 
   testCoordinatorConnection(): void {
     this.telemetry.testDongleMaxConnection();
+  }
+
+  triggerGitUpdate(): void {
+    this.telemetry.runGitUpdate();
+  }
+
+  inspectSystemServices(): void {
+    this.telemetry.inspectServices();
   }
 
   copyOneLiner(): void {
