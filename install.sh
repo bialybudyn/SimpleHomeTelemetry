@@ -39,30 +39,44 @@ apt-get update -y
 apt-get install -y curl wget git build-essential sqlite3 libsqlite3-dev socat ufw
 
 # 2. Instalacja i konfiguracja brokera Mosquitto
-echo -e "\n${YELLOW}[2/7] Instalacja brokera MQTT Eclipse Mosquitto...${NC}"
+echo -e "\n${YELLOW}[2/7] Instalacja i konfiguracja brokera MQTT Eclipse Mosquitto...${NC}"
 apt-get install -y mosquitto mosquitto-clients
 
-echo -e "${CYAN}Tworzenie konfiguracji brokera /etc/mosquitto/conf.d/iot-zigbee.conf...${NC}"
+# Zapewnienie poprawnych uprawnień i katalogów dla użytkownika systemowego mosquitto
+mkdir -p /var/log/mosquitto /var/lib/mosquitto /run/mosquitto /etc/mosquitto/conf.d
+chown -R mosquitto:mosquitto /var/log/mosquitto /var/lib/mosquitto 2>/dev/null || true
+
+# Usunięcie starych konfliktowych plików
+rm -f /etc/mosquitto/conf.d/*.conf.bak 2>/dev/null || true
+
+echo -e "${CYAN}Tworzenie czystej konfiguracji brokera /etc/mosquitto/conf.d/iot-zigbee.conf...${NC}"
 cat << 'EOF' > /etc/mosquitto/conf.d/iot-zigbee.conf
-# Konfiguracja Mosquitto dla sieci IoT Zigbee
+# Konfiguracja Mosquitto dla sieci IoT Zigbee (wymagane od Mosquitto v2.0+)
+# Główny plik /etc/mosquitto/mosquitto.conf zawiera już log_dest oraz persistence.
+# Tutaj definiujemy wyłącznie nasłuchiwanie na porcie 1883 oraz dostęp anonimowy:
 listener 1883
 allow_anonymous true
-persistence true
-persistence_location /var/lib/mosquitto/
-log_dest file /var/log/mosquitto/mosquitto.log
-log_type error
-log_type warning
-log_type notice
-log_type information
 EOF
 
-systemctl restart mosquitto
-systemctl enable mosquitto
+# Weryfikacja składni konfiguracji Mosquitto przed uruchomieniem
+if mosquitto -c /etc/mosquitto/mosquitto.conf -t >/dev/null 2>&1; then
+  echo -e "${GREEN}[OK] Składnia konfiguracji Mosquitto jest poprawna.${NC}"
+else
+  echo -e "${YELLOW}[INFO] Wynik testu konfiguracji mosquitto:${NC}"
+  mosquitto -c /etc/mosquitto/mosquitto.conf -t || true
+fi
 
+systemctl daemon-reload
+systemctl enable mosquitto
+systemctl restart mosquitto
+
+sleep 1
 if systemctl is-active --quiet mosquitto; then
   echo -e "${GREEN}[OK] Broker Mosquitto MQTT działa w tle na porcie 1883.${NC}"
 else
-  echo -e "${RED}[UWAGA] Sprawdź status usługi mosquitto (systemctl status mosquitto).${NC}"
+  echo -e "${RED}[BŁĄD] Usługa mosquitto nie mogła wystartować. Ostatnie logi systemd:${NC}"
+  journalctl -u mosquitto.service -n 12 --no-pager || true
+  exit 1
 fi
 
 # 3. Instalacja Node.js LTS
