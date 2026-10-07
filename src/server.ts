@@ -32,6 +32,18 @@ if (!existsSync(browserDistFolder)) {
 const app = express();
 app.use(express.json());
 
+// Serwowanie plikow statycznych na samym poczatku lancucha Express dla natychmiastowego ladowania CSS i JS
+app.use(express.static(browserDistFolder, { maxAge: '1y', index: false, redirect: false }));
+if (existsSync(join(process.cwd(), 'dist/app/browser'))) {
+  app.use(express.static(join(process.cwd(), 'dist/app/browser'), { maxAge: '1y', index: false, redirect: false }));
+}
+if (existsSync(join(process.cwd(), 'public'))) {
+  app.use(express.static(join(process.cwd(), 'public'), { maxAge: '1y', index: false, redirect: false }));
+}
+if (existsSync(join(process.cwd(), 'static'))) {
+  app.use(express.static(join(process.cwd(), 'static'), { index: false, redirect: false }));
+}
+
 // Modele danych urzadzen i telemetrii dla Sonoff (TRVZB, S26R2, ZBMINI), Tuya oraz Götze & Jensen GOW 007
 type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
 

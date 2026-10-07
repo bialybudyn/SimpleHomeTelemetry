@@ -328,12 +328,12 @@ auto-install-peers=true
 EOF
 chown "$REAL_USER":"$REAL_USER" "$APP_DIR/.npmrc" 2>/dev/null || true
 
-# W pnpm v10/v11 parametr --config.ignored-builds='[]' lub flaga --ignore-scripts / --no-frozen-lockfile
+# W pnpm / npm upewnij sie, ze instalowane sa rowniez devDependencies (niezbedne do budowania Tailwind i Angular)
 if command -v pnpm >/dev/null 2>&1; then
   sudo -u "$REAL_USER" pnpm config set ignored-builds '[]' 2>/dev/null || true
-  sudo -u "$REAL_USER" pnpm install --no-frozen-lockfile --ignore-scripts || sudo -u "$REAL_USER" pnpm install || ( rm -rf node_modules package-lock.json && sudo -u "$REAL_USER" npm install --no-audit --no-fund )
+  sudo -u "$REAL_USER" NODE_ENV=development pnpm install --no-frozen-lockfile --ignore-scripts --prod=false || sudo -u "$REAL_USER" pnpm install || ( rm -rf node_modules package-lock.json && sudo -u "$REAL_USER" NODE_ENV=development npm install --include=dev --no-audit --no-fund )
 else
-  sudo -u "$REAL_USER" npm install --no-audit --no-fund
+  sudo -u "$REAL_USER" NODE_ENV=development npm install --include=dev --no-audit --no-fund
 fi
 
 echo -e "${CYAN}Kompilacja produkcyjna panelu (Angular SSR + Node.js Backend)...${NC}"
