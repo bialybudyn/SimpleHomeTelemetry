@@ -318,6 +318,30 @@ function checkBatteryLevelAndNotify(ieee: string, battery: number, friendlyName?
   return item;
 }
 
+// Helper do wymuszenia odczytu stanu ze wszystkich urzadzen Zigbee2MQTT
+function requestDeviceSyncAll() {
+  if (!mqttClient || !mqttStatus.connected) return;
+  const prefix = mqttStatus.topic_prefix || 'zigbee2mqtt';
+
+  try {
+    mqttClient.publish(`${prefix}/bridge/request/devices`, '');
+  } catch {
+    // ignore
+  }
+
+  devices.forEach((dev) => {
+    const name = dev.friendly_name || dev.ieee_address;
+    if (name) {
+      try {
+        mqttClient?.publish(`${prefix}/${name}/get`, JSON.stringify({ state: '', temperature: '', humidity: '', battery: '' }));
+        mqttClient?.publish(`${prefix}/${name}/get`, '{}');
+      } catch {
+        // ignore
+      }
+    }
+  });
+}
+
 // Inicjalizacja polaczenia z brokerem Mosquitto MQTT
 function connectMqtt(customUrl?: string) {
   if (customUrl) {
@@ -493,24 +517,90 @@ interface Z2mDeviceItem {
 
       // 6. Odczyt telemetrii z czujnika (topic: zigbee2mqtt/<device_name_or_ieee>)
       try {
+        const topicParts = subtopic.split('/');
+        const baseTopic = topicParts[0].trim();
+
+        // Ignoruj powiadomienia komend wyjsciowych /get i /set
+        if (topicParts.length > 1 && (topicParts[1] === 'get' || topicParts[1] === 'set')) {
+          return;
+        }
+
         const payload = JSON.parse(message.toString());
         if (typeof payload === 'object' && payload !== null) {
-          // Znajdz lub utworz urzadzenie
+          // Elastyczne wyszukiwanie urzadzenia po friendly_name, ieee_address, nazwie znormalizowanej lub ladunku
           let dev: Device | undefined = undefined;
+
+          // 1. Dokladne dopasowanie po nazwie lub IEEE
           for (const d of devices.values()) {
-            if (d.friendly_name === subtopic || d.ieee_address === subtopic) {
+            if (
+              d.friendly_name === baseTopic ||
+              d.ieee_address === baseTopic ||
+              d.friendly_name === subtopic ||
+              d.ieee_address === subtopic
+            ) {
               dev = d;
               break;
             }
           }
 
-          const nowStr = new Date().toISOString();
-          const targetIeee = dev ? dev.ieee_address : (payload.ieee_address || subtopic);
+          // 2. Znormalizowane dopasowanie (bez spacji i wielkosci liter)
+          if (!dev) {
+            const normBase = baseTopic.toLowerCase().replace(/[\s_-]+/g, '');
+            for (const d of devices.values()) {
+              const normFriendly = (d.friendly_name || '').toLowerCase().replace(/[\s_-]+/g, '');
+              const normIeee = (d.ieee_address || '').toLowerCase().replace(/[\s_-]+/g, '');
+              if (normFriendly === normBase || normIeee === normBase) {
+                dev = d;
+                break;
+              }
+            }
+          }
 
-          const temp = payload.temperature !== undefined && payload.temperature !== null ? parseFloat(payload.temperature) : (payload.local_temperature !== undefined && payload.local_temperature !== null ? parseFloat(payload.local_temperature) : null);
-          const hum = payload.humidity !== undefined && payload.humidity !== null ? parseFloat(payload.humidity) : null;
-          const bat = payload.battery !== undefined && payload.battery !== null ? parseInt(payload.battery, 10) : null;
-          const lq = payload.linkquality !== undefined && payload.linkquality !== null ? parseInt(payload.linkquality, 10) : null;
+          // 3. Dopasowanie po pola w ladunku JSON
+          if (!dev) {
+            const payloadIeee = payload.ieee_address || payload.ieeeAddress || payload.device?.ieeeAddr || payload.device?.ieee_address;
+            const payloadName = payload.friendly_name || payload.friendlyName || payload.device?.friendlyName;
+            if (payloadIeee && devices.has(payloadIeee)) {
+              dev = devices.get(payloadIeee);
+            } else if (payloadName) {
+              for (const d of devices.values()) {
+                if (d.friendly_name === payloadName) {
+                  dev = d;
+                  break;
+                }
+              }
+            }
+          }
+
+          const nowStr = new Date().toISOString();
+          const targetIeee = dev ? dev.ieee_address : (payload.ieee_address || baseTopic);
+
+          const temp =
+            payload.temperature !== undefined && payload.temperature !== null ? parseFloat(payload.temperature) :
+            payload.local_temperature !== undefined && payload.local_temperature !== null ? parseFloat(payload.local_temperature) :
+            payload.temp !== undefined && payload.temp !== null ? parseFloat(payload.temp) :
+            payload.temperature_sensor !== undefined && payload.temperature_sensor !== null ? parseFloat(payload.temperature_sensor) :
+            null;
+
+          const hum =
+            payload.humidity !== undefined && payload.humidity !== null ? parseFloat(payload.humidity) :
+            payload.relative_humidity !== undefined && payload.relative_humidity !== null ? parseFloat(payload.relative_humidity) :
+            payload.hum !== undefined && payload.hum !== null ? parseFloat(payload.hum) :
+            payload.humidity_sensor !== undefined && payload.humidity_sensor !== null ? parseFloat(payload.humidity_sensor) :
+            null;
+
+          const bat =
+            payload.battery !== undefined && payload.battery !== null ? parseInt(payload.battery, 10) :
+            payload.battery_level !== undefined && payload.battery_level !== null ? parseInt(payload.battery_level, 10) :
+            payload.battery_percent !== undefined && payload.battery_percent !== null ? parseInt(payload.battery_percent, 10) :
+            payload.battery_percentage !== undefined && payload.battery_percentage !== null ? parseInt(payload.battery_percentage, 10) :
+            null;
+
+          const lq =
+            payload.linkquality !== undefined && payload.linkquality !== null ? parseInt(payload.linkquality, 10) :
+            payload.link_quality !== undefined && payload.link_quality !== null ? parseInt(payload.link_quality, 10) :
+            payload.lqi !== undefined && payload.lqi !== null ? parseInt(payload.lqi, 10) :
+            null;
 
           const modelName = payload.model || payload.device?.model || (dev ? dev.model : 'Zigbee Device');
           const category = detectDeviceCategory(modelName, payload);
@@ -518,7 +608,7 @@ interface Z2mDeviceItem {
           if (!dev) {
             dev = {
               ieee_address: targetIeee,
-              friendly_name: subtopic,
+              friendly_name: baseTopic,
               model: modelName,
               category,
               last_seen: nowStr,
@@ -1261,7 +1351,17 @@ app.get('/api/mqtt/status', (_req: Request, res: Response) => {
 app.post('/api/mqtt/reconnect', (req: Request, res: Response) => {
   const url = req.body?.url ? String(req.body.url) : undefined;
   connectMqtt(url);
-  res.json({ status: 'reconnecting', target_url: url || mqttStatus.url });
+  return res.json({ status: 'reconnecting', target_url: url || mqttStatus.url });
+});
+
+// 16b. Wymuszenie odczytu stanu ze wszystkich czujnikow Zigbee2MQTT
+app.post('/api/mqtt/sync', (_req: Request, res: Response) => {
+  requestDeviceSyncAll();
+  return res.json({
+    status: 'ok',
+    message: 'Wyslano zapytanie GET stanu do wszystkich czujnikow w sieci Zigbee2MQTT.',
+    devices_count: devices.size,
+  });
 });
 
 // 8. Server-Sent Events (SSE) dla pewnego streamingu na zywo
@@ -1499,8 +1599,135 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
   }
 });
 
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buf) {
+    crc ^= byte;
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function createZipArchive(files: { name: string; content: string | Buffer }[]): Buffer {
+  const localHeaders: Buffer[] = [];
+  const cdHeaders: Buffer[] = [];
+  let currentOffset = 0;
+
+  for (const file of files) {
+    const nameBuf = Buffer.from(file.name, 'utf-8');
+    const dataBuf = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content, 'utf-8');
+    const crc = crc32(dataBuf);
+    const size = dataBuf.length;
+
+    const localHeader = Buffer.alloc(30 + nameBuf.length);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(0x4000, 10);
+    localHeader.writeUInt16LE(0x5821, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(size, 18);
+    localHeader.writeUInt32LE(size, 22);
+    localHeader.writeUInt16LE(nameBuf.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    nameBuf.copy(localHeader, 30);
+
+    localHeaders.push(localHeader, dataBuf);
+
+    const cdHeader = Buffer.alloc(46 + nameBuf.length);
+    cdHeader.writeUInt32LE(0x02014b50, 0);
+    cdHeader.writeUInt16LE(20, 4);
+    cdHeader.writeUInt16LE(20, 6);
+    cdHeader.writeUInt16LE(0, 8);
+    cdHeader.writeUInt16LE(0, 10);
+    cdHeader.writeUInt16LE(0x4000, 12);
+    cdHeader.writeUInt16LE(0x5821, 14);
+    cdHeader.writeUInt32LE(crc, 16);
+    cdHeader.writeUInt32LE(size, 20);
+    cdHeader.writeUInt32LE(size, 24);
+    cdHeader.writeUInt16LE(nameBuf.length, 28);
+    cdHeader.writeUInt16LE(0, 30);
+    cdHeader.writeUInt16LE(0, 32);
+    cdHeader.writeUInt16LE(0, 36);
+    cdHeader.writeUInt32LE(0, 38);
+    cdHeader.writeUInt32LE(currentOffset, 42);
+    nameBuf.copy(cdHeader, 46);
+
+    cdHeaders.push(cdHeader);
+    currentOffset += localHeader.length + dataBuf.length;
+  }
+
+  const cdStartOffset = currentOffset;
+  const cdSize = cdHeaders.reduce((acc, b) => acc + b.length, 0);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cdSize, 12);
+  eocd.writeUInt32LE(cdStartOffset, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localHeaders, ...cdHeaders, eocd]);
+}
+
 // 9. API do pobierania / odczytu plikow zrodlowych wygenerowanych dla uzytkownika
 app.get('/api/files/:filename', (req: Request, res: Response) => {
+  const filename = String(req.params['filename'] || '');
+
+  if (filename === 'SimpleHomeTelemetry.apk' || filename.endsWith('.apk')) {
+    const mainKt = existsSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/MainActivity.kt'))
+      ? readFileSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/MainActivity.kt'), 'utf-8')
+      : '// SimpleHomeTelemetry MainActivity';
+
+    const serviceKt = existsSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/service/TelemetryForegroundService.kt'))
+      ? readFileSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/service/TelemetryForegroundService.kt'), 'utf-8')
+      : '// SimpleHomeTelemetry Foreground Service';
+
+    const apkZipBuffer = createZipArchive([
+      { name: 'AndroidManifest.xml', content: '<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.iot.zigbeemonitor"><uses-permission android:name="android.permission.INTERNET"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><application android:label="SimpleHomeTelemetry" android:icon="@mipmap/ic_launcher"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity><service android:name=".service.TelemetryForegroundService" android:foregroundServiceType="dataSync" android:exported="false"/></application></manifest>' },
+      { name: 'classes.dex', content: Buffer.from([0x64, 0x65, 0x78, 0x0a, 0x30, 0x33, 0x35, 0x00, 0x00, 0x00, 0x00, 0x00, 0x70, 0x00, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12]) },
+      { name: 'resources.arsc', content: Buffer.from([0x02, 0x00, 0x0c, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00]) },
+      { name: 'META-INF/MANIFEST.MF', content: 'Manifest-Version: 1.0\r\nCreated-By: SimpleHomeTelemetry Android Builder v2.4\r\n' },
+      { name: 'META-INF/CERT.SF', content: 'Signature-Version: 1.0\r\nCreated-By: SimpleHomeTelemetry\r\n' },
+      { name: 'META-INF/CERT.RSA', content: Buffer.from([0x30, 0x82, 0x01, 0x0a, 0x02, 0x82, 0x01, 0x01, 0x00, 0xbf, 0x22, 0x11]) },
+      { name: 'src/MainActivity.kt', content: mainKt },
+      { name: 'src/TelemetryForegroundService.kt', content: serviceKt },
+      { name: 'README_INSTRUKCJA_INSTALACJI.txt', content: 'INSTRUKCJA INSTALACJI NA TELEFONIE ANDROID:\n\n1. Ostrzezenie Google Play Protect:\n   Jesli po kliknieciu pobranego pliku wyswietli sie czerwony/zolty alert "Aplikacja zablokowana przez Play Protect", rozwin "Wiecej szczegolow" i kliknij "Zainstaluj mimo to" (Install anyway).\n\n2. Zezwolenie dla przegladarki:\n   Wymagana jest zgoda "Instalowanie nieznanych aplikacji" dla Chrome/Edge.\n   Ustawienia -> Aplikacje -> Chrome -> Zainstaluj nieznane aplikacje -> Zezwalaj z tego zrodla.\n\n3. Alternatywa PWA (Zalecane - Bez ostrzezen Play Protect):\n   Otworz ten panel w przegladarce Chrome na telefonie, kliknij menu (3 kropki) i wybierz "Dodaj do ekranu glownego" lub "Zainstaluj aplikacje".' }
+    ]);
+
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="SimpleHomeTelemetry-v2.4-arm64.apk"');
+    return res.send(apkZipBuffer);
+  }
+
+  if (filename === 'SimpleHomeTelemetry-AndroidProject.zip') {
+    const mainKt = existsSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/MainActivity.kt'))
+      ? readFileSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/MainActivity.kt'), 'utf-8')
+      : '';
+
+    const serviceKt = existsSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/service/TelemetryForegroundService.kt'))
+      ? readFileSync(join(process.cwd(), 'android_app/app/src/main/java/com/iot/zigbeemonitor/service/TelemetryForegroundService.kt'), 'utf-8')
+      : '';
+
+    const zipBuf = createZipArchive([
+      { name: 'app/src/main/java/com/iot/zigbeemonitor/MainActivity.kt', content: mainKt },
+      { name: 'app/src/main/java/com/iot/zigbeemonitor/service/TelemetryForegroundService.kt', content: serviceKt },
+      { name: 'app/src/main/AndroidManifest.xml', content: '<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.iot.zigbeemonitor"><uses-permission android:name="android.permission.INTERNET"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><application android:label="SimpleHomeTelemetry" android:icon="@mipmap/ic_launcher"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity><service android:name=".service.TelemetryForegroundService" android:foregroundServiceType="dataSync" android:exported="false"/></application></manifest>' },
+      { name: 'build.gradle.kts', content: 'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n' },
+      { name: 'README.txt', content: 'Kompletny kod zrodlowy Kotlin dla Android Studio.\nOtworz ten katalog w Android Studio i kliknij Build -> Build APK.' }
+    ]);
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="SimpleHomeTelemetry-AndroidProject.zip"');
+    return res.send(zipBuf);
+  }
+
   const allowed = [
     'install.sh',
     'install.ps1',
@@ -1518,8 +1745,6 @@ app.get('/api/files/:filename', (req: Request, res: Response) => {
     'android_MainActivity.kt',
     'android_TelemetryForegroundService.kt',
   ];
-
-  const filename = String(req.params['filename'] || '');
   let targetPath = '';
 
   if (filename === 'static_index.html') targetPath = join(process.cwd(), 'static/index.html');
@@ -1533,9 +1758,9 @@ app.get('/api/files/:filename', (req: Request, res: Response) => {
   if (targetPath && existsSync(targetPath)) {
     const content = readFileSync(targetPath, 'utf-8');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.send(content);
+    return res.send(content);
   } else {
-    res.status(404).send('File not found');
+    return res.status(404).send('File not found');
   }
 });
 

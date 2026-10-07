@@ -187,6 +187,15 @@ export class Telemetry {
     });
   }
 
+  syncMqttDevices(): void {
+    this.http.post<{ status: string; message: string }>('/api/mqtt/sync', {}).subscribe({
+      next: () => {
+        setTimeout(() => this.fetchDevices(), 800);
+      },
+      error: (err) => console.debug('Błąd synchronizacji MQTT:', err),
+    });
+  }
+
   fetchSystemStatus(): void {
     this.http.get<SystemStatus>('/api/system/status').subscribe({
       next: (status) => {

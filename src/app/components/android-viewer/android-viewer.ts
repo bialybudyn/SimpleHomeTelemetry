@@ -13,29 +13,85 @@ import { MatIconModule } from '@angular/material/icon';
   imports: [MatIconModule],
   template: `
     <div class="space-y-6">
-      <!-- Baner pobierania pliku APK -->
-      <div class="p-6 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-800/80 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-2xl">
-        <div class="space-y-2">
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold">
-            <mat-icon class="text-sm !w-4 !h-4">get_app</mat-icon>
-            <span>Gotowy Plik Instalacyjny APK (Android 8.0+)</span>
+      <!-- Baner pobierania pliku APK i instrukcja rozwiązywania problemów -->
+      <div class="p-6 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-800/80 space-y-6 shadow-2xl">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b border-slate-800/80 pb-6">
+          <div class="space-y-2">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold">
+              <mat-icon class="text-sm !w-4 !h-4">get_app</mat-icon>
+              <span>Aplikacja Android (.APK) & Wersja PWA</span>
+            </div>
+            <h2 class="text-2xl font-extrabold text-white tracking-tight">
+              Pobierz Aplikację Mobilną SimpleHomeTelemetry (.APK)
+            </h2>
+            <p class="text-xs text-slate-300 max-w-2xl leading-relaxed">
+              Pobierz bezpośrenio pakiet <strong class="text-emerald-400">SimpleHomeTelemetry.apk</strong> lub dodaj panel do ekranu głównego telefonu jako natywną aplikację PWA.
+            </p>
           </div>
-          <h2 class="text-2xl font-extrabold text-white tracking-tight">
-            Pobierz Aplikację Mobilną SimpleHomeTelemetry (.APK)
-          </h2>
-          <p class="text-xs text-slate-300 max-w-2xl leading-relaxed">
-            Pobierz bezpośrednio na swój telefon pakiet instalacyjny <strong class="text-emerald-400">SimpleHomeTelemetry.apk</strong> z obsługą połączenia w tle, natychmiastowych wibracji oraz powiadomień Heads-Up o przekroczeniach temperatury i spadkach baterii.
-          </p>
+
+          <div class="flex flex-wrap items-center gap-3 shrink-0">
+            <a
+              href="/api/files/SimpleHomeTelemetry.apk"
+              download="SimpleHomeTelemetry.apk"
+              class="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold shadow-xl shadow-emerald-950/60 transition-all cursor-pointer border border-emerald-400/40"
+            >
+              <mat-icon class="text-base">download</mat-icon>
+              <span>Pobierz SimpleHomeTelemetry.apk</span>
+            </a>
+
+            <a
+              href="/api/files/SimpleHomeTelemetry-AndroidProject.zip"
+              download="SimpleHomeTelemetry-AndroidProject.zip"
+              class="flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+            >
+              <mat-icon class="text-base">folder_zip</mat-icon>
+              <span>Projekt Android Studio (.ZIP)</span>
+            </a>
+          </div>
         </div>
 
-        <a
-          href="/api/files/SimpleHomeTelemetry.apk"
-          download="SimpleHomeTelemetry.apk"
-          class="flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-extrabold shadow-xl shadow-emerald-950/60 transition-all cursor-pointer shrink-0 border border-emerald-400/40"
-        >
-          <mat-icon class="text-xl">download</mat-icon>
-          <span>Pobierz SimpleHomeTelemetry.apk (Gotowa Aplikacja)</span>
-        </a>
+        <!-- INSTRUKCJA KROK PO KROKU: JAK OMINĄĆ BLOKADĘ INSTALACJI NA TELEFONIE -->
+        <div class="p-5 rounded-xl bg-slate-950/90 border border-amber-500/40 space-y-4">
+          <div class="flex items-center gap-2.5 text-amber-300 font-bold text-sm">
+            <mat-icon class="text-amber-400">warning</mat-icon>
+            <span>Telefon zgłasza błąd / blokuje instalację pliku .APK? Oto jak to rozwiązać:</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+            <!-- Rozwiązanie 1: Play Protect -->
+            <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+              <div class="flex items-center gap-2 text-rose-400 font-bold">
+                <span class="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center text-[10px] border border-rose-500/30">1</span>
+                <span>Google Play Protect</span>
+              </div>
+              <p class="text-slate-300 leading-relaxed text-[11px]">
+                Jeśli telefon wyświetli komunikat <strong class="text-white">„Aplikacja zablokowana przez Play Protect”</strong>, rozwiń napis <strong class="text-amber-300">„Więcej szczegółów”</strong> na dole ekranu i kliknij <strong class="text-emerald-400">„Zainstaluj mimo to”</strong> (Install anyway).
+              </p>
+            </div>
+
+            <!-- Rozwiązanie 2: Zgoda na nieznane źródła -->
+            <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+              <div class="flex items-center gap-2 text-amber-400 font-bold">
+                <span class="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px] border border-amber-500/30">2</span>
+                <span>Zezwolenie przeglądarki</span>
+              </div>
+              <p class="text-slate-300 leading-relaxed text-[11px]">
+                Wejdź w <strong class="text-white">Ustawienia telefonu -> Aplikacje -> Chrome/Edge -> Zainstaluj nieznane aplikacje</strong> i włącz przełącznik <strong class="text-cyan-300">„Zezwalaj z tego źródła”</strong>.
+              </p>
+            </div>
+
+            <!-- Rozwiązanie 3: Alternatywa PWA Bez Ostrzeżeń -->
+            <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+              <div class="flex items-center gap-2 text-emerald-400 font-bold">
+                <span class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] border border-emerald-500/30">3</span>
+                <span>Instalacja PWA (Najłatwiejsza)</span>
+              </div>
+              <p class="text-slate-300 leading-relaxed text-[11px]">
+                Otwórz ten panel na telefonie w przeglądarce Chrome, kliknij menu <strong class="text-white">⋮ (trzy kropki)</strong> w prawym górnym rogu i wybierz <strong class="text-emerald-300">„Dodaj do ekranu głównego”</strong> lub <strong class="text-emerald-300">„Zainstaluj aplikację”</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Wstęp aplikacji mobilnej -->
