@@ -36,7 +36,7 @@ USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 
 echo -e "${YELLOW}[1/7] Aktualizacja repozytoriów systemowych i instalacja narzędzi bazowych...${NC}"
 apt-get update -y
-apt-get install -y curl wget git build-essential sqlite3 libsqlite3-dev socat ufw
+apt-get install -y curl wget git gnupg gpg ca-certificates build-essential sqlite3 libsqlite3-dev socat ufw
 
 # 2. Instalacja i konfiguracja brokera Mosquitto
 echo -e "\n${YELLOW}[2/7] Instalacja i konfiguracja brokera MQTT Eclipse Mosquitto...${NC}"
@@ -83,6 +83,7 @@ fi
 echo -e "\n${YELLOW}[3/7] Sprawdzanie i instalacja środowiska Node.js LTS...${NC}"
 if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d'.' -f1 | tr -d 'v')" -lt 18 ]; then
   echo -e "${CYAN}Instalacja Node.js LTS (wersja 20.x)...${NC}"
+  apt-get install -y gnupg gpg ca-certificates curl
   mkdir -p /etc/apt/keyrings
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg --yes
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
@@ -123,6 +124,13 @@ echo -e "${GREEN}[OK] Wybrano port koordynatora: ${DONGLE_PORT}${NC}"
 
 # 5. Instalacja Zigbee2MQTT w /opt/zigbee2mqtt
 echo -e "\n${YELLOW}[5/7] Instalacja Zigbee2MQTT w katalogu /opt/zigbee2mqtt...${NC}"
+
+# Instalacja pnpm (oficjalny menedżer pakietów dla Zigbee2MQTT v2)
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo -e "${CYAN}Instalacja menedżera pnpm (rekomendowany przez Zigbee2MQTT)...${NC}"
+  npm install -g pnpm || true
+fi
+
 mkdir -p /opt/zigbee2mqtt
 chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
 
@@ -130,8 +138,15 @@ if [ ! -d "/opt/zigbee2mqtt/.git" ]; then
   git clone --depth 1 https://github.com/Koenkk/zigbee2mqtt.git /opt/zigbee2mqtt
 fi
 
+chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
 cd /opt/zigbee2mqtt
-sudo -u "$REAL_USER" npm ci --no-audit --no-fund
+
+echo -e "${CYAN}Pobieranie i instalacja zależności Zigbee2MQTT...${NC}"
+if command -v pnpm >/dev/null 2>&1; then
+  sudo -u "$REAL_USER" pnpm install --frozen-lockfile || sudo -u "$REAL_USER" pnpm install
+else
+  sudo -u "$REAL_USER" npm install --no-audit --no-fund
+fi
 
 # Przygotowanie konfiguracji Zigbee2MQTT
 mkdir -p /opt/zigbee2mqtt/data
@@ -174,7 +189,7 @@ Wants=mosquitto.service
 Type=simple
 User=${REAL_USER}
 WorkingDirectory=/opt/zigbee2mqtt
-ExecStart=$(which npm) start
+ExecStart=$(which node) index.js
 Restart=always
 RestartSec=5
 StandardOutput=journal

@@ -70,8 +70,13 @@ if (-not (Test-Path $InstallDir)) {
 }
 
 Set-Location $InstallDir
-Write-Host "  Instalacja zależności npm..." -ForegroundColor Cyan
-npm ci --no-audit --no-fund
+Write-Host "  Instalacja zależności..." -ForegroundColor Cyan
+if (Get-Command pnpm -ErrorAction SilentlyContinue) {
+    pnpm install --frozen-lockfile
+} else {
+    npm install -g pnpm
+    pnpm install --frozen-lockfile
+}
 
 # 4. Wybór portu koordynatora Sonoff Dongle Max
 Write-Host "[4/5] Konfiguracja portu Sonoff Dongle Max..." -ForegroundColor Yellow
