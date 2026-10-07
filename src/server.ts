@@ -13,7 +13,21 @@ import { Socket } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import mqtt, { MqttClient } from 'mqtt';
 
-const browserDistFolder = join(import.meta.dirname, '../browser');
+// Wykrywanie katalogu zasobów statycznych przeglądarki (CSS, JS, Fonts)
+let browserDistFolder = join(import.meta.dirname, '../browser');
+if (!existsSync(browserDistFolder)) {
+  const fallbackPaths = [
+    join(process.cwd(), 'dist/app/browser'),
+    join(process.cwd(), 'browser'),
+    '/opt/zigbee-telemetry-panel/dist/app/browser',
+  ];
+  for (const p of fallbackPaths) {
+    if (existsSync(p)) {
+      browserDistFolder = p;
+      break;
+    }
+  }
+}
 
 const app = express();
 app.use(express.json());
