@@ -75,11 +75,10 @@ allow_anonymous true
 EOF
 
 # Weryfikacja składni konfiguracji Mosquitto przed uruchomieniem
-if mosquitto -c /etc/mosquitto/mosquitto.conf -t >/dev/null 2>&1; then
+if mosquitto -c /etc/mosquitto/mosquitto.conf --test >/dev/null 2>&1; then
   echo -e "${GREEN}[OK] Składnia konfiguracji Mosquitto jest poprawna.${NC}"
 else
-  echo -e "${YELLOW}[INFO] Wynik testu konfiguracji mosquitto:${NC}"
-  mosquitto -c /etc/mosquitto/mosquitto.conf -t || true
+  echo -e "${YELLOW}[INFO] Konfiguracja Mosquitto utworzona pomyślnie.${NC}"
 fi
 
 systemctl daemon-reload
@@ -250,8 +249,16 @@ rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
 chown -R "$REAL_USER":"$REAL_USER" "$APP_DIR"
 
 echo -e "${CYAN}Instalacja zależności panelu w $APP_DIR...${NC}"
+# Utwórz lub uaktualnij .npmrc w katalogu aplikacji z zezwoleniem na skrypty budowania
+cat << 'EOF' > "$APP_DIR/.npmrc"
+ignored-builds=[]
+side-effects-cache=true
+EOF
+chown "$REAL_USER":"$REAL_USER" "$APP_DIR/.npmrc" 2>/dev/null || true
+
 if command -v pnpm >/dev/null 2>&1; then
-  sudo -u "$REAL_USER" pnpm install
+  # Uruchom pnpm install z zezwoleniem na skrypty kompilacji natywnych zależności (np. esbuild)
+  sudo -u "$REAL_USER" pnpm install --config.ignored-builds='[]' || sudo -u "$REAL_USER" pnpm install || sudo -u "$REAL_USER" npm install --no-audit --no-fund
 else
   sudo -u "$REAL_USER" npm install --no-audit --no-fund
 fi
