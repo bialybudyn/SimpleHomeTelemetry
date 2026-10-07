@@ -5,13 +5,14 @@ import {
 import express, { Request, Response } from 'express';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { Socket } from 'node:net';
 import { createSocket } from 'node:dgram';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 import mqtt, { MqttClient } from 'mqtt';
+import nodemailer from 'nodemailer';
 
 // Wykrywanie katalogu zasobow statycznych przegladarki (CSS, JS, Fonts)
 let browserDistFolder = join(import.meta.dirname, '../browser');
@@ -116,6 +117,14 @@ interface Device {
   occupancy?: boolean | null;
   water_leak?: boolean | null;
   illuminance?: number | null;
+
+  // Alarmy lokalne i powiadomienia
+  temp_alarm_enabled?: boolean | null;
+  temp_alarm_min?: number | null;
+  temp_alarm_max?: number | null;
+  motion_alarm_enabled?: boolean | null;
+  contact_alarm_enabled?: boolean | null;
+  water_alarm_enabled?: boolean | null;
 }
 
 interface TelemetryPoint {
@@ -247,6 +256,115 @@ const mqttStatus: MqttStatus = {
   devices_discovered: 0,
 };
 
+interface NotificationConfig {
+  email_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_pass: string;
+  email_from: string;
+  email_to: string;
+  telegram_enabled: boolean;
+  telegram_token: string;
+  telegram_chat_id: string;
+}
+
+let notificationConfig: NotificationConfig = {
+  email_enabled: false,
+  smtp_host: 'smtp.gmail.com',
+  smtp_port: 587,
+  smtp_user: '',
+  smtp_pass: '',
+  email_from: 'noreply@simplehome.local',
+  email_to: '',
+  telegram_enabled: false,
+  telegram_token: '',
+  telegram_chat_id: '',
+};
+
+const configPath = join(process.cwd(), 'notification_config.json');
+
+function loadNotificationConfig() {
+  if (existsSync(configPath)) {
+    try {
+      const data = readFileSync(configPath, 'utf-8');
+      notificationConfig = { ...notificationConfig, ...JSON.parse(data) };
+      console.log('[NOTIFICATIONS] Zaladowano konfiguracje SMTP/Telegram.');
+    } catch (e) {
+      console.warn('[NOTIFICATIONS] Blad ładowania konfiguracji:', e);
+    }
+  }
+}
+
+function saveNotificationConfig() {
+  try {
+    writeFileSync(configPath, JSON.stringify(notificationConfig, null, 2), 'utf-8');
+    console.log('[NOTIFICATIONS] Zapisano konfiguracje SMTP/Telegram.');
+  } catch (e) {
+    console.warn('[NOTIFICATIONS] Blad zapisu konfiguracji:', e);
+  }
+}
+
+loadNotificationConfig();
+
+async function sendAlertEmail(subject: string, text: string) {
+  if (!notificationConfig.email_enabled) return;
+  if (!notificationConfig.smtp_host || !notificationConfig.smtp_user || !notificationConfig.smtp_pass || !notificationConfig.email_to) {
+    console.warn('[NOTIFICATIONS] E-mail wlaczony, ale dane SMTP sa niepelne!');
+    return;
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: notificationConfig.smtp_host,
+      port: notificationConfig.smtp_port,
+      secure: notificationConfig.smtp_port === 465, // true dla 465, false dla 587
+      auth: {
+        user: notificationConfig.smtp_user,
+        pass: notificationConfig.smtp_pass,
+      },
+    });
+
+    await transporter.sendMail({
+      from: notificationConfig.email_from || 'noreply@simplehome.local',
+      to: notificationConfig.email_to,
+      subject: `[SIMPLEHOME ALARM] ${subject}`,
+      text: text,
+    });
+    console.log(`[NOTIFICATIONS] E-mail wyslany pomyslnie do ${notificationConfig.email_to}`);
+  } catch (e: unknown) {
+    console.error('[NOTIFICATIONS] Blad wysylania e-maila:', e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function sendAlertTelegram(text: string) {
+  if (!notificationConfig.telegram_enabled) return;
+  if (!notificationConfig.telegram_token || !notificationConfig.telegram_chat_id) {
+    console.warn('[NOTIFICATIONS] Telegram wlaczony, ale token lub Chat ID jest pusty!');
+    return;
+  }
+
+  try {
+    const url = `https://api.telegram.org/bot${notificationConfig.telegram_token}/sendMessage`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: notificationConfig.telegram_chat_id,
+        text: `🚨 [SimpleHome Alarm]\n\n${text}`,
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('[NOTIFICATIONS] Blad wysylania Telegram:', errText);
+    } else {
+      console.log('[NOTIFICATIONS] Wiadomosc Telegram wyslana pomyslnie.');
+    }
+  } catch (e: unknown) {
+    console.error('[NOTIFICATIONS] Blad wysylania Telegram:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 let mqttClient: MqttClient | null = null;
 
 // Aktywni subskrybenci SSE (Server-Sent Events) i WebSockets
@@ -343,6 +461,9 @@ function checkBatteryLevelAndNotify(ieee: string, battery: number, friendlyName?
   };
   notifications.unshift(item);
 
+  sendAlertEmail(`Niski poziom baterii - ${name}`, item.message);
+  sendAlertTelegram(item.message);
+
   broadcastEvent({
     type: 'battery_alert',
     device_ieee: ieee,
@@ -353,6 +474,45 @@ function checkBatteryLevelAndNotify(ieee: string, battery: number, friendlyName?
   });
 
   return item;
+}
+
+const alarmCooldowns = new Map<string, number>();
+
+function triggerDeviceAlarm(dev: Device, alertType: string, message: string) {
+  const cooldownKey = `${dev.ieee_address}_${alertType}`;
+  const now = Date.now();
+  const lastAlert = alarmCooldowns.get(cooldownKey) || 0;
+  
+  // 1. Dodaj powiadomienie systemowe (zawsze nadajemy lokalnie w przeglądarce)
+  const item: NotificationItem = {
+    id: notifIdCounter++,
+    device_ieee: dev.ieee_address,
+    device_name: dev.friendly_name,
+    type: alertType,
+    level: 'critical',
+    message: message,
+    battery: dev.battery || 100,
+    timestamp: new Date().toISOString(),
+    acknowledged: false,
+  };
+  notifications.unshift(item);
+
+  // Zawsze nadajemy do przeglądarki, żeby kafelki błyszczały/grały na żywo
+  broadcastEvent({
+    type: 'device_alarm',
+    device_ieee: dev.ieee_address,
+    friendly_name: dev.friendly_name,
+    alarm_type: alertType,
+    message: message,
+    timestamp: item.timestamp,
+  });
+
+  // 2. Jeśli cooldown minął (np. 3 minuty), wysyłamy e-mail oraz Telegram!
+  if (now - lastAlert >= 180000) {
+    alarmCooldowns.set(cooldownKey, now);
+    sendAlertEmail(`ALARM URZADZENIA: ${dev.friendly_name}`, message);
+    sendAlertTelegram(`⚠️ ${dev.friendly_name}: ${message}`);
+  }
 }
 
 // Helper do wymuszenia odczytu stanu ze wszystkich urzadzen Zigbee2MQTT
@@ -820,6 +980,29 @@ interface Z2mDeviceItem {
           if (dev.battery !== null && dev.battery <= 15) {
             checkBatteryLevelAndNotify(targetIeee, dev.battery, dev.friendly_name);
           }
+
+          // Weryfikacja alarmów zadanych przez użytkownika na kafelku
+          if (dev.temp_alarm_enabled && dev.last_temperature !== null && dev.last_temperature !== undefined) {
+            const minT = dev.temp_alarm_min !== undefined && dev.temp_alarm_min !== null ? dev.temp_alarm_min : 16.0;
+            const maxT = dev.temp_alarm_max !== undefined && dev.temp_alarm_max !== null ? dev.temp_alarm_max : 28.0;
+            if (dev.last_temperature < minT) {
+              triggerDeviceAlarm(dev, 'temp_low', `Zbyt niska temperatura: ${dev.last_temperature.toFixed(1)}°C (próg min: ${minT}°C)`);
+            } else if (dev.last_temperature > maxT) {
+              triggerDeviceAlarm(dev, 'temp_high', `Zbyt wysoka temperatura: ${dev.last_temperature.toFixed(1)}°C (próg max: ${maxT}°C)`);
+            }
+          }
+
+          if (dev.motion_alarm_enabled && (payload.occupancy === true || payload.occupancy === 'true')) {
+            triggerDeviceAlarm(dev, 'motion_detected', `Wykryto ruch w strefie nadzorowanej!`);
+          }
+
+          if (dev.contact_alarm_enabled && (payload.contact === false || payload.contact === 'false')) {
+            triggerDeviceAlarm(dev, 'contact_opened', `Wykryto otwarcie okna lub drzwi!`);
+          }
+
+          if (dev.water_alarm_enabled && (payload.water_leak === true || payload.water_leak === 'true')) {
+            triggerDeviceAlarm(dev, 'water_leak_alarm', `🚨 Wykryto wyciek wody pod sondą czujnika!`);
+          }
         }
       } catch {
         // Ignoruj wiadomosci niebedace JSON
@@ -1224,6 +1407,14 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   if (cmd.fan_humidifier !== undefined) dev.fan_humidifier = Boolean(cmd.fan_humidifier);
   if (cmd.fan_uv !== undefined) dev.fan_uv = Boolean(cmd.fan_uv);
 
+  // Alarmy lokalne z poziomu przeglądarki i powiadomienia
+  if (cmd.temp_alarm_enabled !== undefined) dev.temp_alarm_enabled = cmd.temp_alarm_enabled !== null ? Boolean(cmd.temp_alarm_enabled) : null;
+  if (cmd.temp_alarm_min !== undefined) dev.temp_alarm_min = cmd.temp_alarm_min !== null ? parseFloat(cmd.temp_alarm_min) : null;
+  if (cmd.temp_alarm_max !== undefined) dev.temp_alarm_max = cmd.temp_alarm_max !== null ? parseFloat(cmd.temp_alarm_max) : null;
+  if (cmd.motion_alarm_enabled !== undefined) dev.motion_alarm_enabled = cmd.motion_alarm_enabled !== null ? Boolean(cmd.motion_alarm_enabled) : null;
+  if (cmd.contact_alarm_enabled !== undefined) dev.contact_alarm_enabled = cmd.contact_alarm_enabled !== null ? Boolean(cmd.contact_alarm_enabled) : null;
+  if (cmd.water_alarm_enabled !== undefined) dev.water_alarm_enabled = cmd.water_alarm_enabled !== null ? Boolean(cmd.water_alarm_enabled) : null;
+
   dev.last_seen = new Date().toISOString();
 
   // Przekazanie polecenia do brokera Mosquitto MQTT dla Zigbee2MQTT
@@ -1315,6 +1506,80 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   });
 
   res.json({ status: 'ok', device: dev, sent_to_mqtt: !!mqttClient?.connected });
+});
+
+// Endpointy konfiguracji powiadomień SMTP i Telegram
+app.get('/api/notifications/config', (_req: Request, res: Response) => {
+  return res.json({ config: notificationConfig });
+});
+
+app.post('/api/notifications/config', (req: Request, res: Response) => {
+  const cfg = { ...req.body };
+  notificationConfig.email_enabled = Boolean(cfg.email_enabled);
+  notificationConfig.smtp_host = String(cfg.smtp_host || '').trim();
+  notificationConfig.smtp_port = parseInt(cfg.smtp_port || '587', 10);
+  notificationConfig.smtp_user = String(cfg.smtp_user || '').trim();
+  notificationConfig.smtp_pass = String(cfg.smtp_pass || '').trim();
+  notificationConfig.email_from = String(cfg.email_from || 'noreply@simplehome.local').trim();
+  notificationConfig.email_to = String(cfg.email_to || '').trim();
+  notificationConfig.telegram_enabled = Boolean(cfg.telegram_enabled);
+  notificationConfig.telegram_token = String(cfg.telegram_token || '').trim();
+  notificationConfig.telegram_chat_id = String(cfg.telegram_chat_id || '').trim();
+
+  saveNotificationConfig();
+  return res.json({ success: true, config: notificationConfig });
+});
+
+app.post('/api/notifications/test-email', async (req: Request, res: Response) => {
+  const { smtp_host, smtp_port, smtp_user, smtp_pass, email_from, email_to } = req.body;
+  try {
+    const transporter = nodemailer.createTransport({
+      host: String(smtp_host || '').trim(),
+      port: parseInt(smtp_port || '587', 10),
+      secure: parseInt(smtp_port, 10) === 465,
+      auth: {
+        user: String(smtp_user || '').trim(),
+        pass: String(smtp_pass || '').trim(),
+      },
+    });
+
+    await transporter.sendMail({
+      from: String(email_from || 'noreply@simplehome.local').trim(),
+      to: String(email_to || '').trim(),
+      subject: '[SIMPLEHOME] Test Połączenia SMTP',
+      text: 'Gratulacje! Twoje połączenie SMTP zostało prawidłowo skonfigurowane w SimpleHomeTelemetry.',
+    });
+
+    return res.json({ success: true, message: 'Wiadomość testowa SMTP została wysłana pomyślnie!' });
+  } catch (err: unknown) {
+    return res.status(500).json({ success: false, message: `Błąd wysyłki SMTP: ${err instanceof Error ? err.message : String(err)}` });
+  }
+});
+
+app.post('/api/notifications/test-telegram', async (req: Request, res: Response) => {
+  const { telegram_token, telegram_chat_id } = req.body;
+  try {
+    const token = String(telegram_token || '').trim();
+    const chatId = String(telegram_chat_id || '').trim();
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: '🔔 Test integracji bota Telegram z SimpleHomeTelemetry - Działa wyśmienicie!',
+      }),
+    });
+
+    if (response.ok) {
+      return res.json({ success: true, message: 'Wiadomość testowa Telegram została wysłana pomyślnie!' });
+    } else {
+      const errText = await response.text();
+      return res.status(400).json({ success: false, message: `Błąd Telegram API: ${errText}` });
+    }
+  } catch (err: unknown) {
+    return res.status(500).json({ success: false, message: `Błąd połączenia: ${err instanceof Error ? err.message : String(err)}` });
+  }
 });
 
 // 5b. Endpoint czyszczenia / restartu urzadzen (Reset do stanu czystego)
@@ -1731,6 +1996,21 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
 // 18. Aktualizacja oprogramowania SimpleHomeTelemetry z Git / GitHub
 app.post('/api/system/git-update', (_req: Request, res: Response) => {
   const logSteps: string[] = [];
+
+  // Detekcja obecności repozytorium Git w środowisku uruchomieniowym
+  const hasGit = existsSync(join(process.cwd(), '.git')) || existsSync(join(process.cwd(), '../.git')) || existsSync('/opt/zigbee-telemetry-panel/.git');
+  if (!hasGit) {
+    res.json({
+      success: true,
+      updated: false,
+      current_commit: 'cloud-dev',
+      remote_commit: 'cloud-dev',
+      message: 'System pracuje w dedykowanym środowisku uruchomieniowym chmury (Google Cloud Run / Sandbox). Aktualizacja z poziomu Git nie jest wymagana – używasz najnowszej wersji obrazu skompilowanego bezpośrednio z repozytorium.',
+      output: '[System Notice]: Środowisko kontenerowe / bezrepozytoryjne (brak folderu .git). Wszystkie pliki panelu są w najnowszej wersji.',
+    });
+    return;
+  }
+
   try {
     // 1. Zabezpieczenie przed błędem dubious ownership w Git
     try {

@@ -10,6 +10,7 @@ import { DongleMaxManager } from '../dongle-max/dongle-max';
 import { CodeViewer } from '../code-viewer/code-viewer';
 import { AndroidViewer } from '../android-viewer/android-viewer';
 import { Simulator } from '../simulator/simulator';
+import { NotificationsConfig } from './notifications-config';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -22,6 +23,7 @@ import { Simulator } from '../simulator/simulator';
     CodeViewer,
     AndroidViewer,
     Simulator,
+    NotificationsConfig,
   ],
   template: `
     <div class="space-y-6">
@@ -123,6 +125,18 @@ import { Simulator } from '../simulator/simulator';
           <mat-icon class="text-sm !w-4 !h-4">tune</mat-icon>
           <span>Konsola Testowa</span>
         </button>
+
+        <button
+          (click)="activeSubTab.set('notifications')"
+          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
+          [class.bg-slate-800]="activeSubTab() === 'notifications'"
+          [class.text-white]="activeSubTab() === 'notifications'"
+          [class.text-slate-400]="activeSubTab() !== 'notifications'"
+          [class.hover:text-white]="activeSubTab() !== 'notifications'"
+        >
+          <mat-icon class="text-sm !w-4 !h-4">notifications</mat-icon>
+          <span>Powiadomienia (SMTP & Telegram)</span>
+        </button>
       </div>
 
       <!-- Treść Pod-Zakładki -->
@@ -146,11 +160,14 @@ import { Simulator } from '../simulator/simulator';
           @case ('simulator') {
             <app-simulator></app-simulator>
           }
+          @case ('notifications') {
+            <app-notifications-config></app-notifications-config>
+          }
         }
       </div>
     </div>
   `,
 })
 export class ServerSettings {
-  readonly activeSubTab = signal<'installer' | 'catalog' | 'dongle-max' | 'code' | 'android' | 'simulator'>('installer');
+  readonly activeSubTab = signal<'installer' | 'catalog' | 'dongle-max' | 'code' | 'android' | 'simulator' | 'notifications'>('installer');
 }

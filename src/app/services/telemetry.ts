@@ -61,6 +61,7 @@ export class Telemetry {
   readonly gitUpdateResult = signal<GitUpdateResult | null>(null);
 
   // Progi alarmowe
+  readonly isMuted = signal<boolean>(false);
   readonly tempMaxLimit = signal<number>(28.0);
   readonly tempMinLimit = signal<number>(16.0);
   readonly batteryMinLimit = signal<number>(15); // Próg 15% zgodnie ze specyfikacją
@@ -547,6 +548,20 @@ export class Telemetry {
       };
       this.notifications.update((list) => [item, ...list.filter((n) => n.device_ieee !== item.device_ieee || n.type !== 'battery_low')]);
       this.batteryAlertToast.set(item);
+    } else if (type === 'device_alarm') {
+      this.playAlarmAudio();
+      const item: SystemNotification = {
+        id: Date.now(),
+        device_ieee: (event['device_ieee'] as string) || '',
+        device_name: (event['friendly_name'] as string) || 'Urządzenie',
+        type: (event['alarm_type'] as string) || 'alarm',
+        level: 'critical',
+        message: (event['message'] as string) || 'Zdarzenie alarmowe!',
+        battery: 100,
+        timestamp: (event['timestamp'] as string) || new Date().toISOString(),
+        acknowledged: false,
+      };
+      this.notifications.update((list) => [item, ...list]);
     } else if (type === 'permit_join') {
       const dur = (event['duration'] as number) || 60;
       this.startPairingCountdown(dur);
@@ -649,5 +664,46 @@ export class Telemetry {
       this.pulseResetTimeouts.delete(ieee);
     }, 1200);
     this.pulseResetTimeouts.set(ieee, timer);
+  }
+
+  playAlarmAudio(): void {
+    if (this.isMuted()) return;
+    if (typeof window === 'undefined') return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc1.type = 'sawtooth';
+      osc2.type = 'sine';
+      
+      osc1.frequency.setValueAtTime(880, ctx.currentTime);
+      osc2.frequency.setValueAtTime(440, ctx.currentTime);
+      
+      // Siren dual sweeps
+      osc1.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.15);
+      osc1.frequency.linearRampToValueAtTime(880, ctx.currentTime + 0.3);
+      osc1.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.45);
+      osc1.frequency.linearRampToValueAtTime(880, ctx.currentTime + 0.6);
+      
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+      
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc1.start();
+      osc2.start();
+      
+      osc1.stop(ctx.currentTime + 0.8);
+      osc2.stop(ctx.currentTime + 0.8);
+    } catch (err) {
+      console.debug('Failed to play alarm audio:', err);
+    }
   }
 }

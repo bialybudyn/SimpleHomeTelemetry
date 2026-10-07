@@ -785,6 +785,107 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
         </div>
       }
 
+      <!-- Alarmy dźwiękowe i powiadomienia (dla wybranych kategorii) -->
+      @if (category() === 'sensor' || category() === 'climate' || category() === 'occupancy' || category() === 'contact' || category() === 'water_leak') {
+        <div class="mt-3.5 pt-3 border-t border-slate-800/40 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-slate-400 flex items-center gap-1.5">
+              <mat-icon class="text-sm !w-4 !h-4 text-amber-500" [class.animate-pulse]="isAlarmActive()">
+                {{ isAlarmActive() ? 'notifications_active' : 'notifications' }}
+              </mat-icon>
+              <span>Alarm dźwiękowy</span>
+            </span>
+            
+            @if (category() === 'occupancy') {
+              <button
+                (click)="toggleAlarmState('motion_alarm_enabled', $event)"
+                class="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer"
+                [class.bg-rose-500/20]="device().motion_alarm_enabled"
+                [class.text-rose-400]="device().motion_alarm_enabled"
+                [class.border-rose-500/30]="device().motion_alarm_enabled"
+                [class.bg-slate-950]="!device().motion_alarm_enabled"
+                [class.text-slate-500]="!device().motion_alarm_enabled"
+                [class.border-slate-800]="!device().motion_alarm_enabled"
+              >
+                {{ device().motion_alarm_enabled ? 'WŁĄCZONY' : 'WYŁĄCZONY' }}
+              </button>
+            } @else if (category() === 'contact') {
+              <button
+                (click)="toggleAlarmState('contact_alarm_enabled', $event)"
+                class="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer"
+                [class.bg-rose-500/20]="device().contact_alarm_enabled"
+                [class.text-rose-400]="device().contact_alarm_enabled"
+                [class.border-rose-500/30]="device().contact_alarm_enabled"
+                [class.bg-slate-950]="!device().contact_alarm_enabled"
+                [class.text-slate-500]="!device().contact_alarm_enabled"
+                [class.border-slate-800]="!device().contact_alarm_enabled"
+              >
+                {{ device().contact_alarm_enabled ? 'WŁĄCZONY' : 'WYŁĄCZONY' }}
+              </button>
+            } @else if (category() === 'water_leak') {
+              <button
+                (click)="toggleAlarmState('water_alarm_enabled', $event)"
+                class="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer"
+                [class.bg-rose-500/20]="device().water_alarm_enabled"
+                [class.text-rose-400]="device().water_alarm_enabled"
+                [class.border-rose-500/30]="device().water_alarm_enabled"
+                [class.bg-slate-950]="!device().water_alarm_enabled"
+                [class.text-slate-500]="!device().water_alarm_enabled"
+                [class.border-slate-800]="!device().water_alarm_enabled"
+              >
+                {{ device().water_alarm_enabled ? 'WŁĄCZONY' : 'WYŁĄCZONY' }}
+              </button>
+            } @else {
+              <!-- sensor lub climate (temperatura) -->
+              <button
+                (click)="toggleAlarmState('temp_alarm_enabled', $event)"
+                class="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer"
+                [class.bg-rose-500/20]="device().temp_alarm_enabled"
+                [class.text-rose-400]="device().temp_alarm_enabled"
+                [class.border-rose-500/30]="device().temp_alarm_enabled"
+                [class.bg-slate-950]="!device().temp_alarm_enabled"
+                [class.text-slate-500]="!device().temp_alarm_enabled"
+                [class.border-slate-800]="!device().temp_alarm_enabled"
+              >
+                {{ device().temp_alarm_enabled ? 'WŁĄCZONY' : 'WYŁĄCZONY' }}
+              </button>
+            }
+          </div>
+
+          <!-- Dodatkowe progi dla alarmu temperatury -->
+          @if ((category() === 'sensor' || category() === 'climate') && device().temp_alarm_enabled) {
+            <div class="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1.5">
+              <div class="space-y-0.5">
+                <span class="text-slate-500 block text-[9px]">Próg min (°C):</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="40"
+                  step="0.5"
+                  [value]="device().temp_alarm_min ?? 16.0"
+                  (click)="$event.stopPropagation()"
+                  (change)="setAdvancedAttr('temp_alarm_min', $any($event.target).value)"
+                  class="w-full px-2 py-1 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-rose-500 font-mono text-center"
+                />
+              </div>
+              <div class="space-y-0.5">
+                <span class="text-slate-500 block text-[9px]">Próg max (°C):</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  step="0.5"
+                  [value]="device().temp_alarm_max ?? 28.0"
+                  (click)="$event.stopPropagation()"
+                  (change)="setAdvancedAttr('temp_alarm_max', $any($event.target).value)"
+                  class="w-full px-2 py-1 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-rose-500 font-mono text-center"
+                />
+              </div>
+            </div>
+          }
+        </div>
+      }
+
       <!-- Stopka kafelka: Znacznik czasu oraz jakość sygnału (LQI) -->
       <div class="flex items-center justify-between text-[11px] text-slate-400 pt-3 border-t border-slate-800/60">
         <div class="flex items-center gap-1.5">
@@ -819,6 +920,37 @@ export class DeviceCard {
 
   readonly showAdvanced = signal<boolean>(false);
   readonly showSchedule = signal<boolean>(false);
+
+  readonly isAlarmActive = computed(() => {
+    const d = this.device();
+    const cat = this.category();
+    if (cat === 'sensor' || cat === 'climate') {
+      if (!d.temp_alarm_enabled || d.last_temperature === null || d.last_temperature === undefined) return false;
+      const minT = d.temp_alarm_min ?? 16.0;
+      const maxT = d.temp_alarm_max ?? 28.0;
+      return d.last_temperature < minT || d.last_temperature > maxT;
+    }
+    if (cat === 'occupancy') {
+      return !!(d.motion_alarm_enabled && d.occupancy);
+    }
+    if (cat === 'contact') {
+      return !!(d.contact_alarm_enabled && d.contact === false);
+    }
+    if (cat === 'water_leak') {
+      return !!(d.water_alarm_enabled && d.water_leak);
+    }
+    return false;
+  });
+
+  toggleAlarmState(feature: string, event: MouseEvent): void {
+    event.stopPropagation();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentVal = Boolean((this.device() as any)[feature]);
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { [feature]: !currentVal },
+    });
+  }
 
   readonly daysOfWeek = [
     { key: 'monday', label: 'Poniedziałek' },

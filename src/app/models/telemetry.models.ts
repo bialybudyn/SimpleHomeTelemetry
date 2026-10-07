@@ -71,6 +71,14 @@ export interface Device {
   occupancy?: boolean | null;     // true = ruch/obecność wykryta
   water_leak?: boolean | null;    // true = alarm zalania
   illuminance?: number | null;    // lux
+
+  // Alarmy lokalne z poziomu przeglądarki i powiadomienia
+  temp_alarm_enabled?: boolean | null;
+  temp_alarm_min?: number | null;
+  temp_alarm_max?: number | null;
+  motion_alarm_enabled?: boolean | null;
+  contact_alarm_enabled?: boolean | null;
+  water_alarm_enabled?: boolean | null;
 }
 
 export interface TelemetryPoint {
