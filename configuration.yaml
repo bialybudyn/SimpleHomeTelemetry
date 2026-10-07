@@ -1,0 +1,33 @@
+# configuration.yaml dla Zigbee2MQTT z koordynatorem/routerem Sonoff Dongle Max (Dongle-M EFR32MG24)
+# Dokumentacja i przewodnik sprzętowy: https://dongle.sonoff.tech/guide/dongle-m/
+homeassistant: false
+permit_join: false
+
+mqtt:
+  base_topic: zigbee2mqtt
+  server: 'mqtt://localhost:1883'
+
+serial:
+  # 1. Połączenie sieciowe TCP (Ethernet / PoE / Wi-Fi) - zalecane dla Sonoff Dongle Max:
+  port: tcp://Dongle-M.local:6638
+  # Alternatywnie bezpośredni adres IP koordynatora, np.:
+  # port: tcp://192.168.1.120:6638
+  # 2. Połączenie lokalne USB fallback:
+  # Linux: /dev/ttyACM0 lub /dev/serial/by-id/usb-Silicon_Labs_Sonoff_Dongle-M_...
+  # Windows: COM3
+  # port: /dev/ttyACM0
+
+  # Dla układu Silicon Labs EFR32MG24 w Z2M wymagany sterownik 'ember' (EZSP v7.4+)
+  adapter: ember
+  baudrate: 115200
+
+frontend:
+  port: 8080
+
+advanced:
+  network_key: GENERATE
+  pan_id: GENERATE
+  ext_pan_id: GENERATE
+  channel: 15
+  log_level: info
+

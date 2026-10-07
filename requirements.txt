@@ -1,0 +1,16 @@
+# Zależności Python dla backendu monitorowania Zigbee Sonoff Dongle-M
+
+# Wspólne (baza danych, API REST i WebSocket)
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.6.0
+websockets>=12.0
+
+# Implementacja 2 (Zigbee2MQTT + Broker Mosquitto)
+paho-mqtt>=2.0.0
+
+# Implementacja 1 (Natywna zigpy z obsługą Silicon Labs EZSP / Ember EFR32MG24)
+# Opcjonalnie, instalowane przy wyborze wariantu natywnego:
+bellows>=0.38.0
+zigpy>=0.63.0
+pyserial-asyncio>=0.6

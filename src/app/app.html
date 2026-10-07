@@ -1,0 +1,417 @@
+<!-- GÓRNY PASEK STANU (3-strefowy Top Bar) -->
+<header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5">
+  <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+    
+    <!-- Strefa 1: Marka & Koordynator -->
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-cyan-950/40 shrink-0">
+        <mat-icon class="text-xl">router</mat-icon>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="text-base font-bold tracking-tight text-white">Zigbee Dongle-M</span>
+          <span class="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700/60">
+            EFR32MG24
+          </span>
+        </div>
+        <p class="text-xs text-slate-400">Monitoring IoT bez Home Assistanta</p>
+      </div>
+    </div>
+
+    <!-- Strefa 2: Nawigacja zakładkowa -->
+    <nav class="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium">
+      <button
+        (click)="setTab('dashboard')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'dashboard'"
+        [class.text-white]="activeTab() === 'dashboard'"
+        [class.shadow-sm]="activeTab() === 'dashboard'"
+        [class.text-slate-400]="activeTab() !== 'dashboard'"
+        [class.hover:text-white]="activeTab() !== 'dashboard'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">dashboard</mat-icon>
+        <span>Pulpit na żywo</span>
+      </button>
+
+      <button
+        (click)="setTab('installer')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'installer'"
+        [class.text-white]="activeTab() === 'installer'"
+        [class.shadow-sm]="activeTab() === 'installer'"
+        [class.text-slate-400]="activeTab() !== 'installer'"
+        [class.hover:text-white]="activeTab() !== 'installer'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">terminal</mat-icon>
+        <span>Instalator & Usługi w tle</span>
+      </button>
+
+      <button
+        (click)="setTab('dongle-max')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'dongle-max'"
+        [class.text-white]="activeTab() === 'dongle-max'"
+        [class.shadow-sm]="activeTab() === 'dongle-max'"
+        [class.text-slate-400]="activeTab() !== 'dongle-max'"
+        [class.hover:text-white]="activeTab() !== 'dongle-max'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">router</mat-icon>
+        <span>Dongle Max (Sieć & Router)</span>
+      </button>
+
+      <button
+        (click)="setTab('analytics')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'analytics'"
+        [class.text-white]="activeTab() === 'analytics'"
+        [class.shadow-sm]="activeTab() === 'analytics'"
+        [class.text-slate-400]="activeTab() !== 'analytics'"
+        [class.hover:text-white]="activeTab() !== 'analytics'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">insights</mat-icon>
+        <span>Analityka (Chart.js)</span>
+      </button>
+
+      <button
+        (click)="setTab('code')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'code'"
+        [class.text-white]="activeTab() === 'code'"
+        [class.shadow-sm]="activeTab() === 'code'"
+        [class.text-slate-400]="activeTab() !== 'code'"
+        [class.hover:text-white]="activeTab() !== 'code'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">code</mat-icon>
+        <span>Pliki Python & Wdrożenie</span>
+      </button>
+
+      <button
+        (click)="setTab('android')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'android'"
+        [class.text-white]="activeTab() === 'android'"
+        [class.shadow-sm]="activeTab() === 'android'"
+        [class.text-slate-400]="activeTab() !== 'android'"
+        [class.hover:text-white]="activeTab() !== 'android'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">android</mat-icon>
+        <span>Aplikacja Android</span>
+      </button>
+
+      <button
+        (click)="setTab('simulator')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'simulator'"
+        [class.text-white]="activeTab() === 'simulator'"
+        [class.shadow-sm]="activeTab() === 'simulator'"
+        [class.text-slate-400]="activeTab() !== 'simulator'"
+        [class.hover:text-white]="activeTab() !== 'simulator'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4">tune</mat-icon>
+        <span>Konsola Testowa</span>
+      </button>
+    </nav>
+
+    <!-- Strefa 3: Status WebSocket & Przycisk parowania -->
+    <div class="flex items-center gap-3">
+      <!-- Status połączenia strumieniowego -->
+      <div
+        class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono"
+        [class.bg-emerald-950/40]="telemetry.connectionStatus() === 'connected'"
+        [class.border-emerald-800/60]="telemetry.connectionStatus() === 'connected'"
+        [class.bg-slate-950]="telemetry.connectionStatus() === 'connecting'"
+        [class.border-slate-800]="telemetry.connectionStatus() === 'connecting'"
+        [class.bg-rose-950/40]="telemetry.connectionStatus() === 'disconnected'"
+        [class.border-rose-800/60]="telemetry.connectionStatus() === 'disconnected'"
+      >
+        <span
+          class="w-2.5 h-2.5 rounded-full"
+          [class.bg-emerald-500]="telemetry.connectionStatus() === 'connected'"
+          [class.shadow-sm]="telemetry.connectionStatus() === 'connected'"
+          [class.shadow-emerald-500/50]="telemetry.connectionStatus() === 'connected'"
+          [class.bg-amber-500]="telemetry.connectionStatus() === 'connecting'"
+          [class.animate-pulse]="telemetry.connectionStatus() === 'connecting'"
+          [class.bg-rose-500]="telemetry.connectionStatus() === 'disconnected'"
+        ></span>
+        <span class="text-slate-300">
+          @if (telemetry.connectionStatus() === 'connected') {
+            Połączono (Live)
+          } @else if (telemetry.connectionStatus() === 'connecting') {
+            Łączenie...
+          } @else {
+            Rozłączono
+          }
+        </span>
+      </div>
+
+      <!-- Przycisk Parowania Permit-Join z odliczaniem -->
+      <button
+        (click)="triggerPairing()"
+        [disabled]="telemetry.isPairing()"
+        class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 text-white shadow-md shadow-cyan-900/30 transition-all cursor-pointer"
+        title="Włącz tryb parowania Zigbee permit-join na 60 sekund"
+      >
+        <mat-icon
+          class="text-sm !w-4 !h-4"
+          [class.animate-spin]="telemetry.isPairing()"
+        >
+          {{ telemetry.isPairing() ? 'refresh' : 'sensors' }}
+        </mat-icon>
+        <span class="font-bold tracking-wide">
+          @if (telemetry.isPairing()) {
+            Pairing ({{ telemetry.pairingRemainingSeconds() }}s)
+          } @else {
+            Pairing
+          }
+        </span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Pasek aktywnego parowania (odliczanie 60s) -->
+  @if (telemetry.isPairing()) {
+    <div class="mt-3 max-w-7xl mx-auto p-3.5 rounded-xl bg-cyan-950 border border-cyan-700 text-cyan-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in shadow-lg shadow-cyan-950/50">
+      <div class="flex items-center gap-3">
+        <mat-icon class="text-cyan-400 text-lg animate-spin !w-5 !h-5 shrink-0">wifi_tethering</mat-icon>
+        <div>
+          <span class="font-bold text-white">Tryb parowania aktywny (Zigbee permit-join włączony na koordynatorze Sonoff Dongle-M):</span>
+          <p class="text-cyan-300/80 text-[11px] mt-0.5">
+            Przytrzymaj przycisk parowania na czujniku przez 5 sekund, aż dioda LED zamiga. Urządzenie zostanie automatycznie zarejestrowane w bazie SQLite.
+          </p>
+        </div>
+      </div>
+      <div class="font-mono font-bold text-cyan-300 flex items-center gap-2 shrink-0 self-end sm:self-center">
+        <span>Pozostało:</span>
+        <span class="text-base text-white font-extrabold px-3 py-1 rounded-lg bg-cyan-900 border border-cyan-500 shadow-inner">
+          {{ telemetry.pairingRemainingSeconds() }}s
+        </span>
+      </div>
+    </div>
+  }
+</header>
+
+<!-- TOAST ALERT DLA BATERII < 15% -->
+@if (telemetry.batteryAlertToast(); as toast) {
+  <aside aria-label="Powiadomienia o baterii" class="fixed top-20 right-4 z-50 max-w-md p-4 rounded-2xl bg-rose-950 border border-rose-600 shadow-2xl flex items-start justify-between gap-3 animate-in slide-in-from-top-4">
+    <div class="flex items-start gap-3">
+      <mat-icon class="text-rose-400 text-xl animate-pulse">battery_alert</mat-icon>
+      <div>
+        <div class="text-xs font-bold text-white flex items-center gap-2">
+          <span>Ostrzeżenie: Niski poziom baterii (&lt; 15%)</span>
+          <span class="px-2 py-0.5 rounded-md bg-rose-900 border border-rose-700 text-rose-200 text-[10px] font-mono font-bold">
+            {{ toast.battery }}%
+          </span>
+        </div>
+        <p class="text-xs text-rose-200 mt-1 leading-relaxed">{{ toast.message }}</p>
+        <div class="text-[10px] font-mono text-rose-400 mt-1.5">
+          {{ toast.device_name }} ({{ toast.device_ieee }})
+        </div>
+      </div>
+    </div>
+    <button
+      (click)="telemetry.dismissBatteryToast()"
+      class="text-rose-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+      title="Zamknij"
+    >
+      <mat-icon class="text-base">close</mat-icon>
+    </button>
+  </aside>
+}
+
+<!-- GŁÓWNA ZAWARTOŚĆ -->
+<main class="max-w-7xl mx-auto px-4 lg:px-8 py-8">
+
+  <!-- ZAKŁADKA 1: PULPIT NA ŻYWO (DASHBOARD) -->
+  @if (activeTab() === 'dashboard') {
+    <!-- Ostrzeżenie o baterii < 15% w głównym pulpicie -->
+    @if (telemetry.lowBatteryDevices().length > 0) {
+      <div class="mb-6 p-4 rounded-2xl bg-rose-950/70 border border-rose-800 text-rose-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-rose-950/30">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-rose-900/80 border border-rose-700 flex items-center justify-center text-rose-300 shrink-0">
+            <mat-icon class="text-xl animate-pulse">battery_alert</mat-icon>
+          </div>
+          <div>
+            <h4 class="text-sm font-bold text-white">
+              Wykryto niski stan baterii (&lt; 15%) w czujnikach Zigbee
+            </h4>
+            <div class="flex flex-wrap gap-2 mt-1.5">
+              @for (dev of telemetry.lowBatteryDevices(); track dev.ieee_address) {
+                <span class="text-xs px-2.5 py-1 rounded-lg bg-rose-900/90 border border-rose-700 font-mono text-rose-200 flex items-center gap-1.5">
+                  <mat-icon class="text-xs !w-3.5 !h-3.5 text-rose-400">battery_alert</mat-icon>
+                  <strong>{{ dev.friendly_name || dev.ieee_address }}</strong>: {{ dev.battery }}%
+                </span>
+              }
+            </div>
+          </div>
+        </div>
+        <span class="text-xs font-mono text-rose-300 shrink-0 self-end sm:self-center">
+          Wymagana wymiana baterii
+        </span>
+      </div>
+    }
+    <!-- Podsumowanie stanu sieci -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+      <div>
+        <h2 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+          Pomiary środowiskowe na żywo
+          @if (telemetry.alertCount() > 0) {
+            <span class="px-2 py-0.5 text-xs rounded-full bg-rose-950/80 border border-rose-800 text-rose-300 font-normal">
+              {{ telemetry.alertCount() }} alerty progowe
+            </span>
+          }
+        </h2>
+        <p class="text-xs text-slate-400 mt-0.5">
+          Automatyczna aktualizacja w czasie rzeczywistym. Kliknij kafelek, aby otworzyć wykres analityczny Chart.js.
+        </p>
+      </div>
+
+      <div class="flex items-center gap-4 text-xs font-mono">
+        <div class="text-slate-400">
+          <span>Ostatnia transmisja:</span>
+          <span class="text-cyan-400 ml-1 font-semibold">{{ telemetry.lastTransmissionTime() }}</span>
+        </div>
+        <div class="text-slate-500">·</div>
+        <div class="text-slate-400">
+          <span>Czujniki:</span>
+          <span class="text-white font-bold ml-1">{{ telemetry.devices().length }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Siatka kafelków czujników -->
+    @if (telemetry.devices().length > 0) {
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+        @for (device of telemetry.devices(); track device.ieee_address) {
+          <app-device-card
+            [device]="device"
+            (cardClicked)="openAnalytics($event)"
+            (renameRequested)="openRenameDialog($event)"
+          />
+        }
+      </div>
+    } @else {
+      <!-- Stan pusty: brak danych -->
+      <div class="text-center py-20 px-4 border border-dashed border-slate-800 rounded-2xl bg-slate-900/40">
+        <div class="w-14 h-14 mx-auto mb-3 rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
+          <mat-icon class="text-3xl">sensors_off</mat-icon>
+        </div>
+        <h3 class="text-base font-semibold text-slate-300">brak danych — Brak zarejestrowanych czujników Zigbee</h3>
+        <p class="text-xs text-slate-500 max-w-md mx-auto mt-1 mb-5">
+          Podłącz koordynator lub router Sonoff Dongle Max (układ Silicon Labs EFR32MG24) przez sieć TCP (port 6638) lub USB i kliknij przycisk parowania.
+        </p>
+        <button
+          (click)="triggerPairing()"
+          class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+        >
+          Rozpocznij parowanie (60s)
+        </button>
+      </div>
+    }
+
+    <!-- Informacja o sprzęcie na dole ekranu -->
+    <div class="mt-12 p-4 rounded-xl bg-slate-900/40 border border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400 font-mono">
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span>Sprzęt: ITEAD Sonoff Zigbee 3.0 Dongle Max (EFR32MG24 + ESP32-D0WD)</span>
+      </div>
+      <div class="flex items-center gap-4 text-[11px]">
+        <span>Połączenie: Sieć TCP / USB</span>
+        <span>Baza: SQLite (WAL Mode)</span>
+        <span>API: REST + WebSocket</span>
+      </div>
+    </div>
+  }
+
+  <!-- ZAKŁADKA INSTALATOR & USŁUGI W TLE -->
+  @if (activeTab() === 'installer') {
+    <app-installer-view />
+  }
+
+  <!-- ZAKŁADKA DONGLE MAX: SIEĆ I TRYB ROUTERA -->
+  @if (activeTab() === 'dongle-max') {
+    <app-dongle-max />
+  }
+
+  <!-- ZAKŁADKA 2: ANALITYKA (CHART.JS) -->
+  @if (activeTab() === 'analytics') {
+    <app-analytics-view />
+  }
+
+  <!-- ZAKŁADKA 3: PLIKI ŹRÓDŁOWE I WDROŻENIE -->
+  @if (activeTab() === 'code') {
+    <app-code-viewer />
+  }
+
+  <!-- ZAKŁADKA 3: APLIKACJA ANDROID -->
+  @if (activeTab() === 'android') {
+    <app-android-viewer />
+  }
+
+  <!-- ZAKŁADKA 4: KONSOLA TESTOWA (SYMULATOR) -->
+  @if (activeTab() === 'simulator') {
+    <app-simulator />
+  }
+
+</main>
+
+<!-- MODAL ANALITYCZNY ZE SZCZEGÓŁOWYM WYKRESEM CHART.JS -->
+@if (selectedDeviceForModal()) {
+  <app-analytics-modal
+    [device]="selectedDeviceForModal()"
+    (closed)="closeAnalytics()"
+  />
+}
+
+<!-- MODAL ZMIANY NAZWY CZUJNIKA -->
+@if (renamingDevice()) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in">
+    <button
+      type="button"
+      class="fixed inset-0 w-full h-full bg-slate-950/80 backdrop-blur-sm border-none cursor-default"
+      aria-label="Zamknij okno zmiany nazwy"
+      (click)="cancelRename()"
+    ></button>
+    <div class="relative z-10 bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-xl bg-cyan-950 border border-cyan-800 flex items-center justify-center text-cyan-400">
+          <mat-icon class="text-xl">edit</mat-icon>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-white">Zmień nazwę czujnika</h3>
+          <p class="text-xs font-mono text-slate-500">{{ renamingDevice()?.ieee_address }}</p>
+        </div>
+      </div>
+
+      <div class="mb-5">
+        <label for="renameSensorInput" class="block text-xs font-medium text-slate-400 mb-1.5">Nowa przyjazna nazwa</label>
+        <input
+          id="renameSensorInput"
+          #renameInput
+          type="text"
+          [value]="renameValue()"
+          (input)="updateRenameValue(renameInput.value)"
+          (keydown.enter)="confirmRename()"
+          (keydown.escape)="cancelRename()"
+          placeholder="np. Salon, Sypialnia, Spiżarnia"
+          class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-sm focus:outline-none focus:border-cyan-500"
+        />
+      </div>
+
+      <div class="flex items-center justify-end gap-2.5">
+        <button
+          (click)="cancelRename()"
+          class="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+        >
+          Anuluj
+        </button>
+        <button
+          (click)="confirmRename()"
+          class="px-4 py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-900/30 transition-colors"
+        >
+          Zapisz zmianę
+        </button>
+      </div>
+    </div>
+  </div>
+}

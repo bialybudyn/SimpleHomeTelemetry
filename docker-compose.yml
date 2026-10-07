@@ -1,0 +1,55 @@
+services:
+  # 1. Broker MQTT Eclipse Mosquitto
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: sonoff_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  # 2. Demon Zigbee2MQTT dla Sonoff Dongle-M (układ Silicon Labs EFR32MG24)
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:latest
+    container_name: sonoff_zigbee2mqtt
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./data_z2m:/app/data
+      - /run/udev:/run/udev:ro
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Europe/Warsaw
+    # Zmapuj swój port USB koordynatora Sonoff Dongle-M
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+
+  # 3. Dedykowany backend monitoringu IoT (FastAPI + SQLite + WebSocket)
+  iot-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sonoff_telemetry_backend
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "8000:8000"
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - MQTT_TOPIC_PREFIX=zigbee2mqtt
+      - SQLITE_DB_PATH=/data/telemetry.db
+      - PORT=8000
+    volumes:
+      - db_data:/data
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  db_data:
