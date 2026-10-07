@@ -4,6 +4,7 @@ import {
   computed,
   input,
   output,
+  signal,
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { Device, DeviceCategory } from '../../models/telemetry.models';
@@ -182,6 +183,280 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
               <span class="text-[10px] font-mono">{{ device().child_lock === 'LOCK' ? 'Zablok.' : 'Odblok.' }}</span>
             </button>
           </div>
+
+          <!-- Przycisk rozwijający zaawansowane opcje -->
+          <div class="pt-2 border-t border-slate-800/40">
+            <button
+              (click)="toggleAdvanced($event)"
+              class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-950/80 hover:bg-slate-950 border border-slate-800 text-[11px] font-bold text-slate-300 hover:text-white transition-all cursor-pointer"
+            >
+              <div class="flex items-center gap-1.5">
+                <mat-icon class="text-xs text-indigo-400 !w-4 !h-4">tune</mat-icon>
+                <span>Opcje zaawansowane głowicy</span>
+              </div>
+              <mat-icon class="text-xs text-slate-500 !w-4 !h-4 transition-transform duration-200" [style.transform]="showAdvanced() ? 'rotate(180deg)' : 'none'">
+                expand_more
+              </mat-icon>
+            </button>
+          </div>
+
+          <!-- Opcje zaawansowane rozwijane -->
+          @if (showAdvanced()) {
+            <div
+              role="button"
+              tabindex="0"
+              (click)="$event.stopPropagation()"
+              (keydown.enter)="$event.stopPropagation()"
+              (keydown.space)="$event.stopPropagation()"
+              class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono space-y-3.5 animate-fade-in"
+            >
+              
+              <!-- 1. Kalibracja temperatury -->
+              <div class="space-y-1">
+                <div class="flex justify-between text-slate-400">
+                  <span>Kalibracja czujnika:</span>
+                  <span class="text-white font-bold">{{ device().local_temperature_calibration ?? 0 }}°C</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="-12.5"
+                    max="12.5"
+                    step="0.5"
+                    [value]="device().local_temperature_calibration ?? 0"
+                    (change)="setAdvancedAttr('local_temperature_calibration', $any($event.target).value)"
+                    class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <!-- 2. Detekcja otwartego okna (Open window) & Ochrona przed mrozem (Frost protection) -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between">
+                  <span class="text-slate-400">Otwarte okno:</span>
+                  <button
+                    (click)="setAdvancedAttr('open_window', !device().open_window)"
+                    class="px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer"
+                    [class.bg-emerald-500/20]="device().open_window"
+                    [class.text-emerald-400]="device().open_window"
+                    [class.border-emerald-500/30]="device().open_window"
+                    [class.bg-slate-950]="!device().open_window"
+                    [class.text-slate-500]="!device().open_window"
+                    [class.border-slate-800]="!device().open_window"
+                  >
+                    {{ device().open_window ? 'ON' : 'OFF' }}
+                  </button>
+                </div>
+
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between">
+                  <span class="text-slate-400">Ochrona mróz:</span>
+                  <input
+                    type="number"
+                    min="4"
+                    max="15"
+                    step="0.5"
+                    [value]="device().frost_protection_temperature ?? 5.0"
+                    (change)="setAdvancedAttr('frost_protection_temperature', $any($event.target).value)"
+                    class="w-12 px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white text-center focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <!-- 3. Wybór czujnika temperatury (local/remote) & Zdalna temp -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Czujnik źródła:</span>
+                  <select
+                    [value]="device().temperature_sensor ?? 'local_temperature'"
+                    (change)="setAdvancedAttr('temperature_sensor', $any($event.target).value)"
+                    class="w-full bg-slate-950 border border-slate-800 text-white rounded text-[10px] px-1 py-0.5"
+                  >
+                    <option value="local_temperature">Wbudowany</option>
+                    <option value="remote_temperature">Zewnętrzny</option>
+                  </select>
+                </div>
+
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Zdalna temp:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="50"
+                    step="0.1"
+                    [value]="device().external_temperature ?? 22.0"
+                    (change)="setAdvancedAttr('external_temperature', $any($event.target).value)"
+                    class="w-full px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <!-- 4. Stopień otwarcia zaworu (Valve opening degree) & Dokładność regulacji (Temperature accuracy) -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Zawór otwarcie:</span>
+                  <div class="flex items-center gap-1.5 justify-between">
+                    <span class="text-emerald-400 font-bold">{{ device().valve_opening_degree ?? 100 }}%</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="5"
+                      [value]="device().valve_opening_degree ?? 100"
+                      (change)="setAdvancedAttr('valve_opening_degree', $any($event.target).value)"
+                      class="w-10 px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white text-center text-[10px]"
+                    />
+                  </div>
+                </div>
+
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Dokładność regulacji:</span>
+                  <select
+                    [value]="device().temperature_accuracy ?? -1"
+                    (change)="setAdvancedAttr('temperature_accuracy', $any($event.target).value)"
+                    class="w-full bg-slate-950 border border-slate-800 text-white rounded text-[10px] px-1 py-0.5"
+                  >
+                    <option value="-1">-1.0°C (Default)</option>
+                    <option value="-0.8">-0.8°C</option>
+                    <option value="-0.6">-0.6°C</option>
+                    <option value="-0.4">-0.4°C</option>
+                    <option value="-0.2">-0.2°C</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- 5. Smart temperature control (PID) -->
+              <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between">
+                <span class="text-slate-400">Kontrola PID (Smart Temp):</span>
+                <button
+                  (click)="setAdvancedAttr('smart_temperature_control', !device().smart_temperature_control)"
+                  class="px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer"
+                  [class.bg-emerald-500/20]="device().smart_temperature_control"
+                  [class.text-emerald-400]="device().smart_temperature_control"
+                  [class.border-emerald-500/30]="device().smart_temperature_control"
+                  [class.bg-slate-950]="!device().smart_temperature_control"
+                  [class.text-slate-500]="!device().smart_temperature_control"
+                  [class.border-slate-800]="!device().smart_temperature_control"
+                >
+                  {{ device().smart_temperature_control ? 'WŁĄCZ' : 'WYŁĄCZ' }}
+                </button>
+              </div>
+
+              <!-- 6. Tryb tymczasowy i czas trwania -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Tryb tymczasowy:</span>
+                  <select
+                    [value]="device().temporary_mode ?? 'none'"
+                    (change)="setAdvancedAttr('temporary_mode', $any($event.target).value)"
+                    class="w-full bg-slate-950 border border-slate-800 text-white rounded text-[10px] px-1 py-0.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="none">Brak (Normalny)</option>
+                    <option value="boost">Boost Mode</option>
+                    <option value="timer">Timer Mode</option>
+                  </select>
+                </div>
+
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Czas trwania (min):</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="1440"
+                    step="5"
+                    [value]="device().temporary_mode_duration ?? 0"
+                    (change)="setAdvancedAttr('temporary_mode_duration', $any($event.target).value)"
+                    class="w-full px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500 text-center"
+                  />
+                </div>
+              </div>
+
+              <!-- 7. Temperatura trybu Timer i Stopień zamknięcia zaworu -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Temp. trybu Timer:</span>
+                  <input
+                    type="number"
+                    min="4"
+                    max="35"
+                    step="0.5"
+                    [value]="device().timer_mode_target_temp ?? 20"
+                    (change)="setAdvancedAttr('timer_mode_target_temp', $any($event.target).value)"
+                    class="w-full px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500 text-center"
+                  />
+                </div>
+
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                  <span class="text-slate-400 block">Zawór zamkn. stopień:</span>
+                  <div class="flex items-center gap-1.5 justify-between">
+                    <span class="text-orange-400 font-bold">{{ device().valve_closing_degree ?? 100 }}%</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="5"
+                      [value]="device().valve_closing_degree ?? 100"
+                      (change)="setAdvancedAttr('valve_closing_degree', $any($event.target).value)"
+                      class="w-10 px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white text-center text-[10px]"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 8. Harmonogram Tygodniowy (Auto) -->
+              <div class="pt-2 border-t border-slate-800/40">
+                <button
+                  (click)="toggleSchedule($event)"
+                  class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-950/80 hover:bg-slate-950 border border-slate-800 text-[11px] font-bold text-slate-300 hover:text-white transition-all cursor-pointer"
+                >
+                  <div class="flex items-center gap-1.5">
+                    <mat-icon class="text-xs text-amber-400 !w-4 !h-4">calendar_month</mat-icon>
+                    <span>Harmonogram Tygodniowy (Auto)</span>
+                  </div>
+                  <mat-icon class="text-xs text-slate-500 !w-4 !h-4 transition-transform duration-200" [style.transform]="showSchedule() ? 'rotate(180deg)' : 'none'">
+                    expand_more
+                  </mat-icon>
+                </button>
+              </div>
+
+              @if (showSchedule()) {
+                <div
+                  role="button"
+                  tabindex="0"
+                  (click)="$event.stopPropagation()"
+                  (keydown.enter)="$event.stopPropagation()"
+                  (keydown.space)="$event.stopPropagation()"
+                  class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono space-y-3 animate-fade-in"
+                >
+                  <div class="text-[10px] text-slate-400 leading-relaxed mb-1">
+                    Format: oddzielone spacją 'HH:mm/temperatura' (np. '00:00/20.0 06:00/22.0'). Pierwsza zmiana od 00:00, zakres: 4-35°C (krok 0.5°C). Upisuj do 6 zmian dziennie.
+                  </div>
+                  
+                  @for (day of daysOfWeek; track day.key) {
+                    <div class="space-y-1">
+                      <span class="block text-[10px] text-slate-400 uppercase font-semibold">{{ day.label }}:</span>
+                      <input
+                        type="text"
+                        [value]="getWeeklySchedule(day.key)"
+                        (change)="setAdvancedAttr('weekly_schedule_' + day.key, $any($event.target).value)"
+                        class="w-full px-2.5 py-1 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 text-[11px]"
+                        placeholder="np. 00:00/20.0 06:00/22.0"
+                      />
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- 9. Dane techniczne z silnika i napięć -->
+              <div class="p-2.5 rounded-lg bg-slate-950/50 border border-slate-800 text-[9px] font-mono grid grid-cols-2 gap-x-3 gap-y-1.5 text-slate-400 pt-3 border-t border-slate-800/40">
+                <div>Kroki kalibr. (Idle): <span class="text-slate-200 font-semibold">{{ device().idle_steps ?? '211' }}</span></div>
+                <div>Kroki zamkn. (Closing): <span class="text-slate-200 font-semibold">{{ device().closing_steps ?? '432' }}</span></div>
+                <div>Napięcie otw. (Limit): <span class="text-slate-200 font-semibold">{{ device().valve_opening_limit_voltage ?? '1654' }}mV</span></div>
+                <div>Napięcie zamk. (Limit): <span class="text-slate-200 font-semibold">{{ device().valve_closing_limit_voltage ?? '2597' }}mV</span></div>
+                <div class="col-span-2">Napięcie silnika (Running): <span class="text-slate-200 font-semibold">{{ device().valve_motor_running_voltage ?? '1127' }}mV</span></div>
+              </div>
+
+            </div>
+          }
         </div>
       }
 
@@ -541,6 +816,43 @@ export class DeviceCard {
   readonly cardClicked = output<Device>();
   readonly renameRequested = output<Device>();
   readonly commandRequested = output<{ device: Device; command: Record<string, unknown> }>();
+
+  readonly showAdvanced = signal<boolean>(false);
+  readonly showSchedule = signal<boolean>(false);
+
+  readonly daysOfWeek = [
+    { key: 'monday', label: 'Poniedziałek' },
+    { key: 'tuesday', label: 'Wtorek' },
+    { key: 'wednesday', label: 'Środa' },
+    { key: 'thursday', label: 'Czwartek' },
+    { key: 'friday', label: 'Piątek' },
+    { key: 'saturday', label: 'Sobota' },
+    { key: 'sunday', label: 'Niedziela' },
+  ];
+
+  toggleAdvanced(event: MouseEvent): void {
+    event.stopPropagation();
+    this.showAdvanced.set(!this.showAdvanced());
+  }
+
+  toggleSchedule(event: MouseEvent): void {
+    event.stopPropagation();
+    this.showSchedule.set(!this.showSchedule());
+  }
+
+  getWeeklySchedule(dayKey: string): string {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dev = this.device() as any;
+    return dev[`weekly_schedule_${dayKey}`] ?? '00:00/20.0';
+  }
+
+  setAdvancedAttr(attr: string, value: unknown): void {
+    const parsedValue = typeof value === 'string' && !isNaN(Number(value)) ? Number(value) : value;
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { [attr]: parsedValue }
+    });
+  }
 
   readonly category = computed<DeviceCategory>(() => {
     const d = this.device();

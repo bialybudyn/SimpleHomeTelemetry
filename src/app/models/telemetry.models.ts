@@ -31,6 +31,33 @@ export interface Device {
   running_state?: 'heat' | 'idle' | string | null;
   child_lock?: 'LOCK' | 'UNLOCK' | string | null;
   open_window?: boolean | null;
+  local_temperature_calibration?: number | null;
+  frost_protection_temperature?: number | null;
+  temperature_sensor?: string | null;
+  external_temperature?: number | null;
+  valve_opening_degree?: number | null;
+  temperature_accuracy?: number | null;
+  smart_temperature_control?: boolean | null;
+
+  // Dodatkowe opcje TRVZB zgloszone przez uzytkownika
+  timer_mode_target_temp?: number | null;
+  temporary_mode_duration?: number | null;
+  temporary_mode?: 'none' | 'boost' | 'timer' | string | null;
+  valve_closing_degree?: number | null;
+  idle_steps?: number | null;
+  closing_steps?: number | null;
+  valve_opening_limit_voltage?: number | null;
+  valve_closing_limit_voltage?: number | null;
+  valve_motor_running_voltage?: number | null;
+  
+  // Harmonogramy tygodniowe
+  weekly_schedule_sunday?: string | null;
+  weekly_schedule_monday?: string | null;
+  weekly_schedule_tuesday?: string | null;
+  weekly_schedule_wednesday?: string | null;
+  weekly_schedule_thursday?: string | null;
+  weekly_schedule_friday?: string | null;
+  weekly_schedule_saturday?: string | null;
 
   // Włączniki i inteligentne gniazdka (Sonoff S26R2ZB, S40ZB, ZBMINIR2, Tuya Smart Plug)
   state?: 'ON' | 'OFF' | string | null;
@@ -124,6 +151,14 @@ export interface DongleMaxConfig {
   baudrate: number;
   rtscts: boolean;
   web_console_url: string;
+  // SoftAP Mode (Dongle-M tworzy własną sieć Wi-Fi Access Point dla urządzeń IoT)
+  wifi_softap_mode?: boolean;
+  wifi_softap_ssid?: string;
+  wifi_softap_password?: string;
+  wifi_softap_channel?: number;
+  wifi_softap_ip?: string;
+  wifi_softap_dhcp_start?: string;
+  wifi_softap_dhcp_end?: string;
 }
 
 export interface DongleMaxTestResult {

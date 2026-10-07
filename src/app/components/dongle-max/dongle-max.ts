@@ -157,7 +157,7 @@ import { DongleMaxConfig } from '../../models/telemetry.models';
             }
           </div>
 
-          <form [formGroup]="configForm" (ngSubmit)="saveConfig()" class="space-y-4">
+          <form [formGroup]="configForm" (ngSubmit)="saveConfig()" class="space-y-6">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <!-- Tryb połączenia -->
               <div>
@@ -214,33 +214,64 @@ import { DongleMaxConfig } from '../../models/telemetry.models';
                   class="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-mono focus:outline-none focus:border-cyan-500"
                 />
               </div>
+            </div>
 
-              <!-- Sterownik / Adapter -->
-              <div>
-                <label for="adapterInput" class="block text-xs font-medium text-slate-400 mb-1.5">
-                  Sterownik Zigbee (Adapter)
-                </label>
-                <input
-                  id="adapterInput"
-                  type="text"
-                  formControlName="adapter"
-                  readonly
-                  class="w-full px-3.5 py-2 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-400 text-xs font-mono"
-                />
+            <!-- SEKCJA PUNKTU DOSTĘPOWEGO SOFTAP (DONGLE-M BROADCASTING OWN WI-FI NETWORK) -->
+            <div class="p-4 rounded-xl bg-indigo-950/30 border border-indigo-800/60 space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2 text-indigo-300 font-bold text-xs">
+                  <mat-icon class="text-indigo-400 text-sm !w-4 !h-4">wifi_tethering</mat-icon>
+                  <span>Własny Punkt Dostępny Wi-Fi (Dongle-M Access Point / SoftAP)</span>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold">
+                  Natywny ESP32 SoftAP
+                </span>
               </div>
 
-              <!-- Port USB (opcjonalny dla trybu USB) -->
-              <div>
-                <label for="serialPortInput" class="block text-xs font-medium text-slate-400 mb-1.5">
-                  Ścieżka portu USB fallback
-                </label>
-                <input
-                  id="serialPortInput"
-                  type="text"
-                  formControlName="serial_port"
-                  placeholder="/dev/ttyACM0"
-                  class="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-mono focus:outline-none focus:border-cyan-500"
-                />
+              <p class="text-[11px] text-slate-300 leading-relaxed">
+                Moduł ESP32 w Dongle Max potrafi nadawać własną bezprzewodową sieć Wi-Fi! Urządzenia wykonawcze (wentylatory GOW 007, gniazdka Wi-Fi, przekaźniki) łączą się bezpośrednio do Dongle-M bez pośrednictwa domowego routera.
+              </p>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label for="apSsidInput" class="block text-[11px] font-semibold text-slate-400 mb-1">Nazwa Sieci AP (SSID)</label>
+                  <input
+                    id="apSsidInput"
+                    type="text"
+                    formControlName="wifi_softap_ssid"
+                    class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label for="apPassInput" class="block text-[11px] font-semibold text-slate-400 mb-1">Hasło WPA2-PSK (min. 8 znaków)</label>
+                  <input
+                    id="apPassInput"
+                    type="text"
+                    formControlName="wifi_softap_password"
+                    class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label for="apIpInput" class="block text-[11px] font-semibold text-slate-400 mb-1">Adres IP Bramki SoftAP</label>
+                  <input
+                    id="apIpInput"
+                    type="text"
+                    formControlName="wifi_softap_ip"
+                    class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label for="apChannelInput" class="block text-[11px] font-semibold text-slate-400 mb-1">Kanał Wi-Fi 2.4GHz</label>
+                  <input
+                    id="apChannelInput"
+                    type="number"
+                    formControlName="wifi_softap_channel"
+                    class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
               </div>
             </div>
 
@@ -415,6 +446,11 @@ export class DongleMaxManager {
     port: new FormControl<number>(6638, { nonNullable: true, validators: [Validators.required] }),
     serial_port: new FormControl<string>('/dev/ttyACM0', { nonNullable: true }),
     adapter: new FormControl<string>('ember', { nonNullable: true }),
+    wifi_softap_mode: new FormControl<boolean>(true, { nonNullable: true }),
+    wifi_softap_ssid: new FormControl<string>('Sonoff-Dongle-M-AP', { nonNullable: true }),
+    wifi_softap_password: new FormControl<string>('simplehome123', { nonNullable: true }),
+    wifi_softap_channel: new FormControl<number>(6, { nonNullable: true }),
+    wifi_softap_ip: new FormControl<string>('192.168.4.1', { nonNullable: true }),
   });
 
   constructor() {
@@ -432,6 +468,11 @@ export class DongleMaxManager {
       port: cur.port || 6638,
       serial_port: cur.serial_port || '/dev/ttyACM0',
       adapter: cur.adapter || 'ember',
+      wifi_softap_mode: cur.wifi_softap_mode ?? true,
+      wifi_softap_ssid: cur.wifi_softap_ssid || 'Sonoff-Dongle-M-AP',
+      wifi_softap_password: cur.wifi_softap_password || 'simplehome123',
+      wifi_softap_channel: cur.wifi_softap_channel || 6,
+      wifi_softap_ip: cur.wifi_softap_ip || '192.168.4.1',
     });
   }
 

@@ -80,6 +80,29 @@ interface Device {
   running_state?: string | null;
   child_lock?: string | null;
   open_window?: boolean | null;
+  local_temperature_calibration?: number | null;
+  frost_protection_temperature?: number | null;
+  temperature_sensor?: string | null;
+  external_temperature?: number | null;
+  valve_opening_degree?: number | null;
+  temperature_accuracy?: number | null;
+  smart_temperature_control?: boolean | null;
+  timer_mode_target_temp?: number | null;
+  temporary_mode_duration?: number | null;
+  temporary_mode?: string | null;
+  valve_closing_degree?: number | null;
+  idle_steps?: number | null;
+  closing_steps?: number | null;
+  valve_opening_limit_voltage?: number | null;
+  valve_closing_limit_voltage?: number | null;
+  valve_motor_running_voltage?: number | null;
+  weekly_schedule_sunday?: string | null;
+  weekly_schedule_monday?: string | null;
+  weekly_schedule_tuesday?: string | null;
+  weekly_schedule_wednesday?: string | null;
+  weekly_schedule_thursday?: string | null;
+  weekly_schedule_friday?: string | null;
+  weekly_schedule_saturday?: string | null;
 
   // Wlaczniki i gniazdka sterowane (Sonoff S26R2ZB, ZBMINIR2, Tuya Smart Plug)
   state?: string | null;
@@ -160,6 +183,13 @@ export interface DongleMaxConfig {
   baudrate: number;
   rtscts: boolean;
   web_console_url: string;
+  wifi_softap_mode?: boolean;
+  wifi_softap_ssid?: string;
+  wifi_softap_password?: string;
+  wifi_softap_channel?: number;
+  wifi_softap_ip?: string;
+  wifi_softap_dhcp_start?: string;
+  wifi_softap_dhcp_end?: string;
 }
 
 export interface MqttStatus {
@@ -187,6 +217,13 @@ let dongleMaxConfig: DongleMaxConfig = {
   baudrate: 115200,
   rtscts: false,
   web_console_url: 'http://Dongle-M.local',
+  wifi_softap_mode: true,
+  wifi_softap_ssid: 'Sonoff-Dongle-M-AP',
+  wifi_softap_password: 'simplehome123',
+  wifi_softap_channel: 6,
+  wifi_softap_ip: '192.168.4.1',
+  wifi_softap_dhcp_start: '192.168.4.2',
+  wifi_softap_dhcp_end: '192.168.4.50',
 };
 
 // Czysty rejestr urzadzen i historii (BEZ SYNTETYZOWANYCH DANYCH)
@@ -482,22 +519,58 @@ interface Z2mDeviceItem {
               if (ieee && !isCoordinator) {
                 const devName = item.friendly_name || item.friendlyName || `Czujnik ${ieee.slice(-4)}`;
                 const modelName = item.definition?.description || item.definition?.model || item.model_id || item.modelId || 'Zigbee Device';
-                const existing = devices.get(ieee);
-                if (!existing) {
-                  devices.set(ieee, {
-                    ieee_address: ieee,
-                    friendly_name: devName,
-                    model: modelName,
-                    last_seen: null,
-                    battery: null,
-                    last_temperature: null,
-                    last_humidity: null,
-                    linkquality: null,
-                  });
+                
+                // Unikanie duplikatów: sprawdzamy, czy istnieje urządzenie tymczasowe utworzone z friendly_name
+                const normName = devName.toLowerCase().replace(/[\s_-]+/g, '');
+                let tempDevKey: string | null = null;
+                for (const [key, d] of devices.entries()) {
+                  if (!key.startsWith('0x') && !key.startsWith('wifi_')) {
+                    const normK = key.toLowerCase().replace(/[\s_-]+/g, '');
+                    const normF = (d.friendly_name || '').toLowerCase().replace(/[\s_-]+/g, '');
+                    if (normK === normName || normF === normName) {
+                      tempDevKey = key;
+                      break;
+                    }
+                  }
+                }
+
+                if (tempDevKey) {
+                  // Znaleziono tymczasowe urzadzenie z danymi telemetrycznymi! Migrujemy je na właściwy adres IEEE.
+                  const tempDev = devices.get(tempDevKey)!;
+                  devices.delete(tempDevKey);
+                  
+                  tempDev.ieee_address = ieee;
+                  tempDev.friendly_name = devName;
+                  tempDev.model = modelName;
+                  devices.set(ieee, tempDev);
+                  
+                  // Migrujemy rowniez historie pomiarow
+                  const history = telemetryStore.get(tempDevKey);
+                  if (history) {
+                    telemetryStore.delete(tempDevKey);
+                    history.forEach((p) => { p.device_ieee = ieee; });
+                    telemetryStore.set(ieee, history);
+                  }
+                  
                   updated++;
                 } else {
-                  existing.friendly_name = devName;
-                  existing.model = modelName;
+                  const existing = devices.get(ieee);
+                  if (!existing) {
+                    devices.set(ieee, {
+                      ieee_address: ieee,
+                      friendly_name: devName,
+                      model: modelName,
+                      last_seen: null,
+                      battery: null,
+                      last_temperature: null,
+                      last_humidity: null,
+                      linkquality: null,
+                    });
+                    updated++;
+                  } else {
+                    existing.friendly_name = devName;
+                    existing.model = modelName;
+                  }
                 }
               }
             });
@@ -525,8 +598,38 @@ interface Z2mDeviceItem {
           return;
         }
 
-        const payload = JSON.parse(message.toString());
-        if (typeof payload === 'object' && payload !== null) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let payload: any = {};
+        const msgStr = message.toString().trim();
+
+        try {
+          if (msgStr.startsWith('{') && msgStr.endsWith('}')) {
+            payload = JSON.parse(msgStr);
+          } else {
+            // Pojedyncza wartosc atrybutu (np. zigbee2mqtt/Czujnik C Salon/temperature = 22.5)
+            if (topicParts.length > 1) {
+              const attr = topicParts[1].trim();
+              const valNum = parseFloat(msgStr);
+              if (!isNaN(valNum)) {
+                payload[attr] = valNum;
+              } else {
+                payload[attr] = msgStr;
+              }
+            }
+          }
+        } catch {
+          if (topicParts.length > 1) {
+            const attr = topicParts[1].trim();
+            const valNum = parseFloat(msgStr);
+            if (!isNaN(valNum)) {
+              payload[attr] = valNum;
+            } else {
+              payload[attr] = msgStr;
+            }
+          }
+        }
+
+        if (typeof payload === 'object' && payload !== null && Object.keys(payload).length > 0) {
           // Elastyczne wyszukiwanie urzadzenia po friendly_name, ieee_address, nazwie znormalizowanej lub ladunku
           let dev: Device | undefined = undefined;
 
@@ -560,9 +663,9 @@ interface Z2mDeviceItem {
           if (!dev) {
             const payloadIeee = payload.ieee_address || payload.ieeeAddress || payload.device?.ieeeAddr || payload.device?.ieee_address;
             const payloadName = payload.friendly_name || payload.friendlyName || payload.device?.friendlyName;
-            if (payloadIeee && devices.has(payloadIeee)) {
+            if (payloadIeee && typeof payloadIeee === 'string' && devices.has(payloadIeee)) {
               dev = devices.get(payloadIeee);
-            } else if (payloadName) {
+            } else if (payloadName && typeof payloadName === 'string') {
               for (const d of devices.values()) {
                 if (d.friendly_name === payloadName) {
                   dev = d;
@@ -576,30 +679,30 @@ interface Z2mDeviceItem {
           const targetIeee = dev ? dev.ieee_address : (payload.ieee_address || baseTopic);
 
           const temp =
-            payload.temperature !== undefined && payload.temperature !== null ? parseFloat(payload.temperature) :
-            payload.local_temperature !== undefined && payload.local_temperature !== null ? parseFloat(payload.local_temperature) :
-            payload.temp !== undefined && payload.temp !== null ? parseFloat(payload.temp) :
-            payload.temperature_sensor !== undefined && payload.temperature_sensor !== null ? parseFloat(payload.temperature_sensor) :
+            payload.temperature !== undefined && payload.temperature !== null ? parseFloat(payload.temperature as string) :
+            payload.local_temperature !== undefined && payload.local_temperature !== null ? parseFloat(payload.local_temperature as string) :
+            payload.temp !== undefined && payload.temp !== null ? parseFloat(payload.temp as string) :
+            payload.temperature_sensor !== undefined && payload.temperature_sensor !== null ? parseFloat(payload.temperature_sensor as string) :
             null;
 
           const hum =
-            payload.humidity !== undefined && payload.humidity !== null ? parseFloat(payload.humidity) :
-            payload.relative_humidity !== undefined && payload.relative_humidity !== null ? parseFloat(payload.relative_humidity) :
-            payload.hum !== undefined && payload.hum !== null ? parseFloat(payload.hum) :
-            payload.humidity_sensor !== undefined && payload.humidity_sensor !== null ? parseFloat(payload.humidity_sensor) :
+            payload.humidity !== undefined && payload.humidity !== null ? parseFloat(payload.humidity as string) :
+            payload.relative_humidity !== undefined && payload.relative_humidity !== null ? parseFloat(payload.relative_humidity as string) :
+            payload.hum !== undefined && payload.hum !== null ? parseFloat(payload.hum as string) :
+            payload.humidity_sensor !== undefined && payload.humidity_sensor !== null ? parseFloat(payload.humidity_sensor as string) :
             null;
 
           const bat =
-            payload.battery !== undefined && payload.battery !== null ? parseInt(payload.battery, 10) :
-            payload.battery_level !== undefined && payload.battery_level !== null ? parseInt(payload.battery_level, 10) :
-            payload.battery_percent !== undefined && payload.battery_percent !== null ? parseInt(payload.battery_percent, 10) :
-            payload.battery_percentage !== undefined && payload.battery_percentage !== null ? parseInt(payload.battery_percentage, 10) :
+            payload.battery !== undefined && payload.battery !== null ? parseInt(payload.battery as string, 10) :
+            payload.battery_level !== undefined && payload.battery_level !== null ? parseInt(payload.battery_level as string, 10) :
+            payload.battery_percent !== undefined && payload.battery_percent !== null ? parseInt(payload.battery_percent as string, 10) :
+            payload.battery_percentage !== undefined && payload.battery_percentage !== null ? parseInt(payload.battery_percentage as string, 10) :
             null;
 
           const lq =
-            payload.linkquality !== undefined && payload.linkquality !== null ? parseInt(payload.linkquality, 10) :
-            payload.link_quality !== undefined && payload.link_quality !== null ? parseInt(payload.link_quality, 10) :
-            payload.lqi !== undefined && payload.lqi !== null ? parseInt(payload.lqi, 10) :
+            payload.linkquality !== undefined && payload.linkquality !== null ? parseInt(payload.linkquality as string, 10) :
+            payload.link_quality !== undefined && payload.link_quality !== null ? parseInt(payload.link_quality  as string, 10) :
+            payload.lqi !== undefined && payload.lqi !== null ? parseInt(payload.lqi as string, 10) :
             null;
 
           const modelName = payload.model || payload.device?.model || (dev ? dev.model : 'Zigbee Device');
@@ -627,6 +730,8 @@ interface Z2mDeviceItem {
             dev.last_seen = nowStr;
           }
 
+          if (!dev) return;
+
           // Pola dla wentylatora Gotze & Jensen GOW 007 (Tuya WiFi)
           if (payload.fan_speed !== undefined) dev.fan_speed = payload.fan_speed as number | string;
           if (payload.fan_mode !== undefined) dev.fan_mode = String(payload.fan_mode);
@@ -639,6 +744,8 @@ interface Z2mDeviceItem {
           // Pola dla glowic termostatycznych Sonoff TRVZB / TRVZB Gen 2
           if (payload.current_heating_setpoint !== undefined && payload.current_heating_setpoint !== null) {
             dev.current_heating_setpoint = parseFloat(payload.current_heating_setpoint);
+          } else if (payload.occupied_heating_setpoint !== undefined && payload.occupied_heating_setpoint !== null) {
+            dev.current_heating_setpoint = parseFloat(payload.occupied_heating_setpoint);
           }
           if (payload.local_temperature !== undefined && payload.local_temperature !== null) {
             dev.local_temperature = parseFloat(payload.local_temperature);
@@ -648,6 +755,25 @@ interface Z2mDeviceItem {
           if (payload.running_state !== undefined) dev.running_state = String(payload.running_state);
           if (payload.child_lock !== undefined) dev.child_lock = String(payload.child_lock);
           if (payload.open_window !== undefined) dev.open_window = Boolean(payload.open_window);
+          if (payload.local_temperature_calibration !== undefined && payload.local_temperature_calibration !== null) {
+            dev.local_temperature_calibration = parseFloat(payload.local_temperature_calibration);
+          }
+          if (payload.frost_protection_temperature !== undefined && payload.frost_protection_temperature !== null) {
+            dev.frost_protection_temperature = parseFloat(payload.frost_protection_temperature);
+          }
+          if (payload.temperature_sensor !== undefined) dev.temperature_sensor = String(payload.temperature_sensor);
+          if (payload.external_temperature !== undefined && payload.external_temperature !== null) {
+            dev.external_temperature = parseFloat(payload.external_temperature);
+          }
+          if (payload.valve_opening_degree !== undefined && payload.valve_opening_degree !== null) {
+            dev.valve_opening_degree = parseInt(payload.valve_opening_degree, 10);
+          }
+          if (payload.temperature_accuracy !== undefined && payload.temperature_accuracy !== null) {
+            dev.temperature_accuracy = parseFloat(payload.temperature_accuracy);
+          }
+          if (payload.smart_temperature_control !== undefined) {
+            dev.smart_temperature_control = Boolean(payload.smart_temperature_control);
+          }
 
           // Pola dla wlacznikow i inteligentnych gniazdek (Sonoff S26R2, ZBMINIR2, Tuya Plug)
           if (payload.state !== undefined) dev.state = String(payload.state);
@@ -1060,7 +1186,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     return;
   }
 
-  const cmd = req.body;
+  const cmd = { ...req.body };
   if (!cmd || typeof cmd !== 'object') {
     res.status(400).json({ detail: 'Invalid payload' });
     return;
@@ -1068,9 +1194,26 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
 
   // Zastosowanie natychmiastowe w pamieci serwera (optimistic update)
   if (cmd.state !== undefined) dev.state = String(cmd.state);
-  if (cmd.current_heating_setpoint !== undefined) dev.current_heating_setpoint = parseFloat(cmd.current_heating_setpoint);
+  if (cmd.current_heating_setpoint !== undefined) {
+    dev.current_heating_setpoint = parseFloat(cmd.current_heating_setpoint);
+    // Kluczowa poprawka: Mapowanie nastawy zadanej na pole "occupied_heating_setpoint" wymagane przez Sonoff TRVZB w Zigbee2MQTT
+    cmd.occupied_heating_setpoint = dev.current_heating_setpoint;
+  }
   if (cmd.system_mode !== undefined) dev.system_mode = String(cmd.system_mode);
   if (cmd.child_lock !== undefined) dev.child_lock = String(cmd.child_lock);
+  if (cmd.local_temperature_calibration !== undefined) {
+    dev.local_temperature_calibration = parseFloat(cmd.local_temperature_calibration);
+  }
+  if (cmd.frost_protection_temperature !== undefined) {
+    dev.frost_protection_temperature = parseFloat(cmd.frost_protection_temperature);
+  }
+  if (cmd.temperature_sensor !== undefined) dev.temperature_sensor = String(cmd.temperature_sensor);
+  if (cmd.external_temperature !== undefined) dev.external_temperature = parseFloat(cmd.external_temperature);
+  if (cmd.valve_opening_degree !== undefined) dev.valve_opening_degree = parseInt(cmd.valve_opening_degree, 10);
+  if (cmd.temperature_accuracy !== undefined) dev.temperature_accuracy = parseFloat(cmd.temperature_accuracy);
+  if (cmd.smart_temperature_control !== undefined) {
+    dev.smart_temperature_control = Boolean(cmd.smart_temperature_control);
+  }
 
   // Sterowanie wentylatorem GOW 007 (Tuya WiFi)
   if (cmd.fan_speed !== undefined) dev.fan_speed = cmd.fan_speed;
@@ -1087,10 +1230,82 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   if (mqttClient?.connected) {
     const targetTopic = `${mqttStatus.topic_prefix}/${dev.friendly_name || ieee}/set`;
     try {
-      mqttClient.publish(targetTopic, JSON.stringify(cmd));
-      console.log(`[MQTT SET] Wyslano do ${targetTopic}:`, JSON.stringify(cmd));
+      // Przygotuj czysty ladunek tylko z kluczami zapisywalnymi dla Z2M
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const publishPayload: any = {};
+      
+      // Stan zasilania ON/OFF
+      if (cmd.state !== undefined) {
+        publishPayload.state = cmd.state;
+      }
+      
+      // Dla glowic TRVZB: mapowanie nastawy na occupied_heating_setpoint
+      if (cmd.current_heating_setpoint !== undefined) {
+        publishPayload.occupied_heating_setpoint = parseFloat(String(cmd.current_heating_setpoint));
+      } else if (cmd.occupied_heating_setpoint !== undefined) {
+        publishPayload.occupied_heating_setpoint = parseFloat(String(cmd.occupied_heating_setpoint));
+      }
+      
+      if (cmd.system_mode !== undefined) publishPayload.system_mode = cmd.system_mode;
+      if (cmd.child_lock !== undefined) publishPayload.child_lock = cmd.child_lock;
+      if (cmd.local_temperature_calibration !== undefined) {
+        publishPayload.local_temperature_calibration = parseFloat(String(cmd.local_temperature_calibration));
+      }
+      if (cmd.frost_protection_temperature !== undefined) {
+        publishPayload.frost_protection_temperature = parseFloat(String(cmd.frost_protection_temperature));
+      }
+      if (cmd.temperature_sensor !== undefined) publishPayload.temperature_sensor = cmd.temperature_sensor;
+      if (cmd.external_temperature !== undefined) {
+        publishPayload.external_temperature = parseFloat(String(cmd.external_temperature));
+      }
+      if (cmd.valve_opening_degree !== undefined) {
+        publishPayload.valve_opening_degree = parseInt(String(cmd.valve_opening_degree), 10);
+      }
+      if (cmd.temperature_accuracy !== undefined) {
+        publishPayload.temperature_accuracy = parseFloat(String(cmd.temperature_accuracy));
+      }
+      if (cmd.smart_temperature_control !== undefined) {
+        publishPayload.smart_temperature_control = cmd.smart_temperature_control;
+      }
+      
+      // Dodatkowe funkcjonalności zgłoszone przez użytkownika:
+      if (cmd.timer_mode_target_temp !== undefined) {
+        publishPayload.timer_mode_target_temp = parseFloat(String(cmd.timer_mode_target_temp));
+      }
+      if (cmd.temporary_mode_duration !== undefined) {
+        publishPayload.temporary_mode_duration = parseInt(String(cmd.temporary_mode_duration), 10);
+      }
+      if (cmd.temporary_mode !== undefined) {
+        publishPayload.temporary_mode = cmd.temporary_mode;
+      }
+      if (cmd.valve_closing_degree !== undefined) {
+        publishPayload.valve_closing_degree = parseInt(String(cmd.valve_closing_degree), 10);
+      }
+      
+      // Harmonogramy tygodniowe
+      for (const day of ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']) {
+        const key = `weekly_schedule_${day}`;
+        if (cmd[key] !== undefined) {
+          publishPayload[key] = cmd[key];
+        }
+      }
+
+      // Sterowanie wentylatorem GOW 007 (Tuya WiFi)
+      if (cmd.fan_speed !== undefined) publishPayload.fan_speed = cmd.fan_speed;
+      if (cmd.fan_mode !== undefined) publishPayload.fan_mode = cmd.fan_mode;
+      if (cmd.fan_oscillation !== undefined) publishPayload.fan_oscillation = cmd.fan_oscillation;
+      if (cmd.fan_timer !== undefined) publishPayload.fan_timer = cmd.fan_timer;
+      if (cmd.fan_ionizer !== undefined) publishPayload.fan_ionizer = cmd.fan_ionizer;
+      if (cmd.fan_humidifier !== undefined) publishPayload.fan_humidifier = cmd.fan_humidifier;
+      if (cmd.fan_uv !== undefined) publishPayload.fan_uv = cmd.fan_uv;
+
+      // Publikujemy tylko jeśli zawiera zapisywalne klucze
+      if (Object.keys(publishPayload).length > 0) {
+        mqttClient.publish(targetTopic, JSON.stringify(publishPayload));
+        console.log(`[MQTT SET] Wyslano czysty ladunek do ${targetTopic}:`, JSON.stringify(publishPayload));
+      }
     } catch (e) {
-      console.warn(`[MQTT SET] Blad publikacji do ${targetTopic}:`, e);
+      console.warn(`[MQTT SET] Blad publikacji:`, e);
     }
   }
 
