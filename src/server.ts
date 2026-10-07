@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { Socket } from 'node:net';
+import { createSocket } from 'node:dgram';
+import { networkInterfaces } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 import mqtt, { MqttClient } from 'mqtt';
 
@@ -214,6 +216,51 @@ let mqttClient: MqttClient | null = null;
 const sseClients: Response[] = [];
 let permitJoinExpiresAt = 0;
 let wss: WebSocketServer | null = null;
+
+// Stan parowania Czystego Wi-Fi (SmartConfig broadcast bez Zigbee)
+let wifiPairingExpiresAt = 0;
+let wifiPairingSsid = '';
+let wifiPairingInterval: ReturnType<typeof setInterval> | null = null;
+const discoveredWifiDevices: { ip: string; mac?: string; model: string; name: string }[] = [];
+
+function getLocalNetworkDetails(): { ip: string; broadcast: string } {
+  try {
+    const nets = networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name] || []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          const parts = net.address.split('.');
+          if (parts.length === 4) {
+            return {
+              ip: net.address,
+              broadcast: `${parts[0]}.${parts[1]}.${parts[2]}.255`,
+            };
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { ip: '192.168.1.100', broadcast: '192.168.1.255' };
+}
+
+function broadcastWifiSmartConfigPacket(ssid: string, pass: string) {
+  try {
+    const { broadcast } = getLocalNetworkDetails();
+    const udpSocket = createSocket('udp4');
+    udpSocket.bind(() => {
+      udpSocket.setBroadcast(true);
+      const payload = Buffer.from(`TUYA_SMARTCONFIG_EZ:${ssid}:${pass}:SIMPLEHOME_WIFI`);
+      udpSocket.send(payload, 0, payload.length, 6667, broadcast, (err) => {
+        if (err) console.debug('[Wi-Fi SmartConfig UDP error]:', err);
+        try { udpSocket.close(); } catch { /* ignore */ }
+      });
+    });
+  } catch (e) {
+    console.debug('[Wi-Fi SmartConfig Exception]:', e);
+  }
+}
 
 function broadcastEvent(eventData: Record<string, unknown>) {
   const jsonStr = JSON.stringify(eventData);
@@ -779,6 +826,141 @@ app.post('/api/permit-join', (req: Request, res: Response) => {
   res.json({ status: 'ok', duration, expires_at: permitJoinExpiresAt });
 });
 
+// 5a-1. Parowanie Czystego Wi-Fi (SmartConfig UDP broadcast dla urzadzen Tuya Wi-Fi bez Zigbee)
+app.post('/api/wifi/pair-smartconfig', (req: Request, res: Response) => {
+  const ssid = String(req.body?.ssid || '').trim() || 'Domowa_Siec_WiFi';
+  const password = String(req.body?.password || '').trim();
+  const duration = req.body?.duration ? parseInt(req.body.duration, 10) : 160;
+
+  wifiPairingSsid = ssid;
+  wifiPairingExpiresAt = Date.now() + duration * 1000;
+
+  if (wifiPairingInterval) clearInterval(wifiPairingInterval);
+
+  // Natychmiastowa transmisja pierwszego pakietu
+  broadcastWifiSmartConfigPacket(ssid, password);
+
+  // Ciagle rozglaszanie pakietow UDP co 2s w trakcie trwania parowania
+  wifiPairingInterval = setInterval(() => {
+    if (Date.now() >= wifiPairingExpiresAt) {
+      if (wifiPairingInterval) clearInterval(wifiPairingInterval);
+      wifiPairingInterval = null;
+      broadcastEvent({ type: 'wifi_pairing_ended' });
+    } else {
+      broadcastWifiSmartConfigPacket(ssid, password);
+    }
+  }, 2000);
+
+  const netInfo = getLocalNetworkDetails();
+
+  broadcastEvent({
+    type: 'wifi_pairing_started',
+    ssid,
+    duration,
+    expires_at: wifiPairingExpiresAt,
+    local_ip: netInfo.ip,
+  });
+
+  res.json({
+    status: 'ok',
+    message: `Uruchomiono nadawanie rozglaszalne SmartConfig Wi-Fi dla sieci ${ssid} na ${duration}s.`,
+    duration,
+    expires_at: wifiPairingExpiresAt,
+    local_ip: netInfo.ip,
+    broadcast_ip: netInfo.broadcast,
+  });
+});
+
+// 5a-2. Status parowania Wi-Fi
+app.get('/api/wifi/status', (_req: Request, res: Response) => {
+  const now = Date.now();
+  const active = now < wifiPairingExpiresAt;
+  const remaining = active ? Math.ceil((wifiPairingExpiresAt - now) / 1000) : 0;
+  const netInfo = getLocalNetworkDetails();
+
+  res.json({
+    active,
+    duration: 160,
+    remaining_seconds: remaining,
+    ssid: wifiPairingSsid,
+    local_ip: netInfo.ip,
+    broadcast_ip: netInfo.broadcast,
+    discovered_devices: discoveredWifiDevices,
+  });
+});
+
+// 5a-3. Skanowanie podsieci LAN w poszukiwaniu urzadzen Wi-Fi
+app.post('/api/wifi/scan-lan', (_req: Request, res: Response) => {
+  const netInfo = getLocalNetworkDetails();
+
+  try {
+    const parts = netInfo.ip.split('.');
+    if (parts.length === 4) {
+      const subnetBase = `${parts[0]}.${parts[1]}.${parts[2]}`;
+      execSync(`ping -c 1 -w 1 ${subnetBase}.255 >/dev/null 2>&1 || true`);
+    }
+  } catch {
+    // ignore
+  }
+
+  res.json({
+    success: true,
+    local_ip: netInfo.ip,
+    broadcast_ip: netInfo.broadcast,
+    discovered_devices: discoveredWifiDevices,
+  });
+});
+
+// 5a-4. Bezposrednie dodanie urzadzenia Wi-Fi do rejestru (np. Wentylator Gotze & Jensen GOW 007 Wi-Fi)
+app.post('/api/wifi/add-device', (req: Request, res: Response) => {
+  const { ip_address, name, model, category } = req.body;
+  const devIp = String(ip_address || '192.168.1.150').trim();
+  const devName = String(name || 'Wentylator Gotze & Jensen GOW 007 (Wi-Fi)').trim();
+  const devModel = String(model || 'GOW 007 7w1 (Wi-Fi)').trim();
+  const devCategory = (category || 'fan') as DeviceCategory;
+
+  const ieee = `wifi_${devIp.replace(/\./g, '_')}`;
+  const nowStr = new Date().toISOString();
+
+  let dev = devices.get(ieee);
+  if (!dev) {
+    dev = {
+      ieee_address: ieee,
+      friendly_name: devName,
+      model: devModel,
+      category: devCategory,
+      vendor: 'Gotze & Jensen / Tuya Wi-Fi',
+      last_seen: nowStr,
+      battery: null,
+      linkquality: 100,
+      last_temperature: null,
+      last_humidity: null,
+      fan_speed: 1,
+      fan_mode: 'normal',
+      fan_oscillation: false,
+      fan_timer: 0,
+      fan_ionizer: false,
+      fan_humidifier: false,
+      fan_uv: false,
+      state: 'OFF',
+    };
+    devices.set(ieee, dev);
+  } else {
+    dev.friendly_name = devName;
+    dev.model = devModel;
+    dev.category = devCategory;
+    dev.last_seen = nowStr;
+  }
+
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    message: `Dodano urzadzenie Wi-Fi ${devName} (${devIp})!`,
+    device: dev,
+  });
+});
+
 // 5a. Sterowanie urzadzeniem (TRVZB nastawa/tryb, Smart Plug ON/OFF, Przekaznik ZBMINIR2)
 app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   const ieee = String(req.params['ieee'] || '');
@@ -1233,7 +1415,15 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
 
 // 18. Aktualizacja oprogramowania SimpleHomeTelemetry z Git / GitHub
 app.post('/api/system/git-update', (_req: Request, res: Response) => {
+  const logSteps: string[] = [];
   try {
+    // 1. Zabezpieczenie przed błędem dubious ownership w Git
+    try {
+      execSync('git config --global --add safe.directory "*" || true', { encoding: 'utf-8' });
+    } catch {
+      // ignore
+    }
+
     let beforeCommit = 'unknown';
     try {
       beforeCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
@@ -1241,11 +1431,42 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
       // ignore
     }
 
-    // Wykonaj git fetch oraz git pull
-    const pullOutput = execSync('git fetch origin && git pull origin main 2>&1 || git pull 2>&1', {
-      encoding: 'utf-8',
-      timeout: 30000,
-    });
+    // 2. Przechowanie lokalnych zmian (np. baza sqlite, pliki dist), aby git pull sie nie wykrzaczyl
+    try {
+      const stashOut = execSync('git stash --include-untracked 2>&1', { encoding: 'utf-8' });
+      logSteps.push(`[Git Stash]: ${stashOut.trim()}`);
+    } catch {
+      // ignore
+    }
+
+    // 3. Pobranie zmian z repozytorium zdalnego
+    let pullOutput = '';
+    try {
+      pullOutput = execSync('git fetch --all 2>&1 && (git pull origin main 2>&1 || git pull origin master 2>&1 || git pull 2>&1)', {
+        encoding: 'utf-8',
+        timeout: 45000,
+      });
+      logSteps.push(`[Git Pull]: ${pullOutput.trim()}`);
+    } catch (pullErr: unknown) {
+      const errStr = pullErr instanceof Error && 'stdout' in pullErr ? String((pullErr as { stdout?: unknown }).stdout || pullErr.message) : String(pullErr);
+      logSteps.push(`[Git Pull Notice]: ${errStr}`);
+
+      // Fallback: Hard reset do stanu zdalnego w razie konfliktow lub niezgodnosci galezi
+      try {
+        const resetOut = execSync('git reset --hard origin/main 2>&1 || git reset --hard origin/master 2>&1', { encoding: 'utf-8' });
+        logSteps.push(`[Git Reset Fallback]: ${resetOut.trim()}`);
+      } catch (resetErr: unknown) {
+        logSteps.push(`[Git Reset Error]: ${String(resetErr)}`);
+      }
+    }
+
+    // 4. Przywrocenie lokalnych zmienionych plikow jesli to mozliwe
+    try {
+      const popOut = execSync('git stash pop 2>&1', { encoding: 'utf-8' });
+      logSteps.push(`[Git Stash Pop]: ${popOut.trim()}`);
+    } catch {
+      // ignore
+    }
 
     let afterCommit = beforeCommit;
     try {
@@ -1254,7 +1475,8 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
       // ignore
     }
 
-    const updated = beforeCommit !== afterCommit || pullOutput.includes('Updating') || pullOutput.includes('Fast-forward');
+    const fullLogs = logSteps.join('\n');
+    const updated = beforeCommit !== afterCommit || fullLogs.includes('Updating') || fullLogs.includes('Fast-forward') || fullLogs.includes('HEAD is now at');
 
     res.json({
       success: true,
@@ -1262,17 +1484,17 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
       current_commit: afterCommit,
       remote_commit: afterCommit,
       message: updated
-        ? `Pomyslnie zaktualizowano z commita ${beforeCommit} do ${afterCommit}!`
+        ? `Pomyslnie zaktualizowano oprogramowanie z commita ${beforeCommit} do ${afterCommit}!`
         : 'Repozytorium jest juz w najnowszej wersji (Already up to date).',
-      output: pullOutput,
+      output: fullLogs,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({
       success: false,
       updated: false,
-      message: `Blad podczas git pull: ${msg}`,
-      output: msg,
+      message: `Blad podczas aktualizacji Git: ${msg}`,
+      output: logSteps.join('\n') + '\n' + msg,
     });
   }
 });

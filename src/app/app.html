@@ -22,7 +22,7 @@
     <nav class="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium">
       <button
         (click)="setTab('dashboard')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
         [class.bg-slate-800]="activeTab() === 'dashboard'"
         [class.text-white]="activeTab() === 'dashboard'"
         [class.shadow-sm]="activeTab() === 'dashboard'"
@@ -30,51 +30,25 @@
         [class.hover:text-white]="activeTab() !== 'dashboard'"
       >
         <mat-icon class="text-sm !w-4 !h-4">dashboard</mat-icon>
-        <span>Pulpit na żywo</span>
+        <span class="font-bold">Pulpit na żywo</span>
       </button>
 
       <button
-        (click)="setTab('installer')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'installer'"
-        [class.text-white]="activeTab() === 'installer'"
-        [class.shadow-sm]="activeTab() === 'installer'"
-        [class.text-slate-400]="activeTab() !== 'installer'"
-        [class.hover:text-white]="activeTab() !== 'installer'"
+        (click)="setTab('scenes')"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'scenes'"
+        [class.text-white]="activeTab() === 'scenes'"
+        [class.shadow-sm]="activeTab() === 'scenes'"
+        [class.text-slate-400]="activeTab() !== 'scenes'"
+        [class.hover:text-white]="activeTab() !== 'scenes'"
       >
-        <mat-icon class="text-sm !w-4 !h-4">terminal</mat-icon>
-        <span>Instalator & Usługi w tle</span>
-      </button>
-
-      <button
-        (click)="setTab('catalog')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'catalog'"
-        [class.text-white]="activeTab() === 'catalog'"
-        [class.shadow-sm]="activeTab() === 'catalog'"
-        [class.text-slate-400]="activeTab() !== 'catalog'"
-        [class.hover:text-white]="activeTab() !== 'catalog'"
-      >
-        <mat-icon class="text-sm !w-4 !h-4">hub</mat-icon>
-        <span>Katalog Sonoff & Tuya</span>
-      </button>
-
-      <button
-        (click)="setTab('dongle-max')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'dongle-max'"
-        [class.text-white]="activeTab() === 'dongle-max'"
-        [class.shadow-sm]="activeTab() === 'dongle-max'"
-        [class.text-slate-400]="activeTab() !== 'dongle-max'"
-        [class.hover:text-white]="activeTab() !== 'dongle-max'"
-      >
-        <mat-icon class="text-sm !w-4 !h-4">router</mat-icon>
-        <span>Dongle Max (Sieć & Router)</span>
+        <mat-icon class="text-sm !w-4 !h-4">account_tree</mat-icon>
+        <span class="font-bold">Sceny & Automatyzacja</span>
       </button>
 
       <button
         (click)="setTab('analytics')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
         [class.bg-slate-800]="activeTab() === 'analytics'"
         [class.text-white]="activeTab() === 'analytics'"
         [class.shadow-sm]="activeTab() === 'analytics'"
@@ -82,46 +56,20 @@
         [class.hover:text-white]="activeTab() !== 'analytics'"
       >
         <mat-icon class="text-sm !w-4 !h-4">insights</mat-icon>
-        <span>Analityka (Chart.js)</span>
+        <span class="font-bold">Analityka (Chart.js)</span>
       </button>
 
       <button
-        (click)="setTab('code')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'code'"
-        [class.text-white]="activeTab() === 'code'"
-        [class.shadow-sm]="activeTab() === 'code'"
-        [class.text-slate-400]="activeTab() !== 'code'"
-        [class.hover:text-white]="activeTab() !== 'code'"
+        (click)="setTab('settings')"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'settings'"
+        [class.text-white]="activeTab() === 'settings'"
+        [class.shadow-sm]="activeTab() === 'settings'"
+        [class.text-slate-400]="activeTab() !== 'settings'"
+        [class.hover:text-white]="activeTab() !== 'settings'"
       >
-        <mat-icon class="text-sm !w-4 !h-4">code</mat-icon>
-        <span>Pliki Python & Wdrożenie</span>
-      </button>
-
-      <button
-        (click)="setTab('android')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'android'"
-        [class.text-white]="activeTab() === 'android'"
-        [class.shadow-sm]="activeTab() === 'android'"
-        [class.text-slate-400]="activeTab() !== 'android'"
-        [class.hover:text-white]="activeTab() !== 'android'"
-      >
-        <mat-icon class="text-sm !w-4 !h-4">android</mat-icon>
-        <span>Aplikacja Android</span>
-      </button>
-
-      <button
-        (click)="setTab('simulator')"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'simulator'"
-        [class.text-white]="activeTab() === 'simulator'"
-        [class.shadow-sm]="activeTab() === 'simulator'"
-        [class.text-slate-400]="activeTab() !== 'simulator'"
-        [class.hover:text-white]="activeTab() !== 'simulator'"
-      >
-        <mat-icon class="text-sm !w-4 !h-4">tune</mat-icon>
-        <span>Konsola Testowa</span>
+        <mat-icon class="text-sm !w-4 !h-4">settings</mat-icon>
+        <span class="font-bold">Ustawienia serwera</span>
       </button>
     </nav>
 
@@ -172,15 +120,59 @@
         </mat-icon>
         <span class="font-bold tracking-wide">
           @if (telemetry.isPairing()) {
-            Pairing ({{ telemetry.pairingRemainingSeconds() }}s)
+            Zigbee ({{ telemetry.pairingRemainingSeconds() }}s)
           } @else {
-            Pairing
+            Zigbee
+          }
+        </span>
+      </button>
+
+      <!-- Przycisk Parowania Czystego Wi-Fi (SmartConfig bez Zigbee) -->
+      <button
+        (click)="openWifiModal()"
+        class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-900/30 transition-all cursor-pointer"
+        title="Parowanie urządzeń Wi-Fi (SmartConfig) - Wentylatory, Gniazdka Wi-Fi bez Zigbee"
+      >
+        <mat-icon
+          class="text-sm !w-4 !h-4"
+          [class.animate-spin]="telemetry.isWifiPairing()"
+        >
+          {{ telemetry.isWifiPairing() ? 'refresh' : 'wifi_find' }}
+        </mat-icon>
+        <span class="font-bold tracking-wide">
+          @if (telemetry.isWifiPairing()) {
+            Wi-Fi ({{ telemetry.wifiPairingRemainingSeconds() }}s)
+          } @else {
+            Parowanie Wi-Fi
           }
         </span>
       </button>
     </div>
 
   </div>
+
+  <!-- Pasek aktywnego parowania Wi-Fi (SmartConfig) -->
+  @if (telemetry.isWifiPairing()) {
+    <div class="mt-3 max-w-7xl mx-auto p-3.5 rounded-xl bg-indigo-950 border border-indigo-700 text-indigo-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in shadow-lg shadow-indigo-950/50">
+      <div class="flex items-center gap-3">
+        <mat-icon class="text-indigo-400 text-lg animate-spin !w-5 !h-5 shrink-0">wifi_find</mat-icon>
+        <div>
+          <div class="font-bold text-white flex items-center gap-2">
+            <span>Rozgłaszanie parowania SmartConfig Wi-Fi aktywne (Czyste Wi-Fi bez Zigbee)</span>
+            <span class="px-2 py-0.5 rounded bg-indigo-900 text-indigo-300 font-mono text-[10px]">{{ telemetry.wifiSsid() }}</span>
+          </div>
+          <p class="text-[11px] text-indigo-300">
+            Przytrzymaj przycisk Wi-Fi na wentylatorze Götze & Jensen GOW 007 przez 5s, aż dioda Wi-Fi szybko zamiga. Wentylator automatycznie połączy się z Twoją siecią!
+          </p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        <span class="font-mono text-sm font-bold text-indigo-400 bg-indigo-900/60 px-3 py-1 rounded-lg border border-indigo-800">
+          {{ telemetry.wifiPairingRemainingSeconds() }}s
+        </span>
+      </div>
+    </div>
+  }
 
   <!-- Pasek aktywnego parowania (odliczanie 60s) -->
   @if (telemetry.isPairing()) {
@@ -357,6 +349,11 @@
       </div>
     </div>
 
+    <!-- INTERAKTYWNY GRAF TOPOLOGII SIECI D3.JS -->
+    <div class="mb-8">
+      <app-topology-graph (selectDevice)="openAnalytics($event)"></app-topology-graph>
+    </div>
+
     <!-- Pasek filtrów kategorii urządzeń (gdy są urządzenia w sieci) -->
     @if (telemetry.devices().length > 0) {
       <div class="flex flex-wrap items-center gap-2 mb-6">
@@ -524,7 +521,7 @@
           </button>
 
           <button
-            (click)="setTab('catalog')"
+            (click)="setTab('settings')"
             class="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
           >
             <mat-icon class="text-base !w-4 !h-4">hub</mat-icon>
@@ -559,39 +556,19 @@
     </div>
   }
 
-  <!-- ZAKŁADKA INSTALATOR & USŁUGI W TLE -->
-  @if (activeTab() === 'installer') {
-    <app-installer-view />
+  <!-- ZAKŁADKA 2: SCENY I AUTOMATYZACJA WORKFLOW -->
+  @if (activeTab() === 'scenes') {
+    <app-scenes-builder />
   }
 
-  <!-- ZAKŁADKA KATALOG PRODUKTÓW SONOFF & TUYA -->
-  @if (activeTab() === 'catalog') {
-    <app-device-catalog />
-  }
-
-  <!-- ZAKŁADKA DONGLE MAX: SIEĆ I TRYB ROUTERA -->
-  @if (activeTab() === 'dongle-max') {
-    <app-dongle-max />
-  }
-
-  <!-- ZAKŁADKA 2: ANALITYKA (CHART.JS) -->
+  <!-- ZAKŁADKA 3: ANALITYKA (CHART.JS) -->
   @if (activeTab() === 'analytics') {
     <app-analytics-view />
   }
 
-  <!-- ZAKŁADKA 3: PLIKI ŹRÓDŁOWE I WDROŻENIE -->
-  @if (activeTab() === 'code') {
-    <app-code-viewer />
-  }
-
-  <!-- ZAKŁADKA 3: APLIKACJA ANDROID -->
-  @if (activeTab() === 'android') {
-    <app-android-viewer />
-  }
-
-  <!-- ZAKŁADKA 4: KONSOLA TESTOWA (SYMULATOR) -->
-  @if (activeTab() === 'simulator') {
-    <app-simulator />
+  <!-- ZAKŁADKA 3: USTAWIENIA SERWERA (ZBIORCZE) -->
+  @if (activeTab() === 'settings') {
+    <app-server-settings />
   }
 
 </main>
@@ -655,4 +632,9 @@
       </div>
     </div>
   </div>
+}
+
+<!-- Modal Parowania Wi-Fi (Czyste Wi-Fi bez Zigbee) -->
+@if (showWifiModal()) {
+  <app-wifi-pairing-modal (closeModal)="closeWifiModal()"></app-wifi-pairing-modal>
 }

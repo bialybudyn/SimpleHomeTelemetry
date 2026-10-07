@@ -162,12 +162,23 @@ import { DeviceCatalogItem } from '../../models/telemetry.models';
                 <span class="font-mono text-slate-500">
                   Zasilanie: {{ item.batteryPowered ? 'Bateria' : 'Sieć 230V AC' }}
                 </span>
-                <button
-                  (click)="telemetry.triggerPermitJoin(60)"
-                  class="text-xs text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
-                >
-                  Włącz parowanie →
-                </button>
+                @if (item.category === 'fan' || item.id.includes('gotze') || item.pairingGuide.includes('Wi-Fi')) {
+                  <button
+                    (click)="telemetry.triggerWifiPairing('Domowa_Siec_WiFi', '', 160)"
+                    class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer flex items-center gap-1"
+                  >
+                    <mat-icon class="text-xs !w-3.5 !h-3.5">wifi_find</mat-icon>
+                    <span>Parowanie Wi-Fi (160s) →</span>
+                  </button>
+                } @else {
+                  <button
+                    (click)="telemetry.triggerPermitJoin(160)"
+                    class="text-xs text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer flex items-center gap-1"
+                  >
+                    <mat-icon class="text-xs !w-3.5 !h-3.5">sensors</mat-icon>
+                    <span>Parowanie Zigbee (160s) →</span>
+                  </button>
+                }
               </div>
             </div>
 

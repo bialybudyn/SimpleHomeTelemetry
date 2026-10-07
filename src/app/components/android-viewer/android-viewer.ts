@@ -13,6 +13,31 @@ import { MatIconModule } from '@angular/material/icon';
   imports: [MatIconModule],
   template: `
     <div class="space-y-6">
+      <!-- Baner pobierania pliku APK -->
+      <div class="p-6 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-800/80 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-2xl">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold">
+            <mat-icon class="text-sm !w-4 !h-4">get_app</mat-icon>
+            <span>Gotowy Plik Instalacyjny APK (Android 8.0+)</span>
+          </div>
+          <h2 class="text-2xl font-extrabold text-white tracking-tight">
+            Pobierz Aplikację Mobilną SimpleHomeTelemetry (.APK)
+          </h2>
+          <p class="text-xs text-slate-300 max-w-2xl leading-relaxed">
+            Pobierz bezpośrednio na swój telefon pakiet instalacyjny <strong class="text-emerald-400">SimpleHomeTelemetry.apk</strong> z obsługą połączenia w tle, natychmiastowych wibracji oraz powiadomień Heads-Up o przekroczeniach temperatury i spadkach baterii.
+          </p>
+        </div>
+
+        <a
+          href="/api/files/SimpleHomeTelemetry.apk"
+          download="SimpleHomeTelemetry.apk"
+          class="flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-extrabold shadow-xl shadow-emerald-950/60 transition-all cursor-pointer shrink-0 border border-emerald-400/40"
+        >
+          <mat-icon class="text-xl">download</mat-icon>
+          <span>Pobierz SimpleHomeTelemetry.apk (Gotowa Aplikacja)</span>
+        </a>
+      </div>
+
       <!-- Wstęp aplikacji mobilnej -->
       <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div class="max-w-2xl">

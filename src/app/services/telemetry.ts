@@ -42,6 +42,14 @@ export class Telemetry {
   readonly dongleMaxTestResult = signal<DongleMaxTestResult | null>(null);
   readonly isTestingDongleMax = signal<boolean>(false);
 
+  // Stan parowania Czystego Wi-Fi (SmartConfig bez Zigbee)
+  readonly isWifiPairing = signal<boolean>(false);
+  readonly wifiPairingRemainingSeconds = signal<number>(0);
+  readonly wifiSsid = signal<string>('');
+  readonly wifiLocalIp = signal<string>('');
+  readonly wifiDiscoveredDevices = signal<{ ip: string; mac?: string; model: string; name: string }[]>([]);
+  private wifiPairingTimer: ReturnType<typeof setInterval> | null = null;
+
   // Powiadomienia systemowe (w tym alerty baterii < 15%)
   readonly notifications = signal<SystemNotification[]>([]);
   readonly batteryAlertToast = signal<SystemNotification | null>(null);
@@ -86,6 +94,7 @@ export class Telemetry {
       this.fetchDevices();
       this.fetchSystemStatus();
       this.fetchMqttStatus();
+      this.fetchWifiStatus();
       this.fetchNotifications();
       this.fetchDongleMaxConfig();
       this.initRealtime();
@@ -94,6 +103,7 @@ export class Telemetry {
       const statusInterval = setInterval(() => {
         this.fetchSystemStatus();
         this.fetchMqttStatus();
+        this.fetchWifiStatus();
         this.fetchNotifications();
         this.fetchDongleMaxConfig();
       }, 15000);
@@ -198,6 +208,79 @@ export class Telemetry {
         console.error('Błąd permit-join:', err);
         this.startPairingCountdown(duration);
       },
+    });
+  }
+
+  triggerWifiPairing(ssid: string, password = '', duration = 160): void {
+    this.wifiSsid.set(ssid);
+    this.http.post<{ status: string; duration: number; local_ip: string }>('/api/wifi/pair-smartconfig', { ssid, password, duration }).subscribe({
+      next: (res) => {
+        if (res?.local_ip) this.wifiLocalIp.set(res.local_ip);
+        this.startWifiPairingCountdown(res.duration || duration);
+      },
+      error: (err) => {
+        console.error('Błąd parowania Wi-Fi:', err);
+        this.startWifiPairingCountdown(duration);
+      },
+    });
+  }
+
+  startWifiPairingCountdown(seconds: number): void {
+    if (this.wifiPairingTimer) clearInterval(this.wifiPairingTimer);
+    this.isWifiPairing.set(true);
+    this.wifiPairingRemainingSeconds.set(seconds);
+
+    this.wifiPairingTimer = setInterval(() => {
+      const cur = this.wifiPairingRemainingSeconds();
+      if (cur <= 1) {
+        if (this.wifiPairingTimer) clearInterval(this.wifiPairingTimer);
+        this.isWifiPairing.set(false);
+        this.wifiPairingRemainingSeconds.set(0);
+        this.fetchDevices();
+      } else {
+        this.wifiPairingRemainingSeconds.set(cur - 1);
+      }
+    }, 1000);
+  }
+
+  fetchWifiStatus(): void {
+    this.http.get<{ active: boolean; remaining_seconds: number; ssid: string; local_ip: string; discovered_devices: { ip: string; mac?: string; model: string; name: string }[] }>('/api/wifi/status').subscribe({
+      next: (res) => {
+        if (res) {
+          if (res.ssid) this.wifiSsid.set(res.ssid);
+          if (res.local_ip) this.wifiLocalIp.set(res.local_ip);
+          if (res.discovered_devices) this.wifiDiscoveredDevices.set(res.discovered_devices);
+          if (res.active && res.remaining_seconds > 0 && !this.isWifiPairing()) {
+            this.startWifiPairingCountdown(res.remaining_seconds);
+          }
+        }
+      },
+      error: (err) => console.debug('Błąd pobierania statusu Wi-Fi:', err),
+    });
+  }
+
+  addWifiDevice(ip_address: string, name?: string, model?: string, category = 'fan'): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; device: Device }>('/api/wifi/add-device', { ip_address, name, model, category }).subscribe({
+        next: (res) => {
+          if (res?.device) {
+            this.devices.update((list) => {
+              const idx = list.findIndex((d) => d.ieee_address === res.device.ieee_address);
+              if (idx >= 0) {
+                const copy = [...list];
+                copy[idx] = res.device;
+                return copy;
+              }
+              return [...list, res.device];
+            });
+            this.fetchDevices();
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        },
+        error: () => resolve(false),
+      });
     });
   }
 

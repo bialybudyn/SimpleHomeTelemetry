@@ -11,12 +11,10 @@ import { Device, DeviceCategory } from './models/telemetry.models';
 import { DeviceCard } from './components/device-card/device-card';
 import { AnalyticsModal } from './components/analytics-modal/analytics-modal';
 import { AnalyticsView } from './components/analytics-view/analytics-view';
-import { CodeViewer } from './components/code-viewer/code-viewer';
-import { AndroidViewer } from './components/android-viewer/android-viewer';
-import { Simulator } from './components/simulator/simulator';
-import { DongleMaxManager } from './components/dongle-max/dongle-max';
-import { InstallerView } from './components/installer-view/installer-view';
-import { DeviceCatalog } from './components/device-catalog/device-catalog';
+import { WifiPairingModal } from './components/wifi-pairing-modal/wifi-pairing-modal';
+import { TopologyGraph } from './components/topology-graph/topology-graph';
+import { ServerSettings } from './components/server-settings/server-settings';
+import { ScenesBuilder } from './components/scenes-builder/scenes-builder';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -26,12 +24,10 @@ import { DeviceCatalog } from './components/device-catalog/device-catalog';
     DeviceCard,
     AnalyticsModal,
     AnalyticsView,
-    InstallerView,
-    DeviceCatalog,
-    CodeViewer,
-    AndroidViewer,
-    Simulator,
-    DongleMaxManager,
+    WifiPairingModal,
+    TopologyGraph,
+    ServerSettings,
+    ScenesBuilder,
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -39,12 +35,13 @@ import { DeviceCatalog } from './components/device-catalog/device-catalog';
 export class App {
   readonly telemetry = inject(Telemetry);
 
-  readonly activeTab = signal<'dashboard' | 'installer' | 'catalog' | 'dongle-max' | 'analytics' | 'code' | 'android' | 'simulator'>('dashboard');
+  readonly activeTab = signal<'dashboard' | 'scenes' | 'analytics' | 'settings'>('dashboard');
   readonly selectedCategoryFilter = signal<'all' | 'fan' | 'climate' | 'plug' | 'switch' | 'sensor'>('all');
 
   readonly selectedDeviceForModal = signal<Device | null>(null);
   readonly renamingDevice = signal<Device | null>(null);
   readonly renameValue = signal<string>('');
+  readonly showWifiModal = signal<boolean>(false);
 
   readonly filteredDevices = computed(() => {
     const list = this.telemetry.devices();
@@ -96,7 +93,7 @@ export class App {
     return 'sensor';
   }
 
-  setTab(tab: 'dashboard' | 'installer' | 'catalog' | 'dongle-max' | 'analytics' | 'code' | 'android' | 'simulator'): void {
+  setTab(tab: 'dashboard' | 'scenes' | 'analytics' | 'settings'): void {
     this.activeTab.set(tab);
   }
 
@@ -136,6 +133,14 @@ export class App {
 
   triggerPairing(): void {
     this.telemetry.triggerPermitJoin(160);
+  }
+
+  openWifiModal(): void {
+    this.showWifiModal.set(true);
+  }
+
+  closeWifiModal(): void {
+    this.showWifiModal.set(false);
   }
 
   handleDeviceCommand(event: { device: Device; command: Record<string, unknown> }): void {

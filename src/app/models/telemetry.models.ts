@@ -198,9 +198,66 @@ export interface GitUpdateResult {
   output: string;
 }
 
+export interface WifiPairingRequest {
+  ssid: string;
+  password?: string;
+  duration?: number;
+}
+
+export interface WifiPairingStatus {
+  active: boolean;
+  duration: number;
+  remaining_seconds: number;
+  ssid: string;
+  local_ip: string;
+  broadcast_ip: string;
+  discovered_devices: {
+    ip: string;
+    mac?: string;
+    model: string;
+    name: string;
+  }[];
+}
+
 export interface TuyaFanConfig {
   device_id: string;
   local_key?: string;
   ip_address: string;
   protocol_version: '3.3' | '3.4' | '3.5';
+}
+
+export type LogicQuantifier = 'IF' | 'IF_NOT' | 'AND' | 'OR';
+export type TriggerMetric = 'temperature' | 'humidity' | 'battery' | 'contact' | 'occupancy' | 'time' | 'manual';
+export type MetricOperator = '>' | '<' | '==' | '!=' | '<=';
+
+export interface SceneCondition {
+  quantifier: LogicQuantifier;
+  device_ieee?: string;
+  metric: TriggerMetric;
+  operator: MetricOperator;
+  value: number | string | boolean;
+  description: string;
+}
+
+export interface SceneAction {
+  step_number: number;
+  type: 'device_command' | 'notification' | 'delay';
+  target_ieee?: string;
+  target_name?: string;
+  command?: Record<string, unknown>;
+  delay_seconds?: number;
+  notification_message?: string;
+  description: string;
+}
+
+export interface AutomationScene {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  enabled: boolean;
+  conditions: SceneCondition[];
+  actions: SceneAction[];
+  last_triggered_at?: string | null;
+  trigger_count: number;
 }
