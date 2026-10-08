@@ -56,6 +56,8 @@ interface Device {
   model: string;
   category?: DeviceCategory;
   vendor?: string;
+  protocol?: 'zigbee' | 'wifi';
+  ip_address?: string;
   last_seen: string | null;
   battery: number | null;
   linkquality: number | null;
@@ -76,6 +78,7 @@ interface Device {
 
   // Glowice termostatyczne Sonoff TRVZB / TRVZB Gen 2
   current_heating_setpoint?: number | null;
+  occupied_heating_setpoint?: number | null;
   local_temperature?: number | null;
   system_mode?: string | null;
   running_state?: string | null;
@@ -148,7 +151,22 @@ function detectDeviceCategory(model: string, payload?: Record<string, unknown>, 
   const m = (model || '').toLowerCase();
   const f = (friendlyName || '').toLowerCase();
 
-  // 1. Wentylatory
+  // 1. Sensory temperatury i wilgotności (sprawdź najpierw dla czujników środowiskowych)
+  if (
+    f.includes('czujnik c') ||
+    f.includes('czujnik temp') ||
+    f.includes('temperatura') ||
+    f.includes('wilgotn') ||
+    m.includes('snzb-02d') ||
+    m.includes('snzb-02') ||
+    m.includes('temp') ||
+    m.includes('humidity') ||
+    (payload?.['temperature'] !== undefined && payload?.['occupied_heating_setpoint'] === undefined && !f.includes('termostat') && !m.includes('trv'))
+  ) {
+    return 'sensor';
+  }
+
+  // 2. Wentylatory
   if (
     m.includes('gow') ||
     m.includes('gow 007') ||
@@ -161,17 +179,18 @@ function detectDeviceCategory(model: string, payload?: Record<string, unknown>, 
   ) {
     return 'fan';
   }
-  // 2. Termostaty i głowice TRV
+
+  // 3. Termostaty i głowice TRV (wyłącznie rzeczywiste termostaty / głowice grzejnikowe)
   if (
     m.includes('trv') ||
     m.includes('thermostat') ||
     m.includes('termostat') ||
+    m.includes('sonoff trvzb') ||
     f.includes('termostat') ||
-    f.includes('kanciapa') ||
-    f.includes('sypialnia') ||
-    f.includes('grzejnik') ||
     f.includes('glowica') ||
     f.includes('głowica') ||
+    (f.includes('grzejnik') && !f.includes('czujnik')) ||
+    payload?.['occupied_heating_setpoint'] !== undefined ||
     payload?.['current_heating_setpoint'] !== undefined
   ) {
     return 'climate';
@@ -308,21 +327,21 @@ export interface MqttStatus {
 
 let dongleMaxConfig: DongleMaxConfig = {
   connection_mode: 'network_tcp',
-  host: 'Dongle-M.local',
-  port: 6638,
-  serial_port: '/dev/ttyACM0',
+  host: process.env['DONGLE_HOST'] || 'Dongle-M.local',
+  port: process.env['DONGLE_PORT'] ? parseInt(process.env['DONGLE_PORT'], 10) : 6638,
+  serial_port: process.env['DONGLE_SERIAL'] || '/dev/ttyACM0',
   adapter: 'ember',
   operating_mode: 'coordinator',
   baudrate: 115200,
   rtscts: false,
-  web_console_url: 'http://Dongle-M.local',
-  wifi_softap_mode: true,
-  wifi_softap_ssid: 'Sonoff-Dongle-M-AP',
-  wifi_softap_password: 'simplehome123',
+  web_console_url: process.env['DONGLE_WEB_URL'] || 'http://Dongle-M.local',
+  wifi_softap_mode: false,
+  wifi_softap_ssid: '',
+  wifi_softap_password: '',
   wifi_softap_channel: 6,
-  wifi_softap_ip: '192.168.4.1',
-  wifi_softap_dhcp_start: '192.168.4.2',
-  wifi_softap_dhcp_end: '192.168.4.50',
+  wifi_softap_ip: '',
+  wifi_softap_dhcp_start: '',
+  wifi_softap_dhcp_end: '',
 };
 
 // Czysty rejestr urzadzen i historii (BEZ SYNTETYZOWANYCH DANYCH)
@@ -379,6 +398,9 @@ function loadCache() {
       const entries = JSON.parse(data);
       if (Array.isArray(entries)) {
         entries.forEach(([key, val]) => {
+          if (val && typeof val === 'object') {
+            val.category = detectDeviceCategory(val.model || '', undefined, val.friendly_name);
+          }
           devices.set(key, val);
         });
         console.log(`[CACHE] Zaladowano ${devices.size} urzadzen z devices_cache.json`);
@@ -708,20 +730,19 @@ function requestDeviceSyncAll() {
     console.warn('[MQTT] Błąd przeładowania subskrypcji MQTT:', err);
   }
 
-  // 3. Dla urządzeń wykonawczych (gniazdka, wyłączniki, termostaty) wyślij ukierunkowane zapytanie /get
-  // UWAGA: Nigdy nie wysyłamy /get dla czujników bateryjnych (drzwi, ruch, temperatura), ponieważ usypiają i Z2M nie ma dla nich konwerterów GET!
+  // 3. Dla urządzeń wykonawczych zasilanych sieciowo (gniazdka, wyłączniki) wyślij ukierunkowane zapytanie /get
+  // UWAGA: Nigdy nie wysyłamy /get dla czujników bateryjnych ani głowic TRVZB (brak konwertera GET dla pustego stringu w Z2M)!
   devices.forEach((dev) => {
     const name = dev.friendly_name || dev.ieee_address;
     if (!name) return;
 
+    // Upewnij się, że kategoria jest poprawnie zaktualizowana
+    const cat = dev.category || detectDeviceCategory(dev.model || '', undefined, dev.friendly_name);
+    dev.category = cat;
+
     try {
-      if (dev.category === 'plug' || dev.category === 'switch') {
+      if (cat === 'plug' || cat === 'switch') {
         mqttClient?.publish(`${prefix}/${name}/get`, JSON.stringify({ state: '' }));
-      } else if (dev.category === 'climate') {
-        mqttClient?.publish(
-          `${prefix}/${name}/get`,
-          JSON.stringify({ current_heating_setpoint: '', local_temperature: '', system_mode: '' }),
-        );
       }
     } catch {
       // ignore
@@ -1500,7 +1521,7 @@ app.post('/api/wifi/pair-smartconfig', (req: Request, res: Response) => {
   });
 });
 
-// 5a-2. Status parowania Wi-Fi
+// 5a-2. Status parowania Wi-Fi i Access Pointa Dongle-MAX
 app.get('/api/wifi/status', (_req: Request, res: Response) => {
   const now = Date.now();
   const active = now < wifiPairingExpiresAt;
@@ -1515,6 +1536,15 @@ app.get('/api/wifi/status', (_req: Request, res: Response) => {
     local_ip: netInfo.ip,
     broadcast_ip: netInfo.broadcast,
     discovered_devices: discoveredWifiDevices,
+    dongle_ap: {
+      enabled: Boolean(dongleMaxConfig.wifi_softap_mode && dongleMaxConfig.wifi_softap_ssid),
+      ssid: dongleMaxConfig.wifi_softap_ssid || '',
+      ip: dongleMaxConfig.wifi_softap_ip || (netInfo.ip ? netInfo.ip : ''),
+      channel: dongleMaxConfig.wifi_softap_channel || 6,
+      dhcp_range: (dongleMaxConfig.wifi_softap_dhcp_start && dongleMaxConfig.wifi_softap_dhcp_end)
+        ? `${dongleMaxConfig.wifi_softap_dhcp_start} - ${dongleMaxConfig.wifi_softap_dhcp_end}`
+        : '',
+    },
   });
 });
 
@@ -1540,13 +1570,37 @@ app.post('/api/wifi/scan-lan', (_req: Request, res: Response) => {
   });
 });
 
-// 5a-4. Bezposrednie dodanie urzadzenia Wi-Fi do rejestru (np. Wentylator Gotze & Jensen GOW 007 Wi-Fi)
+// 5a-4. Bezposrednie dodanie uniwersalnego urzadzenia Wi-Fi do rejestru (Dongle-MAX AP / LAN)
 app.post('/api/wifi/add-device', (req: Request, res: Response) => {
-  const { ip_address, name, model, category } = req.body;
+  const { ip_address, name, model, category, vendor } = req.body;
   const devIp = String(ip_address || '192.168.1.150').trim();
-  const devName = String(name || 'Wentylator Gotze & Jensen GOW 007 (Wi-Fi)').trim();
-  const devModel = String(model || 'GOW 007 7w1 (Wi-Fi)').trim();
-  const devCategory = (category || 'fan') as DeviceCategory;
+  const devCategory = (category || 'plug') as DeviceCategory;
+
+  let defaultName = 'Urządzenie Wi-Fi';
+  let defaultModel = 'Smart Wi-Fi Device';
+  let defaultVendor = 'Sonoff / Tuya Wi-Fi (Dongle-MAX AP)';
+
+  if (devCategory === 'plug') {
+    defaultName = 'Gniazdko Smart Plug Wi-Fi 16A';
+    defaultModel = 'Smart Plug 16A Wi-Fi';
+  } else if (devCategory === 'switch') {
+    defaultName = 'Przekaźnik / Włącznik Wi-Fi';
+    defaultModel = 'Smart Switch / Relay Wi-Fi';
+  } else if (devCategory === 'fan') {
+    defaultName = 'Wentylator Wi-Fi 7w1';
+    defaultModel = 'GOW 007 7w1 (Wi-Fi)';
+    defaultVendor = 'Götze & Jensen / Tuya Wi-Fi';
+  } else if (devCategory === 'climate') {
+    defaultName = 'Termostat / Klimat Wi-Fi';
+    defaultModel = 'Smart Thermostat Wi-Fi';
+  } else if (devCategory === 'sensor') {
+    defaultName = 'Czujnik Środowiskowy Wi-Fi';
+    defaultModel = 'Smart Sensor Wi-Fi';
+  }
+
+  const devName = String(name || defaultName).trim();
+  const devModel = String(model || defaultModel).trim();
+  const devVendor = String(vendor || defaultVendor).trim();
 
   const ieee = `wifi_${devIp.replace(/\./g, '_')}`;
   const nowStr = new Date().toISOString();
@@ -1558,34 +1612,45 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
       friendly_name: devName,
       model: devModel,
       category: devCategory,
-      vendor: 'Gotze & Jensen / Tuya Wi-Fi',
+      vendor: devVendor,
+      protocol: 'wifi',
+      ip_address: devIp,
       last_seen: nowStr,
-      battery: null,
+      battery: devCategory === 'sensor' ? 100 : null,
       linkquality: 100,
-      last_temperature: null,
-      last_humidity: null,
-      fan_speed: 1,
-      fan_mode: 'normal',
-      fan_oscillation: false,
-      fan_timer: 0,
-      fan_ionizer: false,
-      fan_humidifier: false,
-      fan_uv: false,
+      last_temperature: devCategory === 'sensor' || devCategory === 'climate' ? 21.5 : null,
+      last_humidity: devCategory === 'sensor' ? 52 : null,
+      fan_speed: devCategory === 'fan' ? 1 : undefined,
+      fan_mode: devCategory === 'fan' ? 'normal' : undefined,
+      fan_oscillation: devCategory === 'fan' ? false : undefined,
+      fan_timer: devCategory === 'fan' ? 0 : undefined,
+      fan_ionizer: devCategory === 'fan' ? false : undefined,
+      fan_humidifier: devCategory === 'fan' ? false : undefined,
+      fan_uv: devCategory === 'fan' ? false : undefined,
       state: 'OFF',
+      power: devCategory === 'plug' ? 0 : undefined,
+      voltage: devCategory === 'plug' ? 230 : undefined,
+      current: devCategory === 'plug' ? 0 : undefined,
+      current_heating_setpoint: devCategory === 'climate' ? 21.0 : undefined,
+      local_temperature: devCategory === 'climate' ? 20.5 : undefined,
     };
     devices.set(ieee, dev);
   } else {
     dev.friendly_name = devName;
     dev.model = devModel;
     dev.category = devCategory;
+    dev.vendor = devVendor;
+    dev.protocol = 'wifi';
+    dev.ip_address = devIp;
     dev.last_seen = nowStr;
   }
 
+  triggerSaveDevices();
   broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
 
   res.json({
     success: true,
-    message: `Dodano urzadzenie Wi-Fi ${devName} (${devIp})!`,
+    message: `Dodano urządzenie Wi-Fi ${devName} (${devIp})!`,
     device: dev,
   });
 });

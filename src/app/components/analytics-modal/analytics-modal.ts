@@ -494,7 +494,8 @@ export class AnalyticsModal {
     if (m.includes('contact') || m.includes('door') || f.includes('drzwi') || f.includes('okno') || f.includes('otwarcie') || f.includes('kontaktron') || d.contact !== undefined) return 'contact';
     if (m.includes('motion') || m.includes('pir') || m.includes('presence') || m.includes('occupancy') || f.includes('ruch') || f.includes('ruchu') || f.includes('obecno') || f.includes('korytarz') || f.includes('góra') || f.includes('gora') || d.occupancy !== undefined) return 'occupancy';
     if (m.includes('water') || m.includes('leak') || f.includes('zalani') || f.includes('woda') || d.water_leak !== undefined) return 'water_leak';
-    if (m.includes('trv') || m.includes('thermostat') || m.includes('termostat') || f.includes('termostat') || f.includes('kanciapa') || f.includes('sypialnia') || d.current_heating_setpoint !== undefined) return 'climate';
+    if (f.includes('czujnik c') || f.includes('czujnik temp') || f.includes('temperatura') || f.includes('wilgotn')) return 'sensor';
+    if (m.includes('trv') || m.includes('thermostat') || m.includes('termostat') || m.includes('sonoff trvzb') || f.includes('termostat') || f.includes('glowica') || f.includes('głowica') || d.occupied_heating_setpoint !== undefined) return 'climate';
     return 'sensor';
   });
 

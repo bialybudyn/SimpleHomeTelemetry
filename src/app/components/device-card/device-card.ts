@@ -26,15 +26,21 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
       <!-- Górny wiersz: Badge Kategorii, Nazwa, Zmiana Nazwy oraz Bateria / Zasilanie -->
       <div class="flex items-start justify-between gap-3 mb-3.5">
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-1.5 mb-1">
+          <div class="flex items-center gap-1.5 mb-1 flex-wrap">
             <span
               class="text-[10px] font-mono uppercase px-2 py-0.5 rounded-md font-semibold tracking-wide border"
               [class]="categoryBadgeClass()"
             >
               {{ categoryBadgeLabel() }}
             </span>
+            @if (isWifiDevice()) {
+              <span class="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                <mat-icon class="text-[10px] !w-3 !h-3">wifi</mat-icon>
+                <span>Wi-Fi</span>
+              </span>
+            }
             @if (device().vendor) {
-              <span class="text-[10px] font-mono text-slate-500">
+              <span class="text-[10px] font-mono text-slate-500 truncate max-w-[120px]">
                 {{ device().vendor }}
               </span>
             }
@@ -52,8 +58,11 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
               <mat-icon class="text-xs !w-3.5 !h-3.5">edit</mat-icon>
             </button>
           </div>
-          <div class="text-[11px] font-mono text-slate-500 truncate mt-0.5">
-            {{ device().model }}
+          <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500 truncate mt-0.5">
+            <span class="truncate">{{ device().model }}</span>
+            @if (deviceIpAddress()) {
+              <span class="text-indigo-400 font-semibold shrink-0">IP: {{ deviceIpAddress() }}</span>
+            }
           </div>
         </div>
 
@@ -986,14 +995,34 @@ export class DeviceCard {
     });
   }
 
+  readonly isWifiDevice = computed<boolean>(() => {
+    const d = this.device();
+    if (d.protocol === 'wifi') return true;
+    if (d.ieee_address?.startsWith('wifi_')) return true;
+    const v = (d.vendor || '').toLowerCase();
+    const m = (d.model || '').toLowerCase();
+    const f = (d.friendly_name || '').toLowerCase();
+    return v.includes('wi-fi') || v.includes('wifi') || m.includes('wi-fi') || m.includes('wifi') || f.includes('(wi-fi)') || f.includes('wifi');
+  });
+
+  readonly deviceIpAddress = computed<string | null>(() => {
+    const d = this.device();
+    if (d.ip_address) return d.ip_address;
+    if (d.ieee_address?.startsWith('wifi_')) {
+      return d.ieee_address.replace('wifi_', '').replace(/_/g, '.');
+    }
+    return null;
+  });
+
   readonly category = computed<DeviceCategory>(() => {
     const d = this.device();
     if (d.category) return d.category;
     const m = (d.model || '').toLowerCase();
     const f = (d.friendly_name || '').toLowerCase();
 
+    if (f.includes('czujnik c') || f.includes('czujnik temp') || f.includes('temperatura') || f.includes('wilgotn') || m.includes('snzb-02d') || m.includes('snzb-02')) return 'sensor';
     if (m.includes('gow') || m.includes('gow 007') || m.includes('fan') || m.includes('wentylator') || f.includes('wentylator') || f.includes('fan') || d.fan_speed !== undefined) return 'fan';
-    if (m.includes('trv') || m.includes('thermostat') || m.includes('termostat') || f.includes('termostat') || f.includes('kanciapa') || f.includes('sypialnia') || f.includes('grzejnik') || f.includes('glowica') || f.includes('głowica') || d.current_heating_setpoint !== undefined) return 'climate';
+    if (m.includes('trv') || m.includes('thermostat') || m.includes('termostat') || m.includes('sonoff trvzb') || f.includes('termostat') || f.includes('glowica') || f.includes('głowica') || (f.includes('grzejnik') && !f.includes('czujnik')) || d.occupied_heating_setpoint !== undefined) return 'climate';
     if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || f.includes('gniazdko') || f.includes('plug') || d.power !== undefined) return 'plug';
     if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || f.includes('włącznik') || f.includes('wlacznik') || f.includes('przełącznik') || f.includes('przelacznik') || (d.state !== undefined && d.power === undefined)) return 'switch';
     if (m.includes('snzb-04') || m.includes('contact') || m.includes('door') || f.includes('drzwi') || f.includes('okno') || f.includes('otwarcie') || f.includes('kontaktron') || d.contact !== undefined) return 'contact';

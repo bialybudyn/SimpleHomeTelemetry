@@ -338,12 +338,17 @@ export class TopologyGraph implements OnInit, OnDestroy {
       .text('STREFA WI-FI LAN (SMARTCONFIG)');
 
     // Budowa węzłów i połączeń
+    const cfg = this.telemetry.dongleMaxConfig();
+    const coordAddress = cfg?.connection_mode === 'network_tcp'
+      ? `tcp://${cfg?.host || 'Dongle-M.local'}:${cfg?.port || 6638}`
+      : (cfg?.serial_port || '/dev/ttyACM0');
+
     const coordinatorNode: TopologyNode = {
       id: 'sonoff-dongle-max',
       name: 'Sonoff Dongle Max',
       model: 'EFR32MG24 Coordinator',
       type: 'coordinator',
-      address: 'Port: 6638 / ember',
+      address: coordAddress,
       isCoordinator: true,
       x: width / 2,
       y: height / 2,

@@ -123,7 +123,7 @@
         title="Wymuś odczyt aktualnego stanu ze wszystkich czujników Zigbee2MQTT"
       >
         <mat-icon class="text-sm !w-4 !h-4 text-emerald-400">sync</mat-icon>
-        <span class="font-bold">Synch Z2M</span>
+        <span class="font-bold">Sync Z2M</span>
       </button>
 
       <!-- Przycisk Parowania Permit-Join z odliczaniem -->
@@ -148,11 +148,11 @@
         </span>
       </button>
 
-      <!-- Przycisk Parowania Czystego Wi-Fi (SmartConfig bez Zigbee) -->
+      <!-- Przycisk Parowania Wi-Fi (Dongle-MAX AP & SmartConfig) -->
       <button
         (click)="openWifiModal()"
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-900/30 transition-all cursor-pointer"
-        title="Parowanie urządzeń Wi-Fi (SmartConfig) - Wentylatory, Gniazdka Wi-Fi bez Zigbee"
+        title="Parowanie urządzeń Wi-Fi za pomocą Access Pointa Dongle-MAX oraz SmartConfig"
       >
         <mat-icon
           class="text-sm !w-4 !h-4"
@@ -172,18 +172,18 @@
 
   </div>
 
-  <!-- Pasek aktywnego parowania Wi-Fi (SmartConfig) -->
+  <!-- Pasek aktywnego parowania Wi-Fi (Dongle-MAX AP & SmartConfig) -->
   @if (telemetry.isWifiPairing()) {
     <div class="mt-3 max-w-7xl mx-auto p-3.5 rounded-xl bg-indigo-950 border border-indigo-700 text-indigo-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in shadow-lg shadow-indigo-950/50">
       <div class="flex items-center gap-3">
         <mat-icon class="text-indigo-400 text-lg animate-spin !w-5 !h-5 shrink-0">wifi_find</mat-icon>
         <div>
           <div class="font-bold text-white flex items-center gap-2">
-            <span>Rozgłaszanie parowania SmartConfig Wi-Fi aktywne (Czyste Wi-Fi bez Zigbee)</span>
+            <span>Parowanie urządzeń Wi-Fi aktywne (Dongle-MAX AP & SmartConfig)</span>
             <span class="px-2 py-0.5 rounded bg-indigo-900 text-indigo-300 font-mono text-[10px]">{{ telemetry.wifiSsid() }}</span>
           </div>
           <p class="text-[11px] text-indigo-300">
-            Przytrzymaj przycisk Wi-Fi na wentylatorze Götze & Jensen GOW 007 przez 5s, aż dioda Wi-Fi szybko zamiga. Wentylator automatycznie połączy się z Twoją siecią!
+            Przytrzymaj przycisk parowania na urządzeniu Wi-Fi (gniazdko, przełącznik, wentylator, sensor) przez 5s, aż dioda zacznie migać. Koordynator Dongle-MAX nasłuchuje na Access Poincie i automatycznie rejestruje urządzenie!
           </p>
         </div>
       </div>
@@ -341,227 +341,578 @@
       </div>
     }
 
-    <!-- Podsumowanie stanu sieci oraz filtry kategorii Sonoff / Tuya -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-      <div>
-        <h2 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-          Pulpit Urządzeń Zigbee
-          @if (telemetry.alertCount() > 0) {
-            <span class="px-2 py-0.5 text-xs rounded-full bg-rose-950/80 border border-rose-800 text-rose-300 font-normal">
-              {{ telemetry.alertCount() }} alerty
-            </span>
-          }
-        </h2>
-        <p class="text-xs text-slate-400 mt-0.5">
-          Głowice TRVZB, sterowane gniazdka, przekaźniki i sensory z automatyczną synchronizacją MQTT.
-        </p>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-3 text-xs font-mono">
-        <div class="text-slate-400">
-          <span>Ostatnia transmisja:</span>
-          <span class="text-cyan-400 ml-1 font-semibold">{{ telemetry.lastTransmissionTime() }}</span>
-        </div>
-        <div class="text-slate-500">·</div>
-        <div class="text-slate-400">
-          <span>Urządzenia w sieci:</span>
-          <span class="text-white font-bold ml-1">{{ telemetry.devices().length }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- INTERAKTYWNY GRAF TOPOLOGII SIECI D3.JS -->
-    <div class="mb-8">
+    <!-- 0. TOPOLOGIA HYBRYDOWA SIECI (POZA PULPITEM ZIGBEE) -->
+    <div class="mb-10">
       <app-topology-graph (selectDevice)="openAnalytics($event)"></app-topology-graph>
     </div>
 
-    <!-- Pasek filtrów kategorii urządzeń (gdy są urządzenia w sieci) -->
-    @if (telemetry.devices().length > 0) {
-      <div class="flex flex-wrap items-center gap-2 mb-6">
-        <button
-          (click)="setCategoryFilter('all')"
-          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-          [class.bg-slate-800]="selectedCategoryFilter() === 'all'"
-          [class.text-white]="selectedCategoryFilter() === 'all'"
-          [class.text-slate-400]="selectedCategoryFilter() !== 'all'"
-        >
-          Wszystkie ({{ telemetry.devices().length }})
-        </button>
+    <!-- 1. PULPIT URZĄDZEŃ ZIGBEE -->
+    <div class="mb-10">
+      <!-- Nagłówek Pulpitu Zigbee z możliwością zwijania -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-5">
+        <div class="flex items-center gap-3">
+          <button
+            (click)="toggleZigbeeCollapse()"
+            class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-slate-700/60"
+            [title]="isZigbeeCollapsed() ? 'Rozwiń Pulpit Zigbee' : 'Zwiń Pulpit Zigbee'"
+          >
+            <mat-icon class="text-sm !w-4 !h-4 transition-transform duration-200" [style.transform]="isZigbeeCollapsed() ? 'rotate(-90deg)' : 'none'">
+              expand_more
+            </mat-icon>
+          </button>
+          <div>
+            <h2 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              <mat-icon class="text-cyan-400 !w-5 !h-5 text-xl">router</mat-icon>
+              <span>Pulpit Urządzeń Zigbee</span>
+              @if (telemetry.alertCount() > 0) {
+                <span class="px-2 py-0.5 text-xs rounded-full bg-rose-950/80 border border-rose-800 text-rose-300 font-normal">
+                  {{ telemetry.alertCount() }} alerty
+                </span>
+              }
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Głowice TRVZB, sterowane gniazdka, przekaźniki i sensory z automatyczną synchronizacją MQTT (przeciągaj kafelki Drag & Drop).
+            </p>
+          </div>
+        </div>
 
-        <button
-          (click)="setCategoryFilter('fan')"
-          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-          [class.bg-cyan-500/20]="selectedCategoryFilter() === 'fan'"
-          [class.text-cyan-300]="selectedCategoryFilter() === 'fan'"
-          [class.border]="selectedCategoryFilter() === 'fan'"
-          [class.border-cyan-500/30]="selectedCategoryFilter() === 'fan'"
-          [class.text-slate-400]="selectedCategoryFilter() !== 'fan'"
-        >
-          <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">mode_fan</mat-icon>
-          <span>Wentylatory 7w1 ({{ fanCount() }})</span>
-        </button>
-
-        <button
-          (click)="setCategoryFilter('climate')"
-          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-          [class.bg-rose-500/20]="selectedCategoryFilter() === 'climate'"
-          [class.text-rose-300]="selectedCategoryFilter() === 'climate'"
-          [class.border]="selectedCategoryFilter() === 'climate'"
-          [class.border-rose-500/30]="selectedCategoryFilter() === 'climate'"
-          [class.text-slate-400]="selectedCategoryFilter() !== 'climate'"
-        >
-          <mat-icon class="text-xs !w-3.5 !h-3.5 text-rose-400">thermostat</mat-icon>
-          <span>Głowice TRVZB ({{ climateCount() }})</span>
-        </button>
-
-        <button
-          (click)="setCategoryFilter('plug')"
-          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-          [class.bg-emerald-500/20]="selectedCategoryFilter() === 'plug'"
-          [class.text-emerald-300]="selectedCategoryFilter() === 'plug'"
-          [class.border]="selectedCategoryFilter() === 'plug'"
-          [class.border-emerald-500/30]="selectedCategoryFilter() === 'plug'"
-          [class.text-slate-400]="selectedCategoryFilter() !== 'plug'"
-        >
-          <mat-icon class="text-xs !w-3.5 !h-3.5 text-emerald-400">power</mat-icon>
-          <span>Gniazdka 16A ({{ plugCount() }})</span>
-        </button>
-
-        <button
-          (click)="setCategoryFilter('switch')"
-          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-          [class.bg-cyan-500/20]="selectedCategoryFilter() === 'switch'"
-          [class.text-cyan-300]="selectedCategoryFilter() === 'switch'"
-          [class.border]="selectedCategoryFilter() === 'switch'"
-          [class.border-cyan-500/30]="selectedCategoryFilter() === 'switch'"
-          [class.text-slate-400]="selectedCategoryFilter() !== 'switch'"
-        >
-          <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">toggle_on</mat-icon>
-          <span>Wyłączniki / ZBMINI ({{ switchCount() }})</span>
-        </button>
-
-        <button
-          (click)="setCategoryFilter('sensor')"
-          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-          [class.bg-blue-500/20]="selectedCategoryFilter() === 'sensor'"
-          [class.text-blue-300]="selectedCategoryFilter() === 'sensor'"
-          [class.border]="selectedCategoryFilter() === 'sensor'"
-          [class.border-blue-500/30]="selectedCategoryFilter() === 'sensor'"
-          [class.text-slate-400]="selectedCategoryFilter() !== 'sensor'"
-        >
-          <mat-icon class="text-xs !w-3.5 !h-3.5 text-blue-400">sensors</mat-icon>
-          <span>Sensory & Radary ({{ sensorCount() }})</span>
-        </button>
+        <div class="flex flex-wrap items-center gap-3 text-xs font-mono">
+          <div class="text-slate-400">
+            <span>Ostatnia transmisja:</span>
+            <span class="text-cyan-400 ml-1 font-semibold">{{ telemetry.lastTransmissionTime() }}</span>
+          </div>
+          <div class="text-slate-500">·</div>
+          <div class="text-slate-400">
+            <span>Urządzenia Zigbee:</span>
+            <span class="text-white font-bold ml-1">{{ allZigbeeDevices().length }}</span>
+          </div>
+          @if (zigbeeCustomOrder().length > 0) {
+            <button
+              (click)="resetZigbeeOrder()"
+              class="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-cyan-300 border border-slate-700 transition-colors cursor-pointer"
+              title="Przywróć domyślny układ kafelków Zigbee"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">restart_alt</mat-icon>
+              <span>Domyślny układ</span>
+            </button>
+          }
+          <button
+            (click)="toggleZigbeeCollapse()"
+            class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 border border-slate-700/80 transition-colors cursor-pointer"
+          >
+            <span>{{ isZigbeeCollapsed() ? 'Rozwiń pulpit' : 'Zwiń pulpit' }}</span>
+            <mat-icon class="text-sm !w-4 !h-4">{{ isZigbeeCollapsed() ? 'expand_more' : 'expand_less' }}</mat-icon>
+          </button>
+        </div>
       </div>
-    }
 
-    <!-- Siatka kafelków czujników i urządzeń sterowanych -->
-    @if (filteredDevices().length > 0) {
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-        @for (device of filteredDevices(); track device.ieee_address) {
-          <app-device-card
-            [device]="device"
-            (cardClicked)="openAnalytics($event)"
-            (renameRequested)="openRenameDialog($event)"
-            (commandRequested)="handleDeviceCommand($event)"
-          />
+      <!-- Stan zwinięty Pulpitu Zigbee -->
+      @if (isZigbeeCollapsed()) {
+        <div
+          tabindex="0"
+          role="button"
+          (click)="toggleZigbeeCollapse()"
+          (keydown.enter)="toggleZigbeeCollapse()"
+          (keydown.space)="toggleZigbeeCollapse()"
+          class="p-4 rounded-2xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 flex items-center justify-between cursor-pointer transition-all text-xs"
+        >
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center border border-cyan-500/20">
+              <mat-icon class="text-base !w-4 !h-4">router</mat-icon>
+            </div>
+            <div>
+              <span class="font-bold text-white">Pulpit Urządzeń Zigbee (Zwinięty)</span>
+              <span class="text-slate-400 ml-2">— {{ allZigbeeDevices().length }} urządzeń Zigbee w sieci, transmisja aktywna</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 text-cyan-400 font-semibold hover:underline">
+            <span>Rozwiń pulpit</span>
+            <mat-icon class="text-sm !w-4 !h-4">expand_more</mat-icon>
+          </div>
+        </div>
+      } @else {
+        <!-- Pasek filtrów kategorii urządzeń Zigbee -->
+        @if (allZigbeeDevices().length > 0) {
+          <div class="flex flex-wrap items-center gap-2 mb-6">
+            <button
+              (click)="setZigbeeFilter('all')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              [class.bg-slate-800]="selectedZigbeeFilter() === 'all'"
+              [class.text-white]="selectedZigbeeFilter() === 'all'"
+              [class.text-slate-400]="selectedZigbeeFilter() !== 'all'"
+            >
+              Wszystkie ({{ allZigbeeDevices().length }})
+            </button>
+
+            <button
+              (click)="setZigbeeFilter('climate')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-rose-500/20]="selectedZigbeeFilter() === 'climate'"
+              [class.text-rose-300]="selectedZigbeeFilter() === 'climate'"
+              [class.border]="selectedZigbeeFilter() === 'climate'"
+              [class.border-rose-500/30]="selectedZigbeeFilter() === 'climate'"
+              [class.text-slate-400]="selectedZigbeeFilter() !== 'climate'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-rose-400">thermostat</mat-icon>
+              <span>Głowice TRVZB ({{ zigbeeClimateCount() }})</span>
+            </button>
+
+            <button
+              (click)="setZigbeeFilter('plug')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-emerald-500/20]="selectedZigbeeFilter() === 'plug'"
+              [class.text-emerald-300]="selectedZigbeeFilter() === 'plug'"
+              [class.border]="selectedZigbeeFilter() === 'plug'"
+              [class.border-emerald-500/30]="selectedZigbeeFilter() === 'plug'"
+              [class.text-slate-400]="selectedZigbeeFilter() !== 'plug'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-emerald-400">power</mat-icon>
+              <span>Gniazdka 16A ({{ zigbeePlugCount() }})</span>
+            </button>
+
+            <button
+              (click)="setZigbeeFilter('switch')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-cyan-500/20]="selectedZigbeeFilter() === 'switch'"
+              [class.text-cyan-300]="selectedZigbeeFilter() === 'switch'"
+              [class.border]="selectedZigbeeFilter() === 'switch'"
+              [class.border-cyan-500/30]="selectedZigbeeFilter() === 'switch'"
+              [class.text-slate-400]="selectedZigbeeFilter() !== 'switch'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">toggle_on</mat-icon>
+              <span>Wyłączniki / ZBMINI ({{ zigbeeSwitchCount() }})</span>
+            </button>
+
+            <button
+              (click)="setZigbeeFilter('sensor')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-blue-500/20]="selectedZigbeeFilter() === 'sensor'"
+              [class.text-blue-300]="selectedZigbeeFilter() === 'sensor'"
+              [class.border]="selectedZigbeeFilter() === 'sensor'"
+              [class.border-blue-500/30]="selectedZigbeeFilter() === 'sensor'"
+              [class.text-slate-400]="selectedZigbeeFilter() !== 'sensor'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-blue-400">sensors</mat-icon>
+              <span>Sensory & Radary ({{ zigbeeSensorCount() }})</span>
+            </button>
+          </div>
         }
-      </div>
-    } @else if (telemetry.devices().length > 0) {
-      <div class="text-center py-12 px-4 border border-slate-800 rounded-2xl bg-slate-900/40">
-        <p class="text-xs text-slate-400">Brak urządzeń w wybranej kategorii filtra.</p>
-        <button (click)="setCategoryFilter('all')" class="mt-2 text-xs text-cyan-400 hover:underline cursor-pointer">
-          Pokaż wszystkie urządzenia
-        </button>
-      </div>
-    } @else {
-      <!-- Rozbudowany Stan Początkowy / Onboarding po pierwszym uruchomieniu -->
-      <div class="p-8 sm:p-10 border border-dashed border-slate-800 rounded-3xl bg-slate-900/50 backdrop-blur-sm space-y-8">
-        
-        <!-- Nagłówek stanu -->
-        <div class="text-center max-w-xl mx-auto space-y-3">
-          <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-tr from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-inner">
-            <mat-icon class="text-3xl !w-8 !h-8">sensors</mat-icon>
-          </div>
-          <div class="space-y-1">
-            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Usługi w tle aktywne i gotowe do odbioru</span>
-            </div>
-            <h3 class="text-lg font-bold text-white tracking-tight">
-              Oczekiwanie na urządzenia Sonoff & Tuya
-            </h3>
-            <p class="text-xs text-slate-400 leading-relaxed">
-              Broker Mosquitto oraz demon Zigbee2MQTT działają w tle. Obsługujemy głowice <strong class="text-white">TRVZB i TRVZB Gen 2</strong>, inteligentne gniazdka <strong class="text-white">S26R2ZB</strong>, wyłączniki <strong class="text-white">ZBMINIR2</strong> oraz sensory Tuya.
-            </p>
-          </div>
-        </div>
 
-        <!-- 3-krokowa instrukcja parowania urządzenia -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
-          <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
-            <div class="flex items-center gap-2">
-              <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">1</span>
-              <h4 class="text-xs font-bold text-white">Włącz tryb parowania</h4>
-            </div>
-            <p class="text-[11px] text-slate-400 leading-relaxed">
-              Kliknij przycisk <strong class="text-slate-200">"Włącz parowanie (160s)"</strong>. Koordynator Sonoff Dongle Max otworzy sieć radiową dla nowych urządzeń.
-            </p>
-          </div>
+        <!-- Siatka kafelków Zigbee z Drag & Drop -->
+        @if (filteredZigbeeDevices().length > 0) {
+          <div
+            cdkDropList
+            cdkDropListOrientation="mixed"
+            (cdkDropListDropped)="onZigbeeDrop($event)"
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+          >
+            @for (device of filteredZigbeeDevices(); track device.ieee_address) {
+              <div
+                cdkDrag
+                [cdkDragData]="device"
+                class="group/card relative rounded-2xl transition-all"
+              >
+                <!-- Uchwyt drag'n'drop w prawym górnym rogu -->
+                <div
+                  cdkDragHandle
+                  class="absolute top-3.5 right-3.5 z-20 p-1 rounded-md bg-slate-950/90 hover:bg-slate-800 text-slate-500 hover:text-cyan-400 cursor-grab active:cursor-grabbing border border-slate-800 transition-all opacity-0 group-hover/card:opacity-100 shadow-md"
+                  title="Przeciągnij kafelek aby zmienić kolejność"
+                >
+                  <mat-icon class="text-xs !w-3.5 !h-3.5">drag_indicator</mat-icon>
+                </div>
 
-          <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
-            <div class="flex items-center gap-2">
-              <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">2</span>
-              <h4 class="text-xs font-bold text-white">Aktywuj urządzenie</h4>
-            </div>
-            <p class="text-[11px] text-slate-400 leading-relaxed">
-              Przytrzymaj przycisk parowania na urządzeniu (TRVZB, S26R2ZB, ZBMINIR2, Tuya) przez <strong class="text-slate-200">5 sekund</strong>, aż dioda LED zamiga.
-            </p>
+                <app-device-card
+                  [device]="device"
+                  (cardClicked)="openAnalytics($event)"
+                  (renameRequested)="openRenameDialog($event)"
+                  (commandRequested)="handleDeviceCommand($event)"
+                />
+              </div>
+            }
           </div>
-
-          <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
-            <div class="flex items-center gap-2">
-              <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">3</span>
-              <h4 class="text-xs font-bold text-white">Steruj z panelu</h4>
-            </div>
-            <p class="text-[11px] text-slate-400 leading-relaxed">
-              Urządzenie natychmiast pojawi się na kafelku — możesz zmieniać nastawę TRVZB, włączać gniazdko czy monitorować energię.
-            </p>
+        } @else if (allZigbeeDevices().length > 0) {
+          <div class="text-center py-12 px-4 border border-slate-800 rounded-2xl bg-slate-900/40">
+            <p class="text-xs text-slate-400">Brak urządzeń Zigbee w wybranej kategorii filtra.</p>
+            <button (click)="setZigbeeFilter('all')" class="mt-2 text-xs text-cyan-400 hover:underline cursor-pointer">
+              Pokaż wszystkie urządzenia Zigbee
+            </button>
           </div>
-        </div>
+        } @else {
+          <!-- Rozbudowany Stan Początkowy / Onboarding po pierwszym uruchomieniu -->
+          <div class="p-8 sm:p-10 border border-dashed border-slate-800 rounded-3xl bg-slate-900/50 backdrop-blur-sm space-y-8">
+            <div class="text-center max-w-xl mx-auto space-y-3">
+              <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-tr from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-inner">
+                <mat-icon class="text-3xl !w-8 !h-8">sensors</mat-icon>
+              </div>
+              <div class="space-y-1">
+                <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Usługi w tle aktywne i gotowe do odbioru</span>
+                </div>
+                <h3 class="text-lg font-bold text-white tracking-tight">
+                  Oczekiwanie na urządzenia Sonoff & Tuya
+                </h3>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                  Broker Mosquitto oraz demon Zigbee2MQTT działają w tle. Obsługujemy głowice <strong class="text-white">TRVZB i TRVZB Gen 2</strong>, inteligentne gniazdka <strong class="text-white">S26R2ZB</strong>, wyłączniki <strong class="text-white">ZBMINIR2</strong> oraz sensory Tuya.
+                </p>
+              </div>
+            </div>
 
-        <!-- Przyciski akcji -->
-        <div class="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <!-- 3-krokowa instrukcja parowania urządzenia -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">1</span>
+                  <h4 class="text-xs font-bold text-white">Włącz tryb parowania</h4>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Kliknij przycisk <strong class="text-slate-200">"Włącz parowanie (160s)"</strong>. Koordynator Sonoff Dongle Max otworzy sieć radiową dla nowych urządzeń.
+                </p>
+              </div>
+
+              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">2</span>
+                  <h4 class="text-xs font-bold text-white">Aktywuj urządzenie</h4>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Przytrzymaj przycisk parowania na urządzeniu (TRVZB, S26R2ZB, ZBMINIR2, Tuya) przez <strong class="text-slate-200">5 sekund</strong>, aż dioda LED zamiga.
+                </p>
+              </div>
+
+              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/20">3</span>
+                  <h4 class="text-xs font-bold text-white">Steruj z panelu</h4>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Urządzenie natychmiast pojawi się na kafelku — możesz zmieniać nastawę TRVZB, włączać gniazdko czy monitorować energię.
+                </p>
+              </div>
+            </div>
+
+            <!-- Przyciski akcji -->
+            <div class="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                (click)="triggerPairing()"
+                [disabled]="telemetry.isPairing()"
+                class="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
+              >
+                <mat-icon class="text-base !w-4 !h-4">{{ telemetry.isPairing() ? 'refresh' : 'sensors' }}</mat-icon>
+                <span>{{ telemetry.isPairing() ? 'Parowanie aktywne (' + telemetry.pairingRemainingSeconds() + 's)' : 'Włącz tryb parowania (60s)' }}</span>
+              </button>
+
+              <button
+                (click)="setTab('settings')"
+                class="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <mat-icon class="text-base !w-4 !h-4">hub</mat-icon>
+                <span>Przeglądaj katalog produktów</span>
+              </button>
+
+              <a
+                href="http://localhost:8080"
+                target="_blank"
+                rel="noopener"
+                class="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <mat-icon class="text-base !w-4 !h-4">open_in_new</mat-icon>
+                <span>Konsola Zigbee2MQTT (port 8080)</span>
+              </a>
+            </div>
+          </div>
+        }
+      }
+    </div>
+
+    <!-- 2. PULPIT URZĄDZEŃ WI-FI -->
+    <div class="border-t border-slate-800/80 pt-8 mb-10">
+      <!-- Nagłówek Pulpitu Wi-Fi z możliwością zwijania -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-5">
+        <div class="flex items-center gap-3">
           <button
-            (click)="triggerPairing()"
-            [disabled]="telemetry.isPairing()"
-            class="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
+            (click)="toggleWifiCollapse()"
+            class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-slate-700/60"
+            [title]="isWifiCollapsed() ? 'Rozwiń Pulpit Wi-Fi' : 'Zwiń Pulpit Wi-Fi'"
           >
-            <mat-icon class="text-base !w-4 !h-4">{{ telemetry.isPairing() ? 'refresh' : 'sensors' }}</mat-icon>
-            <span>{{ telemetry.isPairing() ? 'Parowanie aktywne (' + telemetry.pairingRemainingSeconds() + 's)' : 'Włącz tryb parowania (60s)' }}</span>
+            <mat-icon class="text-sm !w-4 !h-4 transition-transform duration-200" [style.transform]="isWifiCollapsed() ? 'rotate(-90deg)' : 'none'">
+              expand_more
+            </mat-icon>
           </button>
-
-          <button
-            (click)="setTab('settings')"
-            class="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <mat-icon class="text-base !w-4 !h-4">hub</mat-icon>
-            <span>Przeglądaj katalog produktów</span>
-          </button>
-
-          <a
-            href="http://localhost:8080"
-            target="_blank"
-            rel="noopener"
-            class="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <mat-icon class="text-base !w-4 !h-4">open_in_new</mat-icon>
-            <span>Konsola Zigbee2MQTT (port 8080)</span>
-          </a>
+          <div>
+            <h2 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              <mat-icon class="text-indigo-400 !w-5 !h-5 text-xl">wifi</mat-icon>
+              <span>Pulpit Urządzeń Wi-Fi</span>
+              <span class="px-2 py-0.5 text-xs rounded-full bg-indigo-950/80 border border-indigo-800 text-indigo-300 font-normal">
+                Dongle-MAX AP
+              </span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Urządzenia sparowane przez wbudowany Access Point Dongle-MAX oraz sieć LAN (przeciągaj kafelki Drag & Drop).
+            </p>
+          </div>
         </div>
 
+        <div class="flex flex-wrap items-center gap-3 text-xs font-mono">
+          <div class="text-slate-400">
+            <span>Dongle-MAX AP:</span>
+            <span class="text-indigo-400 ml-1 font-semibold">
+              @if (telemetry.dongleMaxAp().enabled && telemetry.dongleMaxAp().ssid) {
+                {{ telemetry.dongleMaxAp().ssid }}
+              } @else {
+                LAN / AP w gotowości
+              }
+            </span>
+          </div>
+          <div class="text-slate-500">·</div>
+          <div class="text-slate-400">
+            <span>Urządzenia Wi-Fi:</span>
+            <span class="text-white font-bold ml-1">{{ allWifiDevices().length }}</span>
+          </div>
+          <button
+            (click)="openWifiModal()"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md shadow-indigo-950/40 transition-all cursor-pointer"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5">add</mat-icon>
+            <span>Paruj Wi-Fi</span>
+          </button>
+          @if (wifiCustomOrder().length > 0) {
+            <button
+              (click)="resetWifiOrder()"
+              class="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-indigo-300 border border-slate-700 transition-colors cursor-pointer"
+              title="Przywróć domyślny układ kafelków Wi-Fi"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">restart_alt</mat-icon>
+              <span>Domyślny układ</span>
+            </button>
+          }
+          <button
+            (click)="toggleWifiCollapse()"
+            class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 border border-slate-700/80 transition-colors cursor-pointer"
+          >
+            <span>{{ isWifiCollapsed() ? 'Rozwiń pulpit' : 'Zwiń pulpit' }}</span>
+            <mat-icon class="text-sm !w-4 !h-4">{{ isWifiCollapsed() ? 'expand_more' : 'expand_less' }}</mat-icon>
+          </button>
+        </div>
       </div>
-    }
+
+      <!-- Stan zwinięty Pulpitu Wi-Fi -->
+      @if (isWifiCollapsed()) {
+        <div
+          tabindex="0"
+          role="button"
+          (click)="toggleWifiCollapse()"
+          (keydown.enter)="toggleWifiCollapse()"
+          (keydown.space)="toggleWifiCollapse()"
+          class="p-4 rounded-2xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 flex items-center justify-between cursor-pointer transition-all text-xs"
+        >
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center border border-indigo-500/20">
+              <mat-icon class="text-base !w-4 !h-4">wifi</mat-icon>
+            </div>
+            <div>
+              <span class="font-bold text-white">Pulpit Urządzeń Wi-Fi (Zwinięty)</span>
+              <span class="text-slate-400 ml-2">— {{ allWifiDevices().length }} urządzeń Wi-Fi w sieci</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 text-indigo-400 font-semibold hover:underline">
+            <span>Rozwiń pulpit</span>
+            <mat-icon class="text-sm !w-4 !h-4">expand_more</mat-icon>
+          </div>
+        </div>
+      } @else {
+        <!-- Pasek filtrów kategorii urządzeń Wi-Fi -->
+        @if (allWifiDevices().length > 0) {
+          <div class="flex flex-wrap items-center gap-2 mb-6">
+            <button
+              (click)="setWifiFilter('all')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              [class.bg-slate-800]="selectedWifiFilter() === 'all'"
+              [class.text-white]="selectedWifiFilter() === 'all'"
+              [class.text-slate-400]="selectedWifiFilter() !== 'all'"
+            >
+              Wszystkie ({{ allWifiDevices().length }})
+            </button>
+
+            <button
+              (click)="setWifiFilter('plug')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-emerald-500/20]="selectedWifiFilter() === 'plug'"
+              [class.text-emerald-300]="selectedWifiFilter() === 'plug'"
+              [class.border]="selectedWifiFilter() === 'plug'"
+              [class.border-emerald-500/30]="selectedWifiFilter() === 'plug'"
+              [class.text-slate-400]="selectedWifiFilter() !== 'plug'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-emerald-400">power</mat-icon>
+              <span>Gniazdka Wi-Fi ({{ wifiPlugCount() }})</span>
+            </button>
+
+            <button
+              (click)="setWifiFilter('switch')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-cyan-500/20]="selectedWifiFilter() === 'switch'"
+              [class.text-cyan-300]="selectedWifiFilter() === 'switch'"
+              [class.border]="selectedWifiFilter() === 'switch'"
+              [class.border-cyan-500/30]="selectedWifiFilter() === 'switch'"
+              [class.text-slate-400]="selectedWifiFilter() !== 'switch'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">toggle_on</mat-icon>
+              <span>Przełączniki Wi-Fi ({{ wifiSwitchCount() }})</span>
+            </button>
+
+            <button
+              (click)="setWifiFilter('fan')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-indigo-500/20]="selectedWifiFilter() === 'fan'"
+              [class.text-indigo-300]="selectedWifiFilter() === 'fan'"
+              [class.border]="selectedWifiFilter() === 'fan'"
+              [class.border-indigo-500/30]="selectedWifiFilter() === 'fan'"
+              [class.text-slate-400]="selectedWifiFilter() !== 'fan'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-indigo-400">mode_fan</mat-icon>
+              <span>Wentylatory & HVAC ({{ wifiFanCount() }})</span>
+            </button>
+
+            <button
+              (click)="setWifiFilter('climate')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-rose-500/20]="selectedWifiFilter() === 'climate'"
+              [class.text-rose-300]="selectedWifiFilter() === 'climate'"
+              [class.border]="selectedWifiFilter() === 'climate'"
+              [class.border-rose-500/30]="selectedWifiFilter() === 'climate'"
+              [class.text-slate-400]="selectedWifiFilter() !== 'climate'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-rose-400">thermostat</mat-icon>
+              <span>Termostaty Wi-Fi ({{ wifiClimateCount() }})</span>
+            </button>
+
+            <button
+              (click)="setWifiFilter('sensor')"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+              [class.bg-blue-500/20]="selectedWifiFilter() === 'sensor'"
+              [class.text-blue-300]="selectedWifiFilter() === 'sensor'"
+              [class.border]="selectedWifiFilter() === 'sensor'"
+              [class.border-blue-500/30]="selectedWifiFilter() === 'sensor'"
+              [class.text-slate-400]="selectedWifiFilter() !== 'sensor'"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5 text-blue-400">sensors</mat-icon>
+              <span>Sensory Wi-Fi ({{ wifiSensorCount() }})</span>
+            </button>
+          </div>
+        }
+
+        <!-- Siatka kafelków Wi-Fi z Drag & Drop -->
+        @if (filteredWifiDevices().length > 0) {
+          <div
+            cdkDropList
+            cdkDropListOrientation="mixed"
+            (cdkDropListDropped)="onWifiDrop($event)"
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+          >
+            @for (device of filteredWifiDevices(); track device.ieee_address) {
+              <div
+                cdkDrag
+                [cdkDragData]="device"
+                class="group/card relative rounded-2xl transition-all"
+              >
+                <!-- Uchwyt drag'n'drop w prawym górnym rogu -->
+                <div
+                  cdkDragHandle
+                  class="absolute top-3.5 right-3.5 z-20 p-1 rounded-md bg-slate-950/90 hover:bg-slate-800 text-slate-500 hover:text-indigo-400 cursor-grab active:cursor-grabbing border border-slate-800 transition-all opacity-0 group-hover/card:opacity-100 shadow-md"
+                  title="Przeciągnij kafelek aby zmienić kolejność"
+                >
+                  <mat-icon class="text-xs !w-3.5 !h-3.5">drag_indicator</mat-icon>
+                </div>
+
+                <app-device-card
+                  [device]="device"
+                  (cardClicked)="openAnalytics($event)"
+                  (renameRequested)="openRenameDialog($event)"
+                  (commandRequested)="handleDeviceCommand($event)"
+                />
+              </div>
+            }
+          </div>
+        } @else if (allWifiDevices().length > 0) {
+          <div class="text-center py-12 px-4 border border-slate-800 rounded-2xl bg-slate-900/40">
+            <p class="text-xs text-slate-400">Brak urządzeń Wi-Fi w wybranej kategorii filtra.</p>
+            <button (click)="setWifiFilter('all')" class="mt-2 text-xs text-indigo-400 hover:underline cursor-pointer">
+              Pokaż wszystkie urządzenia Wi-Fi
+            </button>
+          </div>
+        } @else {
+          <!-- Elegancki Stan Początkowy / Onboarding Pulpitu Wi-Fi -->
+          <div class="p-8 sm:p-10 border border-dashed border-indigo-900/40 rounded-3xl bg-indigo-950/10 backdrop-blur-sm space-y-6">
+            <div class="text-center max-w-xl mx-auto space-y-3">
+              <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
+                <mat-icon class="text-3xl !w-8 !h-8">wifi</mat-icon>
+              </div>
+              <div class="space-y-1">
+                <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                  <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                  <span>
+                    @if (telemetry.dongleMaxAp().enabled && telemetry.dongleMaxAp().ssid) {
+                      Access Point Dongle-MAX: {{ telemetry.dongleMaxAp().ssid }}
+                    } @else {
+                      Parowanie przez Access Point Dongle-MAX / SmartConfig / LAN
+                    }
+                  </span>
+                </div>
+                <h3 class="text-lg font-bold text-white tracking-tight">
+                  Pulpit Urządzeń Wi-Fi
+                </h3>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                  Brak sparowanych urządzeń Wi-Fi. Użyj przycisku «Paruj Wi-Fi», aby dodać urządzenie przez wbudowany Access Point Dongle-MAX, SmartConfig lub bezpośrednio po adresie IP w sieci lokalnej.
+                </p>
+              </div>
+            </div>
+
+            <!-- 3-krokowa instrukcja uniwersalnego parowania Wi-Fi -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">1</span>
+                  <h4 class="text-xs font-bold text-white">Tryb parowania AP</h4>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Przytrzymaj przycisk parowania na urządzeniu Wi-Fi przez <strong class="text-slate-200">5 sekund</strong>, aż wskaźnik LED zacznie migać.
+                </p>
+              </div>
+
+              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">2</span>
+                  <h4 class="text-xs font-bold text-white">Access Point Dongle-MAX</h4>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Urządzenie łączy się z Access Pointem Dongle-MAX lub odbiera parametry sieci przez pakiet SmartConfig.
+                </p>
+              </div>
+
+              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">3</span>
+                  <h4 class="text-xs font-bold text-white">Steruj z Pulpitu Wi-Fi</h4>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Urządzenie pojawi się na kafelku — możesz sterować zasilaniem, prędkością czy monitorować zużycie energii.
+                </p>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                (click)="openWifiModal()"
+                class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-950/40 transition-all cursor-pointer"
+              >
+                <mat-icon class="text-base !w-4 !h-4">wifi_find</mat-icon>
+                <span>Otwórz Parowanie Wi-Fi (Dongle-MAX AP)</span>
+              </button>
+            </div>
+          </div>
+        }
+      }
+    </div>
 
     <!-- Informacja o sprzęcie na dole ekranu -->
     <div class="mt-12 p-4 rounded-xl bg-slate-900/40 border border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400 font-mono">

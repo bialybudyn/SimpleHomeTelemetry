@@ -3,6 +3,7 @@ import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import {
   Device,
+  DeviceCategory,
   DongleMaxConfig,
   DongleMaxTestResult,
   GitUpdateResult,
@@ -42,12 +43,25 @@ export class Telemetry {
   readonly dongleMaxTestResult = signal<DongleMaxTestResult | null>(null);
   readonly isTestingDongleMax = signal<boolean>(false);
 
-  // Stan parowania Czystego Wi-Fi (SmartConfig bez Zigbee)
+  // Stan parowania Czystego Wi-Fi (Dongle-MAX AP & SmartConfig)
   readonly isWifiPairing = signal<boolean>(false);
   readonly wifiPairingRemainingSeconds = signal<number>(0);
   readonly wifiSsid = signal<string>('');
   readonly wifiLocalIp = signal<string>('');
   readonly wifiDiscoveredDevices = signal<{ ip: string; mac?: string; model: string; name: string }[]>([]);
+  readonly dongleMaxAp = signal<{
+    enabled: boolean;
+    ssid: string;
+    ip: string;
+    channel: number;
+    dhcp_range: string;
+  }>({
+    enabled: false,
+    ssid: '',
+    ip: '',
+    channel: 0,
+    dhcp_range: '',
+  });
   private wifiPairingTimer: ReturnType<typeof setInterval> | null = null;
 
   // Powiadomienia systemowe (w tym alerty baterii < 15%)
@@ -254,12 +268,20 @@ export class Telemetry {
   }
 
   fetchWifiStatus(): void {
-    this.http.get<{ active: boolean; remaining_seconds: number; ssid: string; local_ip: string; discovered_devices: { ip: string; mac?: string; model: string; name: string }[] }>('/api/wifi/status').subscribe({
+    this.http.get<{
+      active: boolean;
+      remaining_seconds: number;
+      ssid: string;
+      local_ip: string;
+      discovered_devices: { ip: string; mac?: string; model: string; name: string }[];
+      dongle_ap?: { enabled: boolean; ssid: string; ip: string; channel: number; dhcp_range: string };
+    }>('/api/wifi/status').subscribe({
       next: (res) => {
         if (res) {
           if (res.ssid) this.wifiSsid.set(res.ssid);
           if (res.local_ip) this.wifiLocalIp.set(res.local_ip);
           if (res.discovered_devices) this.wifiDiscoveredDevices.set(res.discovered_devices);
+          if (res.dongle_ap) this.dongleMaxAp.set(res.dongle_ap);
           if (res.active && res.remaining_seconds > 0 && !this.isWifiPairing()) {
             this.startWifiPairingCountdown(res.remaining_seconds);
           }
@@ -269,9 +291,9 @@ export class Telemetry {
     });
   }
 
-  addWifiDevice(ip_address: string, name?: string, model?: string, category = 'fan'): Promise<boolean> {
+  addWifiDevice(ip_address: string, name?: string, model?: string, category: DeviceCategory = 'plug', vendor?: string): Promise<boolean> {
     return new Promise((resolve) => {
-      this.http.post<{ success: boolean; device: Device }>('/api/wifi/add-device', { ip_address, name, model, category }).subscribe({
+      this.http.post<{ success: boolean; device: Device }>('/api/wifi/add-device', { ip_address, name, model, category, vendor }).subscribe({
         next: (res) => {
           if (res?.device) {
             this.devices.update((list) => {

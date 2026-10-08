@@ -6,6 +6,8 @@ export interface Device {
   model: string;
   category?: DeviceCategory;
   vendor?: string;
+  protocol?: 'zigbee' | 'wifi';
+  ip_address?: string;
   last_seen: string | null;
   battery: number | null;
   linkquality: number | null;
@@ -26,6 +28,7 @@ export interface Device {
 
   // Głowice termostatyczne Sonoff TRVZB / TRVZB Gen 2 & Tuya TRV
   current_heating_setpoint?: number | null;
+  occupied_heating_setpoint?: number | null;
   local_temperature?: number | null;
   system_mode?: 'heat' | 'auto' | 'off' | string | null;
   running_state?: 'heat' | 'idle' | string | null;
