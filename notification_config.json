@@ -1,0 +1,12 @@
+{
+  "email_enabled": false,
+  "smtp_host": "smtp.test.com",
+  "smtp_port": 587,
+  "smtp_user": "user@test.com",
+  "smtp_pass": "secret",
+  "email_from": "noreply@test.com",
+  "email_to": "admin@test.com",
+  "telegram_enabled": false,
+  "telegram_token": "123456:ABC-DEF",
+  "telegram_chat_id": "987654321"
+}

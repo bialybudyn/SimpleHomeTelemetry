@@ -92,6 +92,9 @@ export interface TelemetryPoint {
   energy?: number | null;
   setpoint?: number | null;
   state?: string | null;
+  contact?: boolean | null;
+  occupancy?: boolean | null;
+  water_leak?: boolean | null;
   timestamp: string;
 }
 
@@ -115,6 +118,12 @@ export interface HistoryStats {
   min_hum?: number;
   max_hum?: number;
   avg_hum?: number;
+  // Statystyki zdarzeniowe (czujniki ruchu, kontaktrony, zalania)
+  motion_count?: number;
+  open_count?: number;
+  leak_count?: number;
+  last_event_time?: string;
+  last_event_type?: string;
 }
 
 export interface HistoryResponse {

@@ -990,13 +990,15 @@ export class DeviceCard {
     const d = this.device();
     if (d.category) return d.category;
     const m = (d.model || '').toLowerCase();
-    if (m.includes('gow') || m.includes('gow 007') || m.includes('fan') || m.includes('wentylator') || d.fan_speed !== undefined) return 'fan';
-    if (m.includes('trv') || m.includes('thermostat') || d.current_heating_setpoint !== undefined) return 'climate';
-    if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || d.power !== undefined) return 'plug';
-    if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || (d.state !== undefined && d.power === undefined)) return 'switch';
-    if (m.includes('snzb-04') || m.includes('contact') || d.contact !== undefined) return 'contact';
-    if (m.includes('snzb-03') || m.includes('motion') || m.includes('pir') || d.occupancy !== undefined) return 'occupancy';
-    if (m.includes('snzb-05') || m.includes('water') || d.water_leak !== undefined) return 'water_leak';
+    const f = (d.friendly_name || '').toLowerCase();
+
+    if (m.includes('gow') || m.includes('gow 007') || m.includes('fan') || m.includes('wentylator') || f.includes('wentylator') || f.includes('fan') || d.fan_speed !== undefined) return 'fan';
+    if (m.includes('trv') || m.includes('thermostat') || m.includes('termostat') || f.includes('termostat') || f.includes('kanciapa') || f.includes('sypialnia') || f.includes('grzejnik') || f.includes('glowica') || f.includes('głowica') || d.current_heating_setpoint !== undefined) return 'climate';
+    if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || f.includes('gniazdko') || f.includes('plug') || d.power !== undefined) return 'plug';
+    if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || f.includes('włącznik') || f.includes('wlacznik') || f.includes('przełącznik') || f.includes('przelacznik') || (d.state !== undefined && d.power === undefined)) return 'switch';
+    if (m.includes('snzb-04') || m.includes('contact') || m.includes('door') || f.includes('drzwi') || f.includes('okno') || f.includes('otwarcie') || f.includes('kontaktron') || d.contact !== undefined) return 'contact';
+    if (m.includes('snzb-03') || m.includes('motion') || m.includes('pir') || m.includes('presence') || m.includes('occupancy') || f.includes('ruch') || f.includes('ruchu') || f.includes('obecno') || f.includes('korytarz') || f.includes('góra') || f.includes('gora') || d.occupancy !== undefined) return 'occupancy';
+    if (m.includes('snzb-05') || m.includes('water') || m.includes('leak') || f.includes('zalani') || f.includes('woda') || d.water_leak !== undefined) return 'water_leak';
     return 'sensor';
   });
 

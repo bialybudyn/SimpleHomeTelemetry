@@ -138,33 +138,123 @@ interface TelemetryPoint {
   energy?: number | null;
   setpoint?: number | null;
   state?: string | null;
+  contact?: boolean | null;
+  occupancy?: boolean | null;
+  water_leak?: boolean | null;
   timestamp: string;
 }
 
-function detectDeviceCategory(model: string, payload?: Record<string, unknown>): DeviceCategory {
+function detectDeviceCategory(model: string, payload?: Record<string, unknown>, friendlyName?: string): DeviceCategory {
   const m = (model || '').toLowerCase();
-  if (m.includes('gow') || m.includes('gow 007') || m.includes('fan') || m.includes('wentylator') || payload?.['fan_speed'] !== undefined || payload?.['fan_mode'] !== undefined) {
+  const f = (friendlyName || '').toLowerCase();
+
+  // 1. Wentylatory
+  if (
+    m.includes('gow') ||
+    m.includes('gow 007') ||
+    m.includes('fan') ||
+    m.includes('wentylator') ||
+    f.includes('wentylator') ||
+    f.includes('fan') ||
+    payload?.['fan_speed'] !== undefined ||
+    payload?.['fan_mode'] !== undefined
+  ) {
     return 'fan';
   }
-  if (m.includes('trv') || m.includes('thermostat') || payload?.['current_heating_setpoint'] !== undefined) {
+  // 2. Termostaty i głowice TRV
+  if (
+    m.includes('trv') ||
+    m.includes('thermostat') ||
+    m.includes('termostat') ||
+    f.includes('termostat') ||
+    f.includes('kanciapa') ||
+    f.includes('sypialnia') ||
+    f.includes('grzejnik') ||
+    f.includes('glowica') ||
+    f.includes('głowica') ||
+    payload?.['current_heating_setpoint'] !== undefined
+  ) {
     return 'climate';
   }
-  if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || payload?.['power'] !== undefined) {
+  // 3. Gniazdka Smart Plug
+  if (
+    m.includes('plug') ||
+    m.includes('s26') ||
+    m.includes('s40') ||
+    m.includes('s31') ||
+    m.includes('ts011f') ||
+    f.includes('gniazdko') ||
+    f.includes('plug') ||
+    payload?.['power'] !== undefined
+  ) {
     return 'plug';
   }
-  if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || m.includes('m5') || (payload?.['state'] !== undefined && payload?.['power'] === undefined)) {
+  // 4. Włączniki i przekaźniki
+  if (
+    m.includes('mini') ||
+    m.includes('zbmini') ||
+    m.includes('switch') ||
+    m.includes('relay') ||
+    m.includes('m5') ||
+    f.includes('włącznik') ||
+    f.includes('wlacznik') ||
+    f.includes('przełącznik') ||
+    f.includes('przelacznik') ||
+    (payload?.['state'] !== undefined && payload?.['power'] === undefined)
+  ) {
     return 'switch';
   }
-  if (m.includes('snzb-04') || m.includes('contact') || m.includes('door') || payload?.['contact'] !== undefined) {
+  // 5. Czujniki otwarcia (drzwi / okna)
+  if (
+    m.includes('snzb-04') ||
+    m.includes('contact') ||
+    m.includes('door') ||
+    f.includes('drzwi') ||
+    f.includes('okno') ||
+    f.includes('otwarcie') ||
+    f.includes('kontaktron') ||
+    payload?.['contact'] !== undefined
+  ) {
     return 'contact';
   }
-  if (m.includes('snzb-03') || m.includes('motion') || m.includes('pir') || m.includes('presence') || m.includes('occupancy') || payload?.['occupancy'] !== undefined) {
+  // 6. Czujniki ruchu i obecności
+  if (
+    m.includes('snzb-03') ||
+    m.includes('motion') ||
+    m.includes('pir') ||
+    m.includes('presence') ||
+    m.includes('occupancy') ||
+    f.includes('ruch') ||
+    f.includes('ruchu') ||
+    f.includes('obecno') ||
+    f.includes('korytarz') ||
+    f.includes('góra') ||
+    f.includes('gora') ||
+    payload?.['occupancy'] !== undefined
+  ) {
     return 'occupancy';
   }
-  if (m.includes('snzb-05') || m.includes('water') || m.includes('leak') || payload?.['water_leak'] !== undefined) {
+  // 7. Czujniki zalania
+  if (
+    m.includes('snzb-05') ||
+    m.includes('water') ||
+    m.includes('leak') ||
+    f.includes('zalani') ||
+    f.includes('woda') ||
+    payload?.['water_leak'] !== undefined
+  ) {
     return 'water_leak';
   }
-  if (m.includes('snzb-02d') || m.includes('snzb-02') || m.includes('temp') || m.includes('humidity')) {
+  // 8. Sensory temperatury i wilgotności
+  if (
+    m.includes('snzb-02d') ||
+    m.includes('snzb-02') ||
+    m.includes('temp') ||
+    m.includes('humidity') ||
+    f.includes('temperatura') ||
+    f.includes('wilgotn') ||
+    f.includes('czujnik c')
+  ) {
     return 'sensor';
   }
   return 'sensor';
@@ -598,21 +688,43 @@ function requestDeviceSyncAll() {
   if (!mqttClient || !mqttStatus.connected) return;
   const prefix = mqttStatus.topic_prefix || 'zigbee2mqtt';
 
+  // 1. Zażądaj pełnej listy urządzeń i definicji z mostka Z2M
   try {
     mqttClient.publish(`${prefix}/bridge/request/devices`, '');
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[MQTT] Błąd publikacji bridge/request/devices:', err);
   }
 
+  // 2. Przeładuj subskrypcję tematów, aby broker natychmiast wysłał wszystkie zachowane stany (retained)
+  try {
+    mqttClient.unsubscribe(`${prefix}/#`, () => {
+      mqttClient?.subscribe(`${prefix}/#`, (err) => {
+        if (!err) {
+          console.log('[MQTT] Ponownie zasubskrybowano tematy Z2M w celu natychmiastowego pobrania zachowanych stanów.');
+        }
+      });
+    });
+  } catch (err) {
+    console.warn('[MQTT] Błąd przeładowania subskrypcji MQTT:', err);
+  }
+
+  // 3. Dla urządzeń wykonawczych (gniazdka, wyłączniki, termostaty) wyślij ukierunkowane zapytanie /get
+  // UWAGA: Nigdy nie wysyłamy /get dla czujników bateryjnych (drzwi, ruch, temperatura), ponieważ usypiają i Z2M nie ma dla nich konwerterów GET!
   devices.forEach((dev) => {
     const name = dev.friendly_name || dev.ieee_address;
-    if (name) {
-      try {
-        mqttClient?.publish(`${prefix}/${name}/get`, JSON.stringify({ state: '', temperature: '', humidity: '', battery: '' }));
-        mqttClient?.publish(`${prefix}/${name}/get`, '{}');
-      } catch {
-        // ignore
+    if (!name) return;
+
+    try {
+      if (dev.category === 'plug' || dev.category === 'switch') {
+        mqttClient?.publish(`${prefix}/${name}/get`, JSON.stringify({ state: '' }));
+      } else if (dev.category === 'climate') {
+        mqttClient?.publish(
+          `${prefix}/${name}/get`,
+          JSON.stringify({ current_heating_setpoint: '', local_temperature: '', system_mode: '' }),
+        );
       }
+    } catch {
+      // ignore
     }
   });
 }
@@ -795,10 +907,12 @@ interface Z2mDeviceItem {
                 } else {
                   const existing = devices.get(ieee);
                   if (!existing) {
+                    const detectedCategory = detectDeviceCategory(modelName, undefined, devName);
                     devices.set(ieee, {
                       ieee_address: ieee,
                       friendly_name: devName,
                       model: modelName,
+                      category: detectedCategory,
                       last_seen: null,
                       battery: null,
                       last_temperature: null,
@@ -809,6 +923,9 @@ interface Z2mDeviceItem {
                   } else {
                     existing.friendly_name = devName;
                     existing.model = modelName;
+                    if (!existing.category || existing.category === 'sensor') {
+                      existing.category = detectDeviceCategory(modelName, undefined, devName);
+                    }
                   }
                 }
               }
@@ -947,7 +1064,7 @@ interface Z2mDeviceItem {
             null;
 
           const modelName = payload.model || payload.device?.model || (dev ? dev.model : 'Zigbee Device');
-          const category = detectDeviceCategory(modelName, payload);
+          const category = detectDeviceCategory(modelName, payload, dev?.friendly_name || baseTopic);
 
           if (!dev) {
             dev = {
@@ -1040,6 +1157,9 @@ interface Z2mDeviceItem {
             energy: dev.energy,
             setpoint: dev.current_heating_setpoint,
             state: dev.state,
+            contact: dev.contact,
+            occupancy: dev.occupancy,
+            water_leak: dev.water_leak,
             timestamp: nowStr,
           };
 
@@ -1182,9 +1302,12 @@ app.get('/api/devices/:ieee/history', (req: Request, res: Response) => {
   const cutoff = now - msLimit;
   const filtered = allPoints.filter((p) => new Date(p.timestamp).getTime() >= cutoff);
 
-  // Downsampling jesli liczba punktow przekracza 120 (dla plynnego renderowania wykresow)
+  const dev = devices.get(ieee);
+  const isEventSensor = dev && (dev.category === 'contact' || dev.category === 'occupancy' || dev.category === 'water_leak');
+
+  // Downsampling jesli liczba punktow przekracza 120 (tylko dla sensorow ciaglych jak temperatura/wilgotnosc)
   let result = filtered;
-  if (filtered.length > 120) {
+  if (!isEventSensor && filtered.length > 120) {
     const step = Math.ceil(filtered.length / 100);
     result = [];
     for (let i = 0; i < filtered.length; i += step) {
@@ -1207,6 +1330,11 @@ app.get('/api/devices/:ieee/history', (req: Request, res: Response) => {
   let maxHum = -999;
   let sumHum = 0;
 
+  let motionCount = 0;
+  let openCount = 0;
+  let leakCount = 0;
+  let lastEventTime: string | undefined = undefined;
+
   filtered.forEach((p) => {
     if (p.temperature !== null && p.temperature !== undefined) {
       if (p.temperature < minTemp) minTemp = p.temperature;
@@ -1221,6 +1349,19 @@ app.get('/api/devices/:ieee/history', (req: Request, res: Response) => {
       sumHum += p.humidity;
       humCount++;
     }
+
+    if (p.occupancy === true) {
+      motionCount++;
+      lastEventTime = p.timestamp;
+    }
+    if (p.contact === false) {
+      openCount++;
+      lastEventTime = p.timestamp;
+    }
+    if (p.water_leak === true) {
+      leakCount++;
+      lastEventTime = p.timestamp;
+    }
   });
 
   const count = filtered.length;
@@ -1234,6 +1375,10 @@ app.get('/api/devices/:ieee/history', (req: Request, res: Response) => {
           min_hum: humCount > 0 ? parseFloat(minHum.toFixed(1)) : undefined,
           max_hum: humCount > 0 ? parseFloat(maxHum.toFixed(1)) : undefined,
           avg_hum: humCount > 0 ? parseFloat((sumHum / humCount).toFixed(1)) : undefined,
+          motion_count: motionCount,
+          open_count: openCount,
+          leak_count: leakCount,
+          last_event_time: lastEventTime,
         }
       : {};
 
@@ -1445,13 +1590,26 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
   });
 });
 
-// 5a. Sterowanie urzadzeniem (TRVZB nastawa/tryb, Smart Plug ON/OFF, Przekaznik ZBMINIR2)
+// 5a. Sterowanie urzadzeniem (TRVZB nastawa/tryb, Smart Plug ON/OFF, Przekaznik ZBMINIR2, Alarmy)
 app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   const ieee = String(req.params['ieee'] || '');
-  const dev = devices.get(ieee);
+  let dev = devices.get(ieee);
   if (!dev) {
-    res.status(404).json({ detail: 'Device not found' });
-    return;
+    const cmdInit = req.body || {};
+    const friendlyName = cmdInit.friendly_name || `Czujnik ${ieee.slice(-4)}`;
+    const modelName = cmdInit.model || 'Zigbee Device';
+    dev = {
+      ieee_address: ieee,
+      friendly_name: friendlyName,
+      model: modelName,
+      category: detectDeviceCategory(modelName, cmdInit, friendlyName),
+      last_seen: new Date().toISOString(),
+      battery: null,
+      last_temperature: null,
+      last_humidity: null,
+      linkquality: null,
+    };
+    devices.set(ieee, dev);
   }
 
   const cmd = { ...req.body };
@@ -2090,15 +2248,29 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
   const logSteps: string[] = [];
 
   // Detekcja obecności repozytorium Git w środowisku uruchomieniowym
-  const hasGit = existsSync(join(process.cwd(), '.git')) || existsSync(join(process.cwd(), '../.git')) || existsSync('/opt/zigbee-telemetry-panel/.git');
-  if (!hasGit) {
+  let gitRepoDir: string | null = null;
+  const candidates = [
+    process.cwd(),
+    join(process.cwd(), '..'),
+    '/opt/zigbee-telemetry-panel',
+    '/var/www/iot-telemetry',
+    '/home/pi/simplehome',
+  ];
+  for (const c of candidates) {
+    if (existsSync(join(c, '.git'))) {
+      gitRepoDir = c;
+      break;
+    }
+  }
+
+  if (!gitRepoDir) {
     res.json({
       success: true,
       updated: false,
-      current_commit: 'cloud-dev',
-      remote_commit: 'cloud-dev',
-      message: 'System pracuje w dedykowanym środowisku uruchomieniowym chmury (Google Cloud Run / Sandbox). Aktualizacja z poziomu Git nie jest wymagana – używasz najnowszej wersji obrazu skompilowanego bezpośrednio z repozytorium.',
-      output: '[System Notice]: Środowisko kontenerowe / bezrepozytoryjne (brak folderu .git). Wszystkie pliki panelu są w najnowszej wersji.',
+      current_commit: 'cloud-production',
+      remote_commit: 'cloud-production',
+      message: 'System pracuje w dedykowanym środowisku produkcyjnym (brak lokalnego katalogu repozytorium .git). Aplikacja korzysta z najnowszego skompilowanego obrazu produkcyjnego. Aktualizacja Git dostępna jest w instalacji bare-metal z klonem repozytorium.',
+      output: '[System Notice]: Środowisko uruchomieniowe bezrepozytoryjne. Wszystkie pliki panelu i serwera są w najnowszej wersji.',
     });
     return;
   }
@@ -2106,21 +2278,21 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
   try {
     // 1. Zabezpieczenie przed błędem dubious ownership w Git
     try {
-      execSync('git config --global --add safe.directory "*" || true', { encoding: 'utf-8' });
+      execSync('git config --global --add safe.directory "*" || true', { cwd: gitRepoDir, encoding: 'utf-8' });
     } catch {
       // ignore
     }
 
     let beforeCommit = 'unknown';
     try {
-      beforeCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+      beforeCommit = execSync('git rev-parse --short HEAD', { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
     } catch {
       // ignore
     }
 
     // 2. Przechowanie lokalnych zmian (np. baza sqlite, pliki dist), aby git pull sie nie wykrzaczyl
     try {
-      const stashOut = execSync('git stash --include-untracked 2>&1', { encoding: 'utf-8' });
+      const stashOut = execSync('git stash --include-untracked 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
       logSteps.push(`[Git Stash]: ${stashOut.trim()}`);
     } catch {
       // ignore
@@ -2130,6 +2302,7 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
     let pullOutput = '';
     try {
       pullOutput = execSync('git fetch --all 2>&1 && (git pull origin main 2>&1 || git pull origin master 2>&1 || git pull 2>&1)', {
+        cwd: gitRepoDir,
         encoding: 'utf-8',
         timeout: 45000,
       });
@@ -2140,7 +2313,7 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
 
       // Fallback: Hard reset do stanu zdalnego w razie konfliktow lub niezgodnosci galezi
       try {
-        const resetOut = execSync('git reset --hard origin/main 2>&1 || git reset --hard origin/master 2>&1', { encoding: 'utf-8' });
+        const resetOut = execSync('git reset --hard origin/main 2>&1 || git reset --hard origin/master 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
         logSteps.push(`[Git Reset Fallback]: ${resetOut.trim()}`);
       } catch (resetErr: unknown) {
         logSteps.push(`[Git Reset Error]: ${String(resetErr)}`);
@@ -2149,7 +2322,7 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
 
     // 4. Przywrocenie lokalnych zmienionych plikow jesli to mozliwe
     try {
-      const popOut = execSync('git stash pop 2>&1', { encoding: 'utf-8' });
+      const popOut = execSync('git stash pop 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
       logSteps.push(`[Git Stash Pop]: ${popOut.trim()}`);
     } catch {
       // ignore
@@ -2157,7 +2330,7 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
 
     let afterCommit = beforeCommit;
     try {
-      afterCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+      afterCommit = execSync('git rev-parse --short HEAD', { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
     } catch {
       // ignore
     }

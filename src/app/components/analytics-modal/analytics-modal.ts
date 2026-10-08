@@ -3,6 +3,7 @@ import {
   Component,
   ElementRef,
   PLATFORM_ID,
+  computed,
   effect,
   inject,
   input,
@@ -153,92 +154,301 @@ import { Chart, registerables } from 'chart.js';
               </div>
             }
 
-            <!-- Karty statystyk dla wybranego zakresu -->
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
-                <div class="text-slate-400 mb-1 flex items-center justify-between">
-                  <span>Średnia temp.</span>
-                  <mat-icon class="text-cyan-400 !w-3.5 !h-3.5 text-xs">thermostat</mat-icon>
+            @if (isEventSensor()) {
+              <!-- 1. KARTY STATYSTYK DLA CZUJNIKÓW ZDARZENIOWYCH (Ruch, Drzwi, Zalanie) -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                @if (category() === 'occupancy') {
+                  <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                    <div class="text-slate-400 mb-1 flex items-center justify-between">
+                      <span>Detekcje ruchu</span>
+                      <mat-icon class="text-cyan-400 !w-3.5 !h-3.5 text-xs">directions_walk</mat-icon>
+                    </div>
+                    <div class="text-xl font-bold font-mono text-cyan-400 tabular-nums">
+                      {{ motionEventsCount() }} zdarzeń
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1">Zakres: {{ activeRange() }}</div>
+                  </div>
+
+                  <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                    <div class="text-slate-400 mb-1 flex items-center justify-between">
+                      <span>Aktualny stan</span>
+                      <mat-icon class="!w-3.5 !h-3.5 text-xs" [class.text-cyan-400]="device()?.occupancy" [class.text-slate-500]="!device()?.occupancy">
+                        {{ device()?.occupancy ? 'radar' : 'person_off' }}
+                      </mat-icon>
+                    </div>
+                    <div class="text-lg font-bold font-mono" [class.text-cyan-400]="device()?.occupancy" [class.text-slate-400]="!device()?.occupancy">
+                      {{ device()?.occupancy ? 'WYKRYTO RUCH' : 'BRAK OBECNOŚCI' }}
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1">Radar mmWave / PIR</div>
+                  </div>
+                } @else if (category() === 'contact') {
+                  <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                    <div class="text-slate-400 mb-1 flex items-center justify-between">
+                      <span>Liczba otwarć</span>
+                      <mat-icon class="text-amber-400 !w-3.5 !h-3.5 text-xs">meeting_room</mat-icon>
+                    </div>
+                    <div class="text-xl font-bold font-mono text-amber-400 tabular-nums">
+                      {{ openEventsCount() }} razy
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1">Zakres: {{ activeRange() }}</div>
+                  </div>
+
+                  <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                    <div class="text-slate-400 mb-1 flex items-center justify-between">
+                      <span>Aktualny stan</span>
+                      <mat-icon class="!w-3.5 !h-3.5 text-xs" [class.text-emerald-400]="device()?.contact" [class.text-rose-400]="!device()?.contact">
+                        {{ device()?.contact ? 'door_front' : 'meeting_room' }}
+                      </mat-icon>
+                    </div>
+                    <div class="text-lg font-bold font-mono" [class.text-emerald-400]="device()?.contact" [class.text-rose-400]="!device()?.contact">
+                      {{ device()?.contact ? 'ZAMKNIĘTE' : 'OTWARTE!' }}
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1">Kontaktron magnetyczny</div>
+                  </div>
+                } @else {
+                  <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                    <div class="text-slate-400 mb-1 flex items-center justify-between">
+                      <span>Alerty zalania</span>
+                      <mat-icon class="text-rose-400 !w-3.5 !h-3.5 text-xs">water_damage</mat-icon>
+                    </div>
+                    <div class="text-xl font-bold font-mono text-rose-400 tabular-nums">
+                      {{ leakEventsCount() }} zdarzeń
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1">Zakres: {{ activeRange() }}</div>
+                  </div>
+
+                  <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                    <div class="text-slate-400 mb-1 flex items-center justify-between">
+                      <span>Stan sondy</span>
+                      <mat-icon class="!w-3.5 !h-3.5 text-xs" [class.text-rose-400]="device()?.water_leak" [class.text-emerald-400]="!device()?.water_leak">
+                        {{ device()?.water_leak ? 'water_damage' : 'water_drop' }}
+                      </mat-icon>
+                    </div>
+                    <div class="text-lg font-bold font-mono" [class.text-rose-400]="device()?.water_leak" [class.text-emerald-400]="!device()?.water_leak">
+                      {{ device()?.water_leak ? 'ALARM ZALANIA!' : 'SUCHO / NORMA' }}
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1">Sonda wilgoci IP67</div>
+                  </div>
+                }
+
+                <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <div class="text-slate-400 mb-1 flex items-center justify-between">
+                    <span>Ostatnie zdarzenie</span>
+                    <mat-icon class="text-slate-400 !w-3.5 !h-3.5 text-xs">schedule</mat-icon>
+                  </div>
+                  <div class="text-sm font-bold font-mono text-white truncate">
+                    {{ lastEventTimeFormatted() }}
+                  </div>
+                  <div class="text-[11px] text-slate-500 mt-1">Czas rejestracji</div>
                 </div>
-                <div class="text-xl font-bold font-mono text-cyan-400 tabular-nums">
-                  {{ stats()?.avg_temp !== undefined ? stats()?.avg_temp + ' °C' : 'brak danych' }}
-                </div>
-                <div class="text-[11px] text-slate-500 font-mono mt-1">
-                  Min: <span class="text-slate-300">{{ stats()?.min_temp !== undefined ? stats()?.min_temp + '°' : 'brak danych' }}</span> / Max: <span class="text-slate-300">{{ stats()?.max_temp !== undefined ? stats()?.max_temp + '°' : 'brak danych' }}</span>
+
+                <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <div class="text-slate-400 mb-1 flex items-center justify-between">
+                    <span>Bateria czujnika</span>
+                    <mat-icon class="text-emerald-400 !w-3.5 !h-3.5 text-xs">battery_charging_full</mat-icon>
+                  </div>
+                  <div class="text-xl font-bold font-mono text-emerald-400 tabular-nums">
+                    {{ device()?.battery !== undefined && device()?.battery !== null ? device()?.battery + ' %' : 'brak danych' }}
+                  </div>
+                  <div class="text-[11px] text-slate-500 mt-1">{{ device()?.linkquality ?? '—' }} LQI</div>
                 </div>
               </div>
 
-              <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
-                <div class="text-slate-400 mb-1 flex items-center justify-between">
-                  <span>Średnia wilgotność</span>
-                  <mat-icon class="text-blue-400 !w-3.5 !h-3.5 text-xs">water_drop</mat-icon>
+              <!-- 2. DZIENNIK ZDARZEŃ W CZASIE RZECZYWISTYM DLA CZUJNIKÓW BINARNYCH -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 relative min-h-[350px]">
+                <div class="flex items-center justify-between border-b border-slate-800/80 pb-3 mb-3">
+                  <div class="flex items-center gap-2">
+                    <mat-icon class="text-cyan-400 text-sm !w-4 !h-4">list_alt</mat-icon>
+                    <span class="text-xs font-bold text-white uppercase tracking-wider">
+                      Dziennik Zdarzeń (Rejestr detekcji w czasie rzeczywistym)
+                    </span>
+                  </div>
+                  <span class="text-[11px] font-mono text-slate-400">
+                    Łącznie wpisów: <strong class="text-white">{{ historyPoints().length }}</strong>
+                  </span>
                 </div>
-                <div class="text-xl font-bold font-mono text-blue-400 tabular-nums">
-                  {{ stats()?.avg_hum !== undefined ? stats()?.avg_hum + ' %' : 'brak danych' }}
-                </div>
-                <div class="text-[11px] text-slate-500 font-mono mt-1">
-                  Min: <span class="text-slate-300">{{ stats()?.min_hum !== undefined ? stats()?.min_hum + '%' : 'brak danych' }}</span> / Max: <span class="text-slate-300">{{ stats()?.max_hum !== undefined ? stats()?.max_hum + '%' : 'brak danych' }}</span>
-                </div>
-              </div>
 
-              <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
-                <div class="text-slate-400 mb-1 flex items-center justify-between">
-                  <span>Bateria czujnika</span>
-                  <mat-icon class="text-emerald-400 !w-3.5 !h-3.5 text-xs">battery_charging_full</mat-icon>
-                </div>
-                <div class="text-xl font-bold font-mono text-emerald-400 tabular-nums">
-                  {{ device()?.battery !== undefined && device()?.battery !== null ? device()?.battery + ' %' : 'brak danych' }}
-                </div>
-                <div class="text-[11px] text-slate-500 mt-1">Ogniwo CR2032/CR2450</div>
+                @if (isLoading()) {
+                  <div class="flex items-center justify-center py-16 text-cyan-400">
+                    <div class="flex items-center gap-2 text-xs font-mono">
+                      <mat-icon class="animate-spin text-base">refresh</mat-icon>
+                      Ładowanie dziennika zdarzeń z bazy...
+                    </div>
+                  </div>
+                } @else if (historyPoints().length > 0) {
+                  <div class="overflow-x-auto max-h-[320px] overflow-y-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                      <thead class="text-[11px] text-slate-400 border-b border-slate-800/60 sticky top-0 bg-slate-950">
+                        <tr>
+                          <th class="py-2 px-3">Godzina i Data</th>
+                          <th class="py-2 px-3">Zdarzenie / Stan</th>
+                          <th class="py-2 px-3">Bateria</th>
+                          <th class="py-2 px-3">Zasięg LQI</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-900">
+                        @for (point of reversedHistory(); track point.id) {
+                          <tr class="hover:bg-slate-900/50 transition-colors">
+                            <td class="py-2 px-3 text-slate-300 font-bold whitespace-nowrap">
+                              {{ formatPointTime(point.timestamp) }}
+                            </td>
+                            <td class="py-2 px-3">
+                              @if (category() === 'occupancy') {
+                                @if (point.occupancy) {
+                                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-cyan-950/80 text-cyan-300 border border-cyan-800 text-[11px] font-bold">
+                                    <mat-icon class="text-xs !w-3.5 !h-3.5">directions_walk</mat-icon>
+                                    Wykryto ruch
+                                  </span>
+                                } @else {
+                                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-900 text-slate-400 border border-slate-800 text-[11px]">
+                                    <mat-icon class="text-xs !w-3.5 !h-3.5">person_off</mat-icon>
+                                    Brak obecności
+                                  </span>
+                                }
+                              } @else if (category() === 'contact') {
+                                @if (point.contact === false) {
+                                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-rose-950/80 text-rose-300 border border-rose-800 text-[11px] font-bold">
+                                    <mat-icon class="text-xs !w-3.5 !h-3.5">meeting_room</mat-icon>
+                                    Otwarto drzwi / okno
+                                  </span>
+                                } @else {
+                                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800 text-[11px]">
+                                    <mat-icon class="text-xs !w-3.5 !h-3.5">door_front</mat-icon>
+                                    Zamknięto
+                                  </span>
+                                }
+                              } @else if (category() === 'water_leak') {
+                                @if (point.water_leak) {
+                                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-rose-950/80 text-rose-300 border border-rose-800 text-[11px] font-bold animate-pulse">
+                                    <mat-icon class="text-xs !w-3.5 !h-3.5">water_damage</mat-icon>
+                                    WYKRYTO ZALANIE!
+                                  </span>
+                                } @else {
+                                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800 text-[11px]">
+                                    <mat-icon class="text-xs !w-3.5 !h-3.5">water_drop</mat-icon>
+                                    Sucho / norma
+                                  </span>
+                                }
+                              }
+                            </td>
+                            <td class="py-2 px-3 text-slate-400">
+                              {{ point.battery !== undefined && point.battery !== null ? point.battery + '%' : '—' }}
+                            </td>
+                            <td class="py-2 px-3 text-slate-400">
+                              {{ point.linkquality !== undefined && point.linkquality !== null ? point.linkquality + ' LQI' : '—' }}
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <div class="flex flex-col items-center justify-center h-[280px] text-center p-6 border border-dashed border-slate-800/80 rounded-xl">
+                    <mat-icon class="text-4xl text-slate-600 mb-2">event_busy</mat-icon>
+                    <p class="text-sm font-semibold text-slate-300">Brak zarejestrowanych zdarzeń</p>
+                    <p class="text-xs text-slate-500 max-w-sm mt-1">
+                      W wybranym przedziale czasu ({{ activeRange() }}) czujnik nie zarejestrował zmian stanu. Aplikacja nie generuje sztucznych zdarzeń.
+                    </p>
+                  </div>
+                }
               </div>
-
-              <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
-                <div class="text-slate-400 mb-1 flex items-center justify-between">
-                  <span>Próbki w SQLite</span>
-                  <mat-icon class="text-slate-400 !w-3.5 !h-3.5 text-xs">storage</mat-icon>
-                </div>
-                <div class="text-xl font-bold font-mono text-slate-200 tabular-nums">
-                  {{ (stats()?.count ?? historyPoints().length) > 0 ? (stats()?.count ?? historyPoints().length) : 'brak danych' }}
-                </div>
-                <div class="text-[11px] text-slate-500 mt-1">Zarejestrowane rekordy</div>
-              </div>
-            </div>
-
-            <!-- Obszar wykresu Chart.js -->
-            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 relative min-h-[350px]">
-              @if (isLoading()) {
-                <div class="absolute inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center text-cyan-400 z-10">
-                  <div class="flex items-center gap-2 text-xs font-mono">
-                    <mat-icon class="animate-spin text-base">refresh</mat-icon>
-                    Pobieranie historii z bazy SQLite...
+            } @else {
+              <!-- Standardowe karty statystyk dla czujników temperatury i klimatyzacji -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <div class="text-slate-400 mb-1 flex items-center justify-between">
+                    <span>Średnia temp.</span>
+                    <mat-icon class="text-cyan-400 !w-3.5 !h-3.5 text-xs">thermostat</mat-icon>
+                  </div>
+                  <div class="text-xl font-bold font-mono text-cyan-400 tabular-nums">
+                    {{ stats()?.avg_temp !== undefined ? stats()?.avg_temp + ' °C' : 'brak danych' }}
+                  </div>
+                  <div class="text-[11px] text-slate-500 font-mono mt-1">
+                    Min: <span class="text-slate-300">{{ stats()?.min_temp !== undefined ? stats()?.min_temp + '°' : 'brak danych' }}</span> / Max: <span class="text-slate-300">{{ stats()?.max_temp !== undefined ? stats()?.max_temp + '°' : 'brak danych' }}</span>
                   </div>
                 </div>
-              }
-              @if (historyPoints().length > 0) {
-                <div class="w-full h-[320px]">
-                  <canvas #chartCanvas></canvas>
+
+                <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <div class="text-slate-400 mb-1 flex items-center justify-between">
+                    <span>Średnia wilgotność</span>
+                    <mat-icon class="text-blue-400 !w-3.5 !h-3.5 text-xs">water_drop</mat-icon>
+                  </div>
+                  <div class="text-xl font-bold font-mono text-blue-400 tabular-nums">
+                    {{ stats()?.avg_hum !== undefined ? stats()?.avg_hum + ' %' : 'brak danych' }}
+                  </div>
+                  <div class="text-[11px] text-slate-500 font-mono mt-1">
+                    Min: <span class="text-slate-300">{{ stats()?.min_hum !== undefined ? stats()?.min_hum + '%' : 'brak danych' }}</span> / Max: <span class="text-slate-300">{{ stats()?.max_hum !== undefined ? stats()?.max_hum + '%' : 'brak danych' }}</span>
+                  </div>
                 </div>
-              } @else if (!isLoading()) {
-                <div class="flex flex-col items-center justify-center h-[320px] text-center p-6 border border-dashed border-slate-800/80 rounded-xl">
-                  <mat-icon class="text-4xl text-slate-600 mb-2">signal_wifi_bad</mat-icon>
-                  <p class="text-sm font-semibold text-slate-300">brak danych</p>
-                  <p class="text-xs text-slate-500 max-w-sm mt-1">
-                    Brak odnotowanych próbek w bazie SQLite dla wybranego zakresu czasu ({{ activeRange() }}). Dane nie są sztucznie syntetyzowane.
-                  </p>
+
+                <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <div class="text-slate-400 mb-1 flex items-center justify-between">
+                    <span>Bateria czujnika</span>
+                    <mat-icon class="text-emerald-400 !w-3.5 !h-3.5 text-xs">battery_charging_full</mat-icon>
+                  </div>
+                  <div class="text-xl font-bold font-mono text-emerald-400 tabular-nums">
+                    {{ device()?.battery !== undefined && device()?.battery !== null ? device()?.battery + ' %' : 'brak danych' }}
+                  </div>
+                  <div class="text-[11px] text-slate-500 mt-1">Ogniwo CR2032/CR2450</div>
                 </div>
-              }
-            </div>
+
+                <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <div class="text-slate-400 mb-1 flex items-center justify-between">
+                    <span>Próbki w SQLite</span>
+                    <mat-icon class="text-slate-400 !w-3.5 !h-3.5 text-xs">storage</mat-icon>
+                  </div>
+                  <div class="text-xl font-bold font-mono text-slate-200 tabular-nums">
+                    {{ (stats()?.count ?? historyPoints().length) > 0 ? (stats()?.count ?? historyPoints().length) : 'brak danych' }}
+                  </div>
+                  <div class="text-[11px] text-slate-500 mt-1">Zarejestrowane rekordy</div>
+                </div>
+              </div>
+
+              <!-- Obszar wykresu Chart.js -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 relative min-h-[350px]">
+                @if (isLoading()) {
+                  <div class="absolute inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center text-cyan-400 z-10">
+                    <div class="flex items-center gap-2 text-xs font-mono">
+                      <mat-icon class="animate-spin text-base">refresh</mat-icon>
+                      Pobieranie historii z bazy SQLite...
+                    </div>
+                  </div>
+                }
+                @if (historyPoints().length > 0) {
+                  <div class="w-full h-[320px]">
+                    <canvas #chartCanvas></canvas>
+                  </div>
+                } @else if (!isLoading()) {
+                  <div class="flex flex-col items-center justify-center h-[320px] text-center p-6 border border-dashed border-slate-800/80 rounded-xl">
+                    <mat-icon class="text-4xl text-slate-600 mb-2">signal_wifi_bad</mat-icon>
+                    <p class="text-sm font-semibold text-slate-300">brak danych</p>
+                    <p class="text-xs text-slate-500 max-w-sm mt-1">
+                      Brak odnotowanych próbek w bazie SQLite dla wybranego zakresu czasu ({{ activeRange() }}). Dane nie są sztucznie syntetyzowane.
+                    </p>
+                  </div>
+                }
+              </div>
+            }
           </div>
 
           <!-- Stopka modala -->
           <div class="p-4 border-t border-slate-800 bg-slate-900/50 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-            <div class="flex items-center gap-2">
-              <span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span>
-              <span>Lewa oś: Temperatura (°C)</span>
-              <span class="text-slate-600">·</span>
-              <span class="inline-block w-2 h-2 rounded-full bg-blue-500"></span>
-              <span>Prawa oś: Wilgotność (%)</span>
-            </div>
+            @if (isEventSensor()) {
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span>
+                <span>Dziennik zdarzeń w czasie rzeczywistym</span>
+                <span class="text-slate-600">·</span>
+                <span class="text-slate-400">Brak syntetycznych danych (rejestr 1:1)</span>
+              </div>
+            } @else {
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span>
+                <span>Lewa oś: Temperatura (°C)</span>
+                <span class="text-slate-600">·</span>
+                <span class="inline-block w-2 h-2 rounded-full bg-blue-500"></span>
+                <span>Prawa oś: Wilgotność (%)</span>
+              </div>
+            }
             <button
               (click)="closed.emit()"
               class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors"
@@ -274,6 +484,70 @@ export class AnalyticsModal {
   readonly stats = signal<HistoryStats | null>(null);
   readonly historyPoints = signal<TelemetryPoint[]>([]);
   readonly isEditingName = signal<boolean>(false);
+
+  readonly category = computed(() => {
+    const d = this.device();
+    if (!d) return 'sensor';
+    if (d.category) return d.category;
+    const m = (d.model || '').toLowerCase();
+    const f = (d.friendly_name || '').toLowerCase();
+    if (m.includes('contact') || m.includes('door') || f.includes('drzwi') || f.includes('okno') || f.includes('otwarcie') || f.includes('kontaktron') || d.contact !== undefined) return 'contact';
+    if (m.includes('motion') || m.includes('pir') || m.includes('presence') || m.includes('occupancy') || f.includes('ruch') || f.includes('ruchu') || f.includes('obecno') || f.includes('korytarz') || f.includes('góra') || f.includes('gora') || d.occupancy !== undefined) return 'occupancy';
+    if (m.includes('water') || m.includes('leak') || f.includes('zalani') || f.includes('woda') || d.water_leak !== undefined) return 'water_leak';
+    if (m.includes('trv') || m.includes('thermostat') || m.includes('termostat') || f.includes('termostat') || f.includes('kanciapa') || f.includes('sypialnia') || d.current_heating_setpoint !== undefined) return 'climate';
+    return 'sensor';
+  });
+
+  readonly isEventSensor = computed(() => {
+    const cat = this.category();
+    return cat === 'contact' || cat === 'occupancy' || cat === 'water_leak';
+  });
+
+  readonly reversedHistory = computed(() => {
+    return [...this.historyPoints()].reverse();
+  });
+
+  readonly motionEventsCount = computed(() => {
+    const st = this.stats();
+    if (st?.motion_count !== undefined) return st.motion_count;
+    return this.historyPoints().filter((p) => p.occupancy === true).length;
+  });
+
+  readonly openEventsCount = computed(() => {
+    const st = this.stats();
+    if (st?.open_count !== undefined) return st.open_count;
+    return this.historyPoints().filter((p) => p.contact === false).length;
+  });
+
+  readonly leakEventsCount = computed(() => {
+    const st = this.stats();
+    if (st?.leak_count !== undefined) return st.leak_count;
+    return this.historyPoints().filter((p) => p.water_leak === true).length;
+  });
+
+  readonly lastEventTimeFormatted = computed(() => {
+    const pts = this.historyPoints();
+    if (pts.length > 0) {
+      const last = pts[pts.length - 1];
+      return this.formatPointTime(last.timestamp);
+    }
+    const d = this.device();
+    if (d?.last_seen) return this.formatPointTime(d.last_seen);
+    return 'brak danych';
+  });
+
+  formatPointTime(timestamp: string): string {
+    const d = new Date(timestamp);
+    if (isNaN(d.getTime())) return timestamp;
+    return d.toLocaleString([], {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  }
 
   private chartInstance: Chart | null = null;
 
