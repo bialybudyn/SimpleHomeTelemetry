@@ -1,6 +1,8 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
+  inject,
   signal,
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
@@ -11,6 +13,27 @@ import { CodeViewer } from '../code-viewer/code-viewer';
 import { AndroidViewer } from '../android-viewer/android-viewer';
 import { Simulator } from '../simulator/simulator';
 import { NotificationsConfig } from './notifications-config';
+import { DevicesManager } from './devices-manager';
+import { Telemetry } from '../../services/telemetry';
+
+export type ServerSubTab =
+  | 'devices'
+  | 'installer'
+  | 'catalog'
+  | 'dongle-max'
+  | 'code'
+  | 'android'
+  | 'simulator'
+  | 'notifications';
+
+interface SubTabItem {
+  id: ServerSubTab;
+  title: string;
+  subtitle: string;
+  icon: string;
+  badge?: string;
+  badgeClass?: string;
+}
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -24,6 +47,7 @@ import { NotificationsConfig } from './notifications-config';
     AndroidViewer,
     Simulator,
     NotificationsConfig,
+    DevicesManager,
   ],
   template: `
     <div class="space-y-6">
@@ -38,7 +62,7 @@ import { NotificationsConfig } from './notifications-config';
             Ustawienia Serwera & Konfiguracja Usług Systemowych
           </h2>
           <p class="text-xs text-slate-400">
-            Kompletne zarządzanie usługami systemd, katalogiem urządzeń, bramką Sonoff Dongle Max, kodem źródłowym oraz aplikacją Android (.APK).
+            Kompletne zarządzanie flotą urządzeń, usługami systemd, bramką Sonoff Dongle Max, kodem źródłowym oraz aplikacją Android (.APK).
           </p>
         </div>
 
@@ -52,122 +76,186 @@ import { NotificationsConfig } from './notifications-config';
         </a>
       </div>
 
-      <!-- Pod-Nawigacja Zakładkowa dla Ustawień Serwera -->
-      <div class="flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-950 border border-slate-800 overflow-x-auto text-xs font-semibold custom-scrollbar">
-        <button
-          (click)="activeSubTab.set('installer')"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
-          [class.bg-slate-800]="activeSubTab() === 'installer'"
-          [class.text-white]="activeSubTab() === 'installer'"
-          [class.text-slate-400]="activeSubTab() !== 'installer'"
-          [class.hover:text-white]="activeSubTab() !== 'installer'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">terminal</mat-icon>
-          <span>Instalator & Usługi w tle</span>
-        </button>
+      <!-- KAFELKI POD SOBĄ Z PODZAKŁADKAMI (Zamiast niewygodnego poziomego paska) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <!-- Lewa Kolumna: Pionowe Kafelki Podzakładek -->
+        <div class="lg:col-span-4 xl:col-span-3 space-y-2.5">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-1 flex items-center justify-between">
+            <span>Podzakładki Administracji</span>
+            <span class="text-[10px] text-cyan-400 font-mono">Wybierz moduł</span>
+          </div>
 
-        <button
-          (click)="activeSubTab.set('catalog')"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
-          [class.bg-slate-800]="activeSubTab() === 'catalog'"
-          [class.text-white]="activeSubTab() === 'catalog'"
-          [class.text-slate-400]="activeSubTab() !== 'catalog'"
-          [class.hover:text-white]="activeSubTab() !== 'catalog'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">hub</mat-icon>
-          <span>Katalog Sonoff & Tuya</span>
-        </button>
+          <div class="space-y-2">
+            @for (tab of subTabs(); track tab.id) {
+              <button
+                (click)="activeSubTab.set(tab.id)"
+                class="w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer relative group flex items-start gap-3 shadow-md"
+                [class.bg-slate-800]="activeSubTab() === tab.id"
+                [class.border-cyan-500]="activeSubTab() === tab.id"
+                [class.shadow-cyan-950/40]="activeSubTab() === tab.id"
+                [class.bg-slate-900/80]="activeSubTab() !== tab.id"
+                [class.border-slate-800]="activeSubTab() !== tab.id"
+                [class.hover:border-slate-700]="activeSubTab() !== tab.id"
+                [class.hover:bg-slate-900]="activeSubTab() !== tab.id"
+              >
+                <!-- Lewa krawędź aktywnego kafelka -->
+                @if (activeSubTab() === tab.id) {
+                  <div class="absolute left-0 top-3 bottom-3 w-1 bg-gradient-to-b from-cyan-400 to-blue-500 rounded-r"></div>
+                }
 
-        <button
-          (click)="activeSubTab.set('dongle-max')"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
-          [class.bg-slate-800]="activeSubTab() === 'dongle-max'"
-          [class.text-white]="activeSubTab() === 'dongle-max'"
-          [class.text-slate-400]="activeSubTab() !== 'dongle-max'"
-          [class.hover:text-white]="activeSubTab() !== 'dongle-max'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">router</mat-icon>
-          <span>Dongle Max (Sieć & Konfiguracja)</span>
-        </button>
+                <!-- Ikona kafelka -->
+                <div
+                  class="p-2.5 rounded-xl border shrink-0 transition-colors"
+                  [class.bg-cyan-500/20]="activeSubTab() === tab.id"
+                  [class.border-cyan-500/40]="activeSubTab() === tab.id"
+                  [class.text-cyan-300]="activeSubTab() === tab.id"
+                  [class.bg-slate-950]="activeSubTab() !== tab.id"
+                  [class.border-slate-800]="activeSubTab() !== tab.id"
+                  [class.text-slate-400]="activeSubTab() !== tab.id"
+                >
+                  <mat-icon class="text-lg !w-5 !h-5">{{ tab.icon }}</mat-icon>
+                </div>
 
-        <button
-          (click)="activeSubTab.set('code')"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
-          [class.bg-slate-800]="activeSubTab() === 'code'"
-          [class.text-white]="activeSubTab() === 'code'"
-          [class.text-slate-400]="activeSubTab() !== 'code'"
-          [class.hover:text-white]="activeSubTab() !== 'code'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">code</mat-icon>
-          <span>Pliki Python & Wdrożenie</span>
-        </button>
+                <!-- Tytuł, opis i badge -->
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-1.5">
+                    <span
+                      class="text-xs font-bold truncate transition-colors"
+                      [class.text-white]="activeSubTab() === tab.id"
+                      [class.text-slate-300]="activeSubTab() !== tab.id"
+                      [class.group-hover:text-white]="activeSubTab() !== tab.id"
+                    >
+                      {{ tab.title }}
+                    </span>
+                    @if (tab.badge) {
+                      <span
+                        class="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold shrink-0 border"
+                        [class]="tab.badgeClass || 'bg-slate-800 text-slate-300 border-slate-700'"
+                      >
+                        {{ tab.badge }}
+                      </span>
+                    }
+                  </div>
+                  <p class="text-[11px] text-slate-400 mt-0.5 leading-snug line-clamp-2">
+                    {{ tab.subtitle }}
+                  </p>
+                </div>
 
-        <button
-          (click)="activeSubTab.set('android')"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
-          [class.bg-slate-800]="activeSubTab() === 'android'"
-          [class.text-white]="activeSubTab() === 'android'"
-          [class.text-slate-400]="activeSubTab() !== 'android'"
-          [class.hover:text-white]="activeSubTab() !== 'android'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">android</mat-icon>
-          <span>Aplikacja Android (.APK)</span>
-        </button>
+                <mat-icon
+                  class="text-sm !w-4 !h-4 shrink-0 transition-transform self-center"
+                  [class.text-cyan-400]="activeSubTab() === tab.id"
+                  [class.translate-x-0.5]="activeSubTab() === tab.id"
+                  [class.text-slate-600]="activeSubTab() !== tab.id"
+                  [class.group-hover:text-slate-400]="activeSubTab() !== tab.id"
+                >
+                  chevron_right
+                </mat-icon>
+              </button>
+            }
+          </div>
+        </div>
 
-        <button
-          (click)="activeSubTab.set('simulator')"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
-          [class.bg-slate-800]="activeSubTab() === 'simulator'"
-          [class.text-white]="activeSubTab() === 'simulator'"
-          [class.text-slate-400]="activeSubTab() !== 'simulator'"
-          [class.hover:text-white]="activeSubTab() !== 'simulator'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">tune</mat-icon>
-          <span>Konsola Testowa</span>
-        </button>
-
-        <button
-          (click)="activeSubTab.set('notifications')"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
-          [class.bg-slate-800]="activeSubTab() === 'notifications'"
-          [class.text-white]="activeSubTab() === 'notifications'"
-          [class.text-slate-400]="activeSubTab() !== 'notifications'"
-          [class.hover:text-white]="activeSubTab() !== 'notifications'"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">notifications</mat-icon>
-          <span>Powiadomienia (SMTP & Telegram)</span>
-        </button>
-      </div>
-
-      <!-- Treść Pod-Zakładki -->
-      <div>
-        @switch (activeSubTab()) {
-          @case ('installer') {
-            <app-installer-view></app-installer-view>
+        <!-- Prawa Kolumna: Treść Wybranej Podzakładki -->
+        <div class="lg:col-span-8 xl:col-span-9 min-w-0">
+          @switch (activeSubTab()) {
+            @case ('devices') {
+              <app-devices-manager></app-devices-manager>
+            }
+            @case ('installer') {
+              <app-installer-view></app-installer-view>
+            }
+            @case ('catalog') {
+              <app-device-catalog></app-device-catalog>
+            }
+            @case ('dongle-max') {
+              <app-dongle-max></app-dongle-max>
+            }
+            @case ('code') {
+              <app-code-viewer></app-code-viewer>
+            }
+            @case ('android') {
+              <app-android-viewer></app-android-viewer>
+            }
+            @case ('simulator') {
+              <app-simulator></app-simulator>
+            }
+            @case ('notifications') {
+              <app-notifications-config></app-notifications-config>
+            }
           }
-          @case ('catalog') {
-            <app-device-catalog></app-device-catalog>
-          }
-          @case ('dongle-max') {
-            <app-dongle-max></app-dongle-max>
-          }
-          @case ('code') {
-            <app-code-viewer></app-code-viewer>
-          }
-          @case ('android') {
-            <app-android-viewer></app-android-viewer>
-          }
-          @case ('simulator') {
-            <app-simulator></app-simulator>
-          }
-          @case ('notifications') {
-            <app-notifications-config></app-notifications-config>
-          }
-        }
+        </div>
       </div>
     </div>
   `,
 })
 export class ServerSettings {
-  readonly activeSubTab = signal<'installer' | 'catalog' | 'dongle-max' | 'code' | 'android' | 'simulator' | 'notifications'>('installer');
+  readonly telemetry = inject(Telemetry);
+
+  readonly activeSubTab = signal<ServerSubTab>('devices');
+
+  readonly subTabs = computed<SubTabItem[]>(() => {
+    const allCount = this.telemetry.allDevices().length;
+    const deletedCount = this.telemetry.allDevices().filter((d) => d.is_deleted).length;
+
+    return [
+      {
+        id: 'devices',
+        title: 'Urządzenia (Rejestr Floty)',
+        subtitle: 'Aktywne, Niepołączone, Usunięte z pulpitu & Trwałe kasowanie',
+        icon: 'devices_other',
+        badge: deletedCount > 0 ? `${allCount} (${deletedCount} usun.)` : `${allCount}`,
+        badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+      },
+      {
+        id: 'installer',
+        title: 'Instalator & Usługi w tle',
+        subtitle: 'Status procesów systemd, porty sieciowe, restarty demonów',
+        icon: 'terminal',
+        badge: 'systemd',
+        badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
+      },
+      {
+        id: 'catalog',
+        title: 'Katalog Sonoff & Tuya',
+        subtitle: 'Baza wspieranych czujników, głowic TRVZB, wentylatorów i smart plugów',
+        icon: 'hub',
+        badge: 'Zigbee/Wi-Fi',
+        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+      },
+      {
+        id: 'dongle-max',
+        title: 'Dongle Max (Sieć & Wi-Fi)',
+        subtitle: 'Tryb Ember EFR32MG24, punkt dostępowy SoftAP i konfiguracja TCP',
+        icon: 'router',
+        badge: 'TCP 6638',
+        badgeClass: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
+      },
+      {
+        id: 'code',
+        title: 'Pliki Python & Wdrożenie',
+        subtitle: 'Podgląd skryptów mostka TinyTuya, backendu MQTT i instalatora',
+        icon: 'code',
+      },
+      {
+        id: 'android',
+        title: 'Aplikacja Android (.APK)',
+        subtitle: 'Natywna aplikacja z powiadomieniami push i usługą foreground',
+        icon: 'android',
+        badge: '.APK',
+        badgeClass: 'bg-teal-500/20 text-teal-300 border-teal-500/40',
+      },
+      {
+        id: 'simulator',
+        title: 'Konsola Testowa',
+        subtitle: 'Wstrzykiwanie testowych pakietów telemetrii i weryfikacja wykresów',
+        icon: 'tune',
+      },
+      {
+        id: 'notifications',
+        title: 'Powiadomienia (SMTP & Telegram)',
+        subtitle: 'Alerty e-mail oraz powiadomienia bota Telegram przy awariach i alarmach',
+        icon: 'notifications',
+      },
+    ];
+  });
 }

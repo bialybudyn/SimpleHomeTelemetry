@@ -18,6 +18,7 @@ import {
   TuyaQrStatusResponse,
   TinyTuyaTestResponse,
   TinyTuyaScanResponse,
+  DeviceAuditLog,
 } from '../models/telemetry.models';
 import { format24hTime } from '../utils/date-format';
 
@@ -31,6 +32,17 @@ export class Telemetry {
 
   // Reaktywne sygnały stanu
   readonly devices = signal<Device[]>([]);
+  readonly allDevices = signal<Device[]>([]);
+  readonly adminDevicesData = signal<{
+    total: number;
+    active: Device[];
+    disconnected: Device[];
+    deleted: Device[];
+    all: Device[];
+    logs: DeviceAuditLog[];
+  } | null>(null);
+  readonly deviceAuditLogs = signal<DeviceAuditLog[]>([]);
+  readonly isActionProcessing = signal<boolean>(false);
   readonly connectionStatus = signal<'connected' | 'connecting' | 'disconnected'>('connecting');
   readonly isPairing = signal<boolean>(false);
   readonly pairingRemainingSeconds = signal<number>(0);
@@ -204,6 +216,133 @@ export class Telemetry {
         }
       },
       error: (err) => console.warn('Błąd pobierania czujników:', err),
+    });
+    this.fetchAdminDevices();
+  }
+
+  fetchAdminDevices(): void {
+    this.http.get<{
+      total: number;
+      active: Device[];
+      disconnected: Device[];
+      deleted: Device[];
+      all: Device[];
+      logs: DeviceAuditLog[];
+    }>('/api/admin/devices').subscribe({
+      next: (res) => {
+        if (res) {
+          this.adminDevicesData.set(res);
+          this.allDevices.set(res.all || []);
+          if (res.logs) {
+            this.deviceAuditLogs.set(res.logs);
+          }
+        }
+      },
+      error: (err) => console.debug('Błąd pobierania danych urządzeń admina:', err),
+    });
+  }
+
+  deleteDevice(ieee: string): Promise<boolean> {
+    this.isActionProcessing.set(true);
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/delete`, {}).subscribe({
+        next: () => {
+          this.isActionProcessing.set(false);
+          this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+          this.fetchAdminDevices();
+          resolve(true);
+        },
+        error: (err) => {
+          this.isActionProcessing.set(false);
+          console.error('Błąd usuwania urządzenia:', err);
+          resolve(false);
+        },
+      });
+    });
+  }
+
+  restoreDevice(ieee: string): Promise<boolean> {
+    this.isActionProcessing.set(true);
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/restore`, {}).subscribe({
+        next: (res) => {
+          this.isActionProcessing.set(false);
+          if (res?.device) {
+            this.devices.update((list) => {
+              const idx = list.findIndex((d) => d.ieee_address === ieee);
+              if (idx >= 0) {
+                const copy = [...list];
+                copy[idx] = res.device;
+                return copy;
+              }
+              return [...list, res.device];
+            });
+          }
+          this.fetchDevices();
+          resolve(true);
+        },
+        error: (err) => {
+          this.isActionProcessing.set(false);
+          console.error('Błąd przywracania urządzenia:', err);
+          resolve(false);
+        },
+      });
+    });
+  }
+
+  permanentDeleteDevice(ieee: string): Promise<boolean> {
+    this.isActionProcessing.set(true);
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string }>(`/api/devices/${encodeURIComponent(ieee)}/permanent-delete`, {}).subscribe({
+        next: () => {
+          this.isActionProcessing.set(false);
+          this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+          this.allDevices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+          this.fetchAdminDevices();
+          resolve(true);
+        },
+        error: (err) => {
+          this.isActionProcessing.set(false);
+          console.error('Błąd trwałego usuwania urządzenia:', err);
+          resolve(false);
+        },
+      });
+    });
+  }
+
+  batchDeviceAction(action: 'soft_delete' | 'restore' | 'permanent_delete', ieee_list: string[]): Promise<boolean> {
+    this.isActionProcessing.set(true);
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; processed_count: number; message: string }>('/api/devices/batch', { action, ieee_list }).subscribe({
+        next: () => {
+          this.isActionProcessing.set(false);
+          this.fetchDevices();
+          this.fetchAdminDevices();
+          resolve(true);
+        },
+        error: (err) => {
+          this.isActionProcessing.set(false);
+          console.error('Błąd operacji zbiorczej:', err);
+          resolve(false);
+        },
+      });
+    });
+  }
+
+  testDeviceConnection(ieee: string): Promise<{ success: boolean; message: string; device?: Device }> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string; device?: Device }>(`/api/devices/${encodeURIComponent(ieee)}/test-connection`, {}).subscribe({
+        next: (res) => {
+          if (res?.device) {
+            this.devices.update((list) => list.map((d) => (d.ieee_address === ieee ? { ...d, ...res.device } : d)));
+          }
+          this.fetchAdminDevices();
+          resolve(res);
+        },
+        error: (err) => {
+          resolve({ success: false, message: err?.error?.message || 'Błąd połączenia' });
+        },
+      });
     });
   }
 
@@ -624,17 +763,50 @@ export class Telemetry {
       if (state) {
         this.bridgeState.set(state);
       }
+    } else if (type === 'device_deleted') {
+      const ieee = event['ieee_address'] as string;
+      if (ieee) {
+        this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+        this.fetchAdminDevices();
+      }
+    } else if (type === 'device_permanently_deleted') {
+      const ieee = event['ieee_address'] as string;
+      if (ieee) {
+        this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+        this.allDevices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+        this.fetchAdminDevices();
+      }
     } else if (type === 'device_updated') {
       const dev = event['device'] as Device;
       if (dev && dev.ieee_address) {
-        this.devices.update((list) =>
-          list.map((d) => (d.ieee_address === dev.ieee_address ? { ...d, ...dev } : d)),
-        );
+        if (dev.is_deleted) {
+          this.devices.update((list) => list.filter((d) => d.ieee_address !== dev.ieee_address));
+        } else {
+          this.devices.update((list) => {
+            const idx = list.findIndex((d) => d.ieee_address === dev.ieee_address);
+            if (idx >= 0) {
+              const copy = [...list];
+              copy[idx] = { ...copy[idx], ...dev };
+              return copy;
+            }
+            return [...list, dev];
+          });
+        }
+        this.allDevices.update((list) => {
+          const idx = list.findIndex((d) => d.ieee_address === dev.ieee_address);
+          if (idx >= 0) {
+            const copy = [...list];
+            copy[idx] = { ...copy[idx], ...dev };
+            return copy;
+          }
+          return [...list, dev];
+        });
       }
     } else if (type === 'devices_updated') {
       const devList = event['devices'] as Device[];
       if (Array.isArray(devList)) {
-        this.devices.set(devList);
+        this.devices.set(devList.filter((d) => !d.is_deleted));
+        this.allDevices.set(devList);
       }
     } else if (type === 'dongle_max_config_updated') {
       const cfg = event['config'] as DongleMaxConfig;

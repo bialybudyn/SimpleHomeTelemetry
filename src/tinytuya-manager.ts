@@ -110,6 +110,20 @@ function runBridgeScript(payload: Record<string, unknown>, timeoutMs = 4500): Pr
 }
 
 /**
+ * Sprawdza czy adres IP należy do lokalnej podsieci prywatnej (LAN: 192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+ */
+export function isPrivateIp(ip: string): boolean {
+  if (!ip) return false;
+  const parts = ip.trim().split('.').map(Number);
+  if (parts.length !== 4 || parts.some((p) => isNaN(p))) return false;
+  if (parts[0] === 10) return true;
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+  if (parts[0] === 192 && parts[1] === 168) return true;
+  if (parts[0] === 127) return true;
+  return false;
+}
+
+/**
  * Walidacja adresu IP
  */
 export function isValidIp(ip: string): boolean {
@@ -123,12 +137,13 @@ export function isValidIp(ip: string): boolean {
 }
 
 /**
- * Walidacja klucza Local Key (dokładnie 16 znaków alfanumerycznych/hex)
+ * Walidacja klucza Local Key (dokładnie 16 znaków ASCII, w tym litery, cyfry oraz znaki specjalne jak np. ` ) / itp.)
  */
 export function isValidLocalKey(key: string): boolean {
   if (!key) return false;
   const clean = key.trim();
-  return clean.length === 16 && /^[a-zA-Z0-9]+$/.test(clean);
+  // Klucze Tuya składają się z dokładnie 16 znaków ASCII (dowolne znaki drukowalne ASCII od 0x20 do 0x7E)
+  return clean.length === 16 && /^[\x20-\x7E]{16}$/.test(clean);
 }
 
 /**
@@ -150,7 +165,7 @@ export async function executeTinyTuyaCommand(
   if (!isValidLocalKey(localKey)) {
     return {
       success: false,
-      error: 'Local Key musi mieć dokładnie 16 znaków alfanumerycznych (np. a1b2c3d4e5f6g7h8)',
+      error: 'Local Key musi mieć dokładnie 16 znaków ASCII (np. z chmury Tuya lub localtuya)',
     };
   }
   if (!devId) {
@@ -197,7 +212,7 @@ export async function getTinyTuyaStatus(
     return { success: false, error: `Niepoprawny adres IP: ${ip}` };
   }
   if (!isValidLocalKey(localKey)) {
-    return { success: false, error: 'Local Key musi mieć 16 znaków alfanumerycznych' };
+    return { success: false, error: 'Local Key musi mieć dokładnie 16 znaków ASCII' };
   }
   if (!devId) {
     return { success: false, error: 'Brak Device ID' };
@@ -243,11 +258,17 @@ export async function testTinyTuyaConnection(
   if (!isValidLocalKey(cleanKey)) {
     return {
       success: false,
-      message: 'Klucz Local Key musi mieć dokładnie 16 znaków (np. 16 liter/cyfr wyciągniętych z Tuya).',
+      message: 'Klucz Local Key musi mieć dokładnie 16 znaków ASCII (np. z chmury Tuya lub biblioteki localtuya).',
     };
   }
   if (!cleanId) {
     return { success: false, message: 'Podaj Device ID (identyfikator urządzenia Tuya).' };
+  }
+
+  // Wskazówka dla użytkownika gdy podano publiczny adres WAN zamiast lokalnego IP w sieci LAN
+  if (!isPrivateIp(cleanIp)) {
+    // Sprawdzamy czy to nie jest próba testu z publicznym adresem routera
+    console.warn(`[TINYTUYA] Podany adres ${cleanIp} to publiczny adres IP (WAN). Protokół LAN wymaga adresu lokalnego.`);
   }
 
   const payload = {
@@ -268,14 +289,28 @@ export async function testTinyTuyaConnection(
         dps: parsed.dps,
       };
     }
+    const errText = parsed.error || 'Nie udało się nawiązać połączenia z urządzeniem.';
+    if (!isPrivateIp(cleanIp) && (errText.includes('Nie można połączyć') || errText.includes('timeout') || errText.includes('Network Error'))) {
+      return {
+        success: false,
+        message: `${errText} Wskazówka: Adres ${cleanIp} to zewnętrzny adres publiczny (WAN). Sterowanie TinyTuya w protokole 3.3/3.4 wymaga lokalnego adresu IP urządzenia w domowej sieci Wi-Fi/LAN (np. 192.168.x.x lub 10.x.x.x). Sprawdź adres IP wentylatora na routerze.`,
+      };
+    }
     return {
       success: false,
-      message: parsed.error || 'Nie udało się nawiązać połączenia z urządzeniem.',
+      message: errText,
     };
   } catch (err) {
+    const errText = err instanceof Error ? err.message : String(err);
+    if (!isPrivateIp(cleanIp)) {
+      return {
+        success: false,
+        message: `Błąd połączenia z ${cleanIp}: ${errText}. Uwaga: ${cleanIp} to publiczny adres WAN. Do sterowania lokalnego TinyTuya wymagany jest lokalny adres IP w sieci LAN (np. 192.168.x.x).`,
+      };
+    }
     return {
       success: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: errText,
     };
   }
 }

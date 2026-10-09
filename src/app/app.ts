@@ -368,6 +368,18 @@ export class App {
     this.renamingDevice.set(null);
   }
 
+  confirmDeleteFromDashboard(dev: Device): void {
+    const confirmed = confirm(
+      `Czy na pewno chcesz usunąć urządzenie "${dev.friendly_name || dev.ieee_address}" z Pulpitu na żywo?\n\n` +
+      `• Urządzenie zostanie wyrejestrowane z mostka Zigbee2MQTT / sterownika Wi-Fi\n` +
+      `• Historia pomiarów NIE zostanie skasowana i będzie bezpiecznie zachowana w archiwum serwera (Ustawienia serwera -> Urządzenia)\n` +
+      `• W razie ponownego podłączenia lub transmisji urządzenie automatycznie powróci na pulpit z tym samym opisem i kompletną historią.`
+    );
+    if (confirmed) {
+      this.telemetry.deleteDevice(dev.ieee_address);
+    }
+  }
+
   cancelRename(): void {
     this.renamingDevice.set(null);
   }

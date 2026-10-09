@@ -76,6 +76,12 @@ interface Device {
   tuya_product_name?: string | null;
   tuya_protocol_version?: string | null;
   last_seen: string | null;
+  added_at?: string | null;
+  first_seen?: string | null;
+  is_deleted?: boolean | null;
+  deleted_at?: string | null;
+  connection_status?: 'online' | 'offline' | 'error' | 'untested' | null;
+  last_error?: string | null;
   battery: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
@@ -204,14 +210,17 @@ function detectDeviceCategory(model: string, payload?: Record<string, unknown>, 
     return 'sensor';
   }
 
-  // 2. Wentylatory
+  // 2. Wentylatory (w tym Tuya fs / 风扇 / GOW 007 / Smart Fan)
   if (
     m.includes('gow') ||
     m.includes('gow 007') ||
     m.includes('fan') ||
     m.includes('wentylator') ||
+    m.includes('风扇') ||
     f.includes('wentylator') ||
     f.includes('fan') ||
+    f.includes('风扇') ||
+    payload?.['category'] === 'fs' ||
     payload?.['fan_speed'] !== undefined ||
     payload?.['fan_mode'] !== undefined
   ) {
@@ -457,25 +466,49 @@ function triggerSaveTelemetry() {
   }, 5000);
 }
 
-function loadCache() {
-  if (existsSync(devicesCachePath)) {
-    try {
-      const data = readFileSync(devicesCachePath, 'utf-8');
-      const entries = JSON.parse(data);
-      if (Array.isArray(entries)) {
-        entries.forEach(([key, val]) => {
-          if (val && typeof val === 'object') {
-            val.category = detectDeviceCategory(val.model || '', undefined, val.friendly_name);
-          }
-          devices.set(key, val);
-        });
-        console.log(`[CACHE] Zaladowano ${devices.size} urzadzen z devices_cache.json`);
-      }
-    } catch (err) {
-      console.warn('[CACHE] Blad odczytu devices_cache.json:', err);
-    }
-  }
+interface DeviceAuditLog {
+  id: number;
+  timestamp: string;
+  action: 'soft_delete' | 'restore' | 'permanent_delete' | 'rename' | 'created' | 'reconnected' | 'batch_action';
+  device_ieee: string;
+  device_name?: string;
+  message: string;
+}
 
+const deviceAuditLogs: DeviceAuditLog[] = [];
+let nextLogId = 1;
+
+function addDeviceLog(
+  action: 'soft_delete' | 'restore' | 'permanent_delete' | 'rename' | 'created' | 'reconnected' | 'batch_action',
+  device_ieee: string,
+  device_name: string | undefined,
+  message: string,
+) {
+  const logItem: DeviceAuditLog = {
+    id: nextLogId++,
+    timestamp: new Date().toISOString(),
+    action,
+    device_ieee,
+    device_name: device_name || device_ieee,
+    message,
+  };
+  deviceAuditLogs.unshift(logItem);
+  if (deviceAuditLogs.length > 200) {
+    deviceAuditLogs.pop();
+  }
+}
+
+function isDeviceOnline(dev: Device): boolean {
+  if (dev.is_deleted) return false;
+  if (dev.connection_status === 'offline') return false;
+  if (!dev.last_seen) return false;
+  const lastSeenMs = new Date(dev.last_seen).getTime();
+  if (isNaN(lastSeenMs)) return false;
+  const diffMinutes = (Date.now() - lastSeenMs) / (1000 * 60);
+  return diffMinutes <= 60;
+}
+
+function loadCache() {
   if (existsSync(telemetryCachePath)) {
     try {
       const data = readFileSync(telemetryCachePath, 'utf-8');
@@ -490,6 +523,36 @@ function loadCache() {
       }
     } catch (err) {
       console.warn('[CACHE] Blad odczytu telemetry_cache.json:', err);
+    }
+  }
+
+  if (existsSync(devicesCachePath)) {
+    try {
+      const data = readFileSync(devicesCachePath, 'utf-8');
+      const entries = JSON.parse(data);
+      if (Array.isArray(entries)) {
+        entries.forEach(([key, val]) => {
+          if (val && typeof val === 'object') {
+            val.category = detectDeviceCategory(val.model || '', undefined, val.friendly_name);
+            val.is_deleted = Boolean(val.is_deleted);
+            if (!val.added_at) {
+              const hist = telemetryStore.get(key);
+              if (hist && hist.length > 0 && hist[0].timestamp) {
+                val.added_at = hist[0].timestamp;
+              } else {
+                val.added_at = val.last_seen || new Date().toISOString();
+              }
+            }
+            if (!val.first_seen) {
+              val.first_seen = val.added_at;
+            }
+          }
+          devices.set(key, val);
+        });
+        console.log(`[CACHE] Zaladowano ${devices.size} urzadzen z devices_cache.json`);
+      }
+    } catch (err) {
+      console.warn('[CACHE] Blad odczytu devices_cache.json:', err);
     }
   }
 }
@@ -912,16 +975,23 @@ function connectMqtt(customUrl?: string) {
               const devName = d.friendly_name || d.friendlyName || `Czujnik ${ieee.slice(-4)}`;
               const modelName = d.definition?.description || d.definition?.model || d.model_id || 'Nowy czujnik Zigbee';
               if (!devices.has(ieee)) {
+                const joinedNow = new Date().toISOString();
                 devices.set(ieee, {
                   ieee_address: ieee,
                   friendly_name: devName,
                   model: modelName,
-                  last_seen: new Date().toISOString(),
+                  last_seen: joinedNow,
+                  added_at: joinedNow,
+                  first_seen: joinedNow,
+                  is_deleted: false,
+                  connection_status: 'online',
+                  last_error: null,
                   battery: null,
                   last_temperature: null,
                   last_humidity: null,
                   linkquality: null,
                 });
+                addDeviceLog('created', ieee, devName, `Dołączono urządzenie Zigbee "${devName}" (${ieee}).`);
                 mqttStatus.devices_discovered = devices.size;
                 broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
                 triggerSaveDevices();
@@ -1161,12 +1231,18 @@ interface Z2mDeviceItem {
               model: modelName,
               category,
               last_seen: nowStr,
+              added_at: nowStr,
+              first_seen: nowStr,
+              is_deleted: false,
+              connection_status: 'online',
+              last_error: null,
               battery: bat,
               last_temperature: temp,
               last_humidity: hum,
               linkquality: lq,
             };
             devices.set(targetIeee, dev);
+            addDeviceLog('created', targetIeee, baseTopic, `Wykryto nowe urządzenie "${baseTopic}" (${targetIeee}).`);
           } else {
             dev.category = category;
             if (temp !== null) dev.last_temperature = temp;
@@ -1174,6 +1250,19 @@ interface Z2mDeviceItem {
             if (bat !== null) dev.battery = bat;
             if (lq !== null) dev.linkquality = lq;
             dev.last_seen = nowStr;
+            dev.connection_status = 'online';
+            dev.last_error = null;
+
+            // Jeśli urządzenie było wcześniej usunięte z pulpitu, przywracamy je z zachowaniem pełnej historii i nazwy
+            if (dev.is_deleted) {
+              dev.is_deleted = false;
+              dev.deleted_at = null;
+              const reconMsg = `Urządzenie "${dev.friendly_name}" (${dev.ieee_address}) nawiązało ponownie połączenie i wskoczyło z powrotem na pulpit z zachowaniem pełnej historii!`;
+              console.log(`[DEVICE RECONNECTED] ${reconMsg}`);
+              addDeviceLog('reconnected', dev.ieee_address, dev.friendly_name, reconMsg);
+              broadcastEvent({ type: 'device_updated', device: dev });
+              broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+            }
           }
 
           if (!dev) return;
@@ -1393,10 +1482,267 @@ connectMqtt();
 
 // --- REST API ENDPOINTS ---
 
-// 1. Pobierz liste wszystkich czujnikow
-app.get('/api/devices', (_req: Request, res: Response) => {
-  const devList = Array.from(devices.values());
-  res.json({ devices: devList });
+// 1. Pobierz listę czujników dla Pulpitu na żywo (lub wszystkich z opcją ?include_deleted=true)
+app.get('/api/devices', (req: Request, res: Response) => {
+  const includeDeleted = req.query['include_deleted'] === 'true';
+  const allList = Array.from(devices.values());
+  const devList = includeDeleted ? allList : allList.filter((d) => !d.is_deleted);
+  res.json({
+    devices: devList,
+    total: allList.length,
+    active: allList.filter((d) => !d.is_deleted && isDeviceOnline(d)).length,
+    disconnected: allList.filter((d) => !d.is_deleted && !isDeviceOnline(d)).length,
+    deleted: allList.filter((d) => d.is_deleted).length,
+  });
+});
+
+// 1b. Zaawansowane zarządzanie urządzeniami dla zakładki Ustawienia serwera (podział na: Aktywne, Niepołączone, Usunięte)
+app.get('/api/admin/devices', (_req: Request, res: Response) => {
+  const allList = Array.from(devices.values());
+  const active: Device[] = [];
+  const disconnected: Device[] = [];
+  const deleted: Device[] = [];
+
+  for (const dev of allList) {
+    if (dev.is_deleted) {
+      deleted.push(dev);
+    } else if (isDeviceOnline(dev)) {
+      active.push(dev);
+    } else {
+      disconnected.push(dev);
+    }
+  }
+
+  res.json({
+    total: allList.length,
+    active,
+    disconnected,
+    deleted,
+    all: allList,
+    logs: deviceAuditLogs.slice(0, 100),
+  });
+});
+
+// 1c. Usunięcie urządzenia z Pulpitu na żywo (Soft-delete bez usuwania danych historycznych)
+app.post('/api/devices/:ieee/delete', (req: Request, res: Response) => {
+  const ieee = String(req.params['ieee'] || '').trim();
+  const dev = devices.get(ieee);
+  if (!dev) {
+    res.status(404).json({ error: 'Nie odnaleziono urządzenia w rejestrze' });
+    return;
+  }
+
+  dev.is_deleted = true;
+  dev.deleted_at = new Date().toISOString();
+
+  const logMsg = `Usunięto urządzenie "${dev.friendly_name}" (${ieee}) z pulpitu na żywo. Historia danych została bezpiecznie zachowana w archiwum serwera.`;
+  console.log(`[DEVICE SOFT DELETE] ${logMsg}`);
+  addDeviceLog('soft_delete', ieee, dev.friendly_name, logMsg);
+
+  // Wysłanie unpair/remove do Zigbee2MQTT jeśli to urządzenie Zigbee
+  if (mqttClient?.connected && dev.protocol !== 'wifi') {
+    try {
+      const topic = `${mqttStatus.topic_prefix}/bridge/request/device/remove`;
+      mqttClient.publish(topic, JSON.stringify({ id: dev.friendly_name || ieee, force: true }));
+      console.log(`[MQTT] Wysłano polecenie wyrejestrowania do Zigbee2MQTT dla ${ieee}`);
+    } catch (e) {
+      console.warn('[MQTT] Błąd publikacji remove do Zigbee2MQTT:', e);
+    }
+  }
+
+  triggerSaveDevices();
+  broadcastEvent({ type: 'device_deleted', ieee_address: ieee, device: dev });
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    message: `Urządzenie "${dev.friendly_name}" zostało usunięte z pulpitu na żywo. Wszystkie dane historyczne zostały zachowane i pojawią się ponownie jeśli urządzenie połączy się w sieci.`,
+    device: dev,
+  });
+});
+
+// 1d. Przywrócenie urządzenia do Pulpitu na żywo
+app.post('/api/devices/:ieee/restore', (req: Request, res: Response) => {
+  const ieee = String(req.params['ieee'] || '').trim();
+  const dev = devices.get(ieee);
+  if (!dev) {
+    res.status(404).json({ error: 'Nie odnaleziono urządzenia w rejestrze' });
+    return;
+  }
+
+  dev.is_deleted = false;
+  dev.deleted_at = null;
+
+  const logMsg = `Przywrócono urządzenie "${dev.friendly_name}" (${ieee}) na pulpit na żywo.`;
+  console.log(`[DEVICE RESTORE] ${logMsg}`);
+  addDeviceLog('restore', ieee, dev.friendly_name, logMsg);
+
+  triggerSaveDevices();
+  broadcastEvent({ type: 'device_updated', device: dev });
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    message: `Urządzenie "${dev.friendly_name}" zostało pomyślnie przywrócone do pulpitu na żywo wraz z pełną historią pomiarów.`,
+    device: dev,
+  });
+});
+
+// 1e. PERMANENTNE USUNIĘCIE URZĄDZENIA (Usuwa urządzenie oraz CAŁĄ historię telemetrii!)
+const handlePermanentDelete = (req: Request, res: Response) => {
+  const ieee = String(req.params['ieee'] || '').trim();
+  const dev = devices.get(ieee);
+  const devName = dev ? dev.friendly_name : ieee;
+
+  const hadHistory = telemetryStore.has(ieee);
+  const pointsCount = hadHistory ? (telemetryStore.get(ieee)?.length || 0) : 0;
+
+  // 1. Usunięcie z mapy pamięci
+  devices.delete(ieee);
+  telemetryStore.delete(ieee);
+
+  // 2. Usunięcie z Zigbee2MQTT
+  if (mqttClient?.connected && dev?.protocol !== 'wifi') {
+    try {
+      const topic = `${mqttStatus.topic_prefix}/bridge/request/device/remove`;
+      mqttClient.publish(topic, JSON.stringify({ id: devName || ieee, force: true }));
+    } catch (e) {
+      console.warn('[MQTT] Błąd publikacji remove:', e);
+    }
+  }
+
+  // 3. Logowanie operacji
+  const logMsg = `PERMANENTNE USUNIĘCIE: Urządzenie "${devName}" (${ieee}) oraz cała historia danych pomiarowych (${pointsCount} wpisów) zostały bezpowrotnie skasowane z serwera.`;
+  console.log(`[DEVICE PERMANENT DELETE] ${logMsg}`);
+  addDeviceLog('permanent_delete', ieee, devName, logMsg);
+
+  // 4. Zapis do plików cache
+  saveDevicesCache();
+  saveTelemetryCache();
+
+  // 5. Powiadomienie klientów WebSocket
+  broadcastEvent({ type: 'device_permanently_deleted', ieee_address: ieee });
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    message: `Urządzenie "${devName}" oraz cała historia danych (${pointsCount} punktów pomiarowych) zostały trwale i bezpowrotnie usunięte z bazy serwera.`,
+    deleted_points: pointsCount,
+  });
+};
+
+app.delete('/api/devices/:ieee/permanent', handlePermanentDelete);
+app.post('/api/devices/:ieee/permanent-delete', handlePermanentDelete);
+
+// 1f. Operacje grupowe na wielu urządzeniach (Soft-delete, Restore, Permanent-delete)
+app.post('/api/devices/batch', (req: Request, res: Response) => {
+  const { action, ieee_list } = req.body || {};
+  if (!action || !Array.isArray(ieee_list) || ieee_list.length === 0) {
+    res.status(400).json({ error: 'Wymagane parametry: action ("soft_delete" | "restore" | "permanent_delete") oraz ieee_list' });
+    return;
+  }
+
+  let count = 0;
+  for (const rawIeee of ieee_list) {
+    const ieee = String(rawIeee).trim();
+    const dev = devices.get(ieee);
+    if (!dev && action !== 'permanent_delete') continue;
+    const name = dev ? dev.friendly_name : ieee;
+
+    if (action === 'soft_delete' && dev) {
+      dev.is_deleted = true;
+      dev.deleted_at = new Date().toISOString();
+      if (mqttClient?.connected && dev.protocol !== 'wifi') {
+        try {
+          mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/device/remove`, JSON.stringify({ id: name || ieee, force: true }));
+        } catch { /* ignore */ }
+      }
+      addDeviceLog('soft_delete', ieee, name, `[Operacja zbiorcza] Usunięto "${name}" z pulpitu na żywo.`);
+      count++;
+    } else if (action === 'restore' && dev) {
+      dev.is_deleted = false;
+      dev.deleted_at = null;
+      addDeviceLog('restore', ieee, name, `[Operacja zbiorcza] Przywrócono "${name}" do pulpitu na żywo.`);
+      count++;
+    } else if (action === 'permanent_delete') {
+      devices.delete(ieee);
+      telemetryStore.delete(ieee);
+      if (mqttClient?.connected && dev?.protocol !== 'wifi') {
+        try {
+          mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/device/remove`, JSON.stringify({ id: name || ieee, force: true }));
+        } catch { /* ignore */ }
+      }
+      addDeviceLog('permanent_delete', ieee, name, `[Operacja zbiorcza] TRWALE USUNIĘTO "${name}" i całą jego historię pomiarów.`);
+      count++;
+    }
+  }
+
+  saveDevicesCache();
+  if (action === 'permanent_delete') {
+    saveTelemetryCache();
+  }
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    action,
+    processed_count: count,
+    message: `Pomyślnie wykonano operację "${action}" dla ${count} wybranych urządzeń.`,
+  });
+});
+
+// 1g. Pobranie rejestru logów audytowych operacji na urządzeniach
+app.get('/api/devices/logs', (_req: Request, res: Response) => {
+  res.json({ logs: deviceAuditLogs.slice(0, 100) });
+});
+
+// 1h. Testowanie połączenia z pojedynczym urządzeniem (Wi-Fi / Zigbee)
+app.post('/api/devices/:ieee/test-connection', async (req: Request, res: Response) => {
+  const ieee = String(req.params['ieee'] || '').trim();
+  const dev = devices.get(ieee);
+  if (!dev) {
+    res.status(404).json({ error: 'Nie odnaleziono urządzenia' });
+    return;
+  }
+
+  if (dev.protocol === 'wifi' || dev.local_key) {
+    const ip = dev.ip_address || '';
+    const key = dev.local_key || '';
+    const devId = dev.tuya_dev_id || dev.ieee_address.replace('wifi_', '');
+
+    if (!ip || !key) {
+      dev.connection_status = 'error';
+      dev.last_error = 'Brak skonfigurowanego adresu IP lub klucza Local Key w sieci LAN';
+      broadcastEvent({ type: 'device_updated', device: dev });
+      res.json({ success: false, message: dev.last_error, device: dev });
+      return;
+    }
+
+    const testRes = await testTinyTuyaConnection(ip, key, devId, dev.tuya_protocol_version || '3.3');
+    if (testRes.success) {
+      dev.connection_status = 'online';
+      dev.last_error = null;
+      dev.last_seen = new Date().toISOString();
+    } else {
+      dev.connection_status = 'offline';
+      dev.last_error = testRes.message;
+    }
+    triggerSaveDevices();
+    broadcastEvent({ type: 'device_updated', device: dev });
+    res.json({ success: testRes.success, message: testRes.message, device: dev });
+    return;
+  }
+
+  // Zigbee: sprawdzamy linkquality i ostatni czas odebrania telemetrii
+  const isOnline = isDeviceOnline(dev);
+  dev.connection_status = isOnline ? 'online' : 'offline';
+  if (!isOnline) {
+    dev.last_error = 'Brak pakietów radiowych Zigbee w ciągu ostatnich 60 minut (urządzenie uśpione lub wyłączone)';
+  } else {
+    dev.last_error = null;
+  }
+  broadcastEvent({ type: 'device_updated', device: dev });
+  res.json({ success: isOnline, message: isOnline ? 'Urządzenie Zigbee jest aktywne w sieci' : 'Brak odpowiedzi urządzenia Zigbee', device: dev });
 });
 
 // 2. Pobierz pojedynczy czujnik
@@ -1687,7 +2033,7 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
   }
   const cleanLocalKey = local_key ? String(local_key).trim() : '';
   if (cleanLocalKey && !isValidLocalKey(cleanLocalKey)) {
-    res.status(400).json({ error: 'Niepoprawny format Local Key (klucz Tuya musi mieć dokładnie 16 znaków)' });
+    res.status(400).json({ error: 'Niepoprawny format Local Key (klucz Tuya musi mieć dokładnie 16 znaków ASCII)' });
     return;
   }
   const devCategory = (category || 'plug') as DeviceCategory;
@@ -1736,6 +2082,11 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
       tuya_protocol_version: tuya_protocol_version ? String(tuya_protocol_version).trim() : '3.3',
       tuya_product_name: tuya_product_name ? String(tuya_product_name).trim() : null,
       last_seen: nowStr,
+      added_at: nowStr,
+      first_seen: nowStr,
+      is_deleted: false,
+      connection_status: 'untested',
+      last_error: null,
       battery: null,
       linkquality: 100,
       last_temperature: null,
@@ -2008,6 +2359,9 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
               `[TINYTUYA] Pomyślnie wysłano instrukcję do ${dev.friendly_name} (${dev.ip_address}):`,
               ttRes.message,
             );
+            dev.connection_status = 'online';
+            dev.last_error = null;
+            dev.last_seen = new Date().toISOString();
             if (ttRes.device_data) {
               if (ttRes.device_data.state !== undefined) dev.state = ttRes.device_data.state;
               if (ttRes.device_data.power !== undefined) dev.power = ttRes.device_data.power;
@@ -2017,13 +2371,19 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
               if (ttRes.device_data.smoke_alarm !== undefined) dev.smoke_alarm = ttRes.device_data.smoke_alarm;
               if (ttRes.device_data.smoke_status !== undefined) dev.smoke_status = ttRes.device_data.smoke_status;
               if (ttRes.device_data.battery !== undefined) dev.battery = ttRes.device_data.battery;
-              broadcastEvent({ type: 'device_updated', device: dev });
-              triggerSaveDevices();
             }
+            broadcastEvent({ type: 'device_updated', device: dev });
+            triggerSaveDevices();
           } else {
             console.warn(
-              `[TINYTUYA] Ostrzeżenie dla ${dev.friendly_name}: ${ttRes.error}. Próba fallbacku do TuyAPI...`,
+              `[TINYTUYA] Błąd komunikacji z ${dev.friendly_name} (${dev.ip_address}): ${ttRes.error}`,
             );
+            dev.connection_status = 'offline';
+            dev.last_error = ttRes.error || 'Brak połączenia z urządzeniem w sieci LAN na porcie 6668';
+            broadcastEvent({ type: 'device_updated', device: dev });
+            triggerSaveDevices();
+
+            // Opcjonalna próba TuyAPI
             sendTuyaLocalCommand(
               dev.ip_address!,
               dev.local_key!,
@@ -2032,7 +2392,13 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
               dev.tuya_protocol_version || '3.3',
             )
               .then((resFallback) => {
-                console.log(`[TUYA FALLBACK] Wynik:`, resFallback.message);
+                if (resFallback.success) {
+                  dev.connection_status = 'online';
+                  dev.last_error = null;
+                  dev.last_seen = new Date().toISOString();
+                  broadcastEvent({ type: 'device_updated', device: dev });
+                  triggerSaveDevices();
+                }
               })
               .catch((errFallback) => {
                 console.warn(`[TUYA FALLBACK] Błąd:`, errFallback);
@@ -2041,8 +2407,15 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
         })
         .catch((err) => {
           console.warn(`[TINYTUYA] Błąd wykonania dla ${dev.friendly_name}:`, err);
+          dev.connection_status = 'offline';
+          dev.last_error = err instanceof Error ? err.message : String(err);
+          broadcastEvent({ type: 'device_updated', device: dev });
+          triggerSaveDevices();
         });
     } else {
+      dev.connection_status = 'untested';
+      dev.last_error = 'Urządzenie oczekuje na skonfigurowanie Local Key i lokalnego adresu IP w sieci LAN.';
+      broadcastEvent({ type: 'device_updated', device: dev });
       console.log(
         `[TINYTUYA] Urządzenie ${dev.friendly_name} oczekuje na skonfigurowanie Local Key i IP do sterowania w sieci LAN.`,
       );

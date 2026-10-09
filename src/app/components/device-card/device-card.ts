@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  inject,
   input,
   output,
   signal,
@@ -9,6 +10,7 @@ import {
 import { MatIconModule } from '@angular/material/icon';
 import { Device, DeviceCategory } from '../../models/telemetry.models';
 import { formatEuropeanDateTime, formatEuropeanDate, format24hTime } from '../../utils/date-format';
+import { Telemetry } from '../../services/telemetry';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -125,6 +127,13 @@ import { formatEuropeanDateTime, formatEuropeanDate, format24hTime } from '../..
             >
               <mat-icon class="text-xs !w-3.5 !h-3.5">edit</mat-icon>
             </button>
+            <button
+              (click)="onDeleteClick($event)"
+              class="text-slate-500 hover:text-rose-400 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              title="Usuń urządzenie z pulpitu na żywo"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">delete_outline</mat-icon>
+            </button>
           </div>
           <div class="flex items-center gap-2 text-[11px] font-mono text-slate-500 truncate mt-0.5">
             <span class="truncate">{{ device().model }}</span>
@@ -157,6 +166,32 @@ import { formatEuropeanDateTime, formatEuropeanDate, format24hTime } from '../..
           </div>
         }
       </div>
+
+      <!-- Ostrzeżenie o braku połączenia / błędzie offline -->
+      @if (isDeviceOffline() || device().last_error) {
+        <div class="mb-3.5 p-2.5 rounded-xl bg-rose-950/30 border border-rose-500/30 text-rose-200 text-xs flex items-start justify-between gap-2 shadow-sm">
+          <div class="flex items-start gap-1.5 min-w-0">
+            <mat-icon class="text-xs !w-4 !h-4 text-rose-400 shrink-0 mt-0.5">cloud_off</mat-icon>
+            <div class="min-w-0">
+              <span class="font-bold text-rose-300 block">Brak połączenia z urządzeniem (Offline)</span>
+              @if (device().last_error) {
+                <span class="text-[11px] text-slate-300 font-mono block truncate" [title]="device().last_error">{{ device().last_error }}</span>
+              } @else {
+                <span class="text-[11px] text-slate-400 block">Brak transmisji pakietów w sieci</span>
+              }
+            </div>
+          </div>
+          @if (isWifiDevice() || device().local_key) {
+            <button
+              (click)="onTestConnection($event)"
+              class="px-2 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 text-[10px] font-bold border border-rose-500/40 shrink-0 transition-colors cursor-pointer"
+              title="Sprawdź połączenie z urządzeniem w sieci LAN"
+            >
+              Sprawdź LAN
+            </button>
+          }
+        </div>
+      }
 
       <!-- SEKCJA GŁÓWNA KAFELKA W ZALEŻNOŚCI OD TYPU URZĄDZENIA -->
 
@@ -1383,15 +1418,38 @@ import { formatEuropeanDateTime, formatEuropeanDate, format24hTime } from '../..
   `,
 })
 export class DeviceCard {
+  private readonly telemetry = inject(Telemetry);
   readonly device = input.required<Device>();
   readonly tempRank = input<'max' | 'min' | null>(null);
   readonly cardClicked = output<Device>();
   readonly renameRequested = output<Device>();
+  readonly deleteRequested = output<Device>();
   readonly commandRequested = output<{ device: Device; command: Record<string, unknown> }>();
   readonly tuyaQrRequested = output<Device>();
 
   readonly showAdvanced = signal<boolean>(false);
   readonly showSchedule = signal<boolean>(false);
+
+  readonly isDeviceOffline = computed(() => {
+    const d = this.device();
+    if (d.connection_status === 'offline') return true;
+    if (!d.last_seen) return true;
+    const ms = new Date(d.last_seen).getTime();
+    if (isNaN(ms)) return true;
+    return (Date.now() - ms) > 60 * 60 * 1000;
+  });
+
+  onDeleteClick(event: MouseEvent): void {
+    event.stopPropagation();
+    this.deleteRequested.emit(this.device());
+  }
+
+  onTestConnection(event: MouseEvent): void {
+    event.stopPropagation();
+    this.telemetry.testDeviceConnection(this.device().ieee_address).then((res) => {
+      alert(`Wynik testu połączenia z ${this.device().friendly_name}:\n\n${res.message}`);
+    });
+  }
 
   readonly localKeyLast4 = computed(() => {
     const k = this.device().local_key;

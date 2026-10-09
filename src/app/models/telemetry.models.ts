@@ -13,6 +13,12 @@ export interface Device {
   tuya_product_name?: string | null;
   tuya_protocol_version?: string | null;
   last_seen: string | null;
+  added_at?: string | null;
+  first_seen?: string | null;
+  is_deleted?: boolean | null;
+  deleted_at?: string | null;
+  connection_status?: 'online' | 'offline' | 'error' | 'untested' | null;
+  last_error?: string | null;
   battery: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
@@ -386,6 +392,15 @@ export interface TinyTuyaScanResponse {
   }[];
   message: string;
   error?: string;
+}
+
+export interface DeviceAuditLog {
+  id: number;
+  timestamp: string;
+  action: 'soft_delete' | 'restore' | 'permanent_delete' | 'rename' | 'created' | 'reconnected' | 'batch_action';
+  device_ieee: string;
+  device_name?: string;
+  message: string;
 }
 
 
