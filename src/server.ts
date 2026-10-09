@@ -75,6 +75,7 @@ interface Device {
   tuya_dev_id?: string | null;
   tuya_product_name?: string | null;
   tuya_protocol_version?: string | null;
+  dongle_gateway_ip?: string | null;
   last_seen: string | null;
   added_at?: string | null;
   first_seen?: string | null;
@@ -1718,7 +1719,13 @@ app.post('/api/devices/:ieee/test-connection', async (req: Request, res: Respons
       return;
     }
 
-    const testRes = await testTinyTuyaConnection(ip, key, devId, dev.tuya_protocol_version || '3.3');
+    const testRes = await testTinyTuyaConnection(
+      ip,
+      key,
+      devId,
+      dev.tuya_protocol_version || '3.3',
+      dev.dongle_gateway_ip || dongleMaxConfig.host,
+    );
     if (testRes.success) {
       dev.connection_status = 'online';
       dev.last_error = null;
@@ -2352,6 +2359,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
         version: dev.tuya_protocol_version || '3.3',
         category: dev.category,
         command: cmd,
+        gateway_ip: dev.dongle_gateway_ip || dongleMaxConfig.host,
       })
         .then((ttRes) => {
           if (ttRes.success) {
@@ -2589,11 +2597,13 @@ app.post('/api/tinytuya/device/test', async (req: Request, res: Response) => {
   }
 
   try {
+    const gatewayIp = req.body?.gateway_ip || dongleMaxConfig.host;
     const result = await testTinyTuyaConnection(
       targetIp,
       targetKey,
       targetId,
       version || '3.3',
+      gatewayIp,
     );
     res.json(result);
   } catch (err: unknown) {
@@ -2646,12 +2656,14 @@ app.post('/api/tinytuya/device/status', async (req: Request, res: Response) => {
   }
 
   try {
+    const gatewayIp = req.body?.gateway_ip || (ieee_address ? devices.get(String(ieee_address))?.dongle_gateway_ip : undefined) || dongleMaxConfig.host;
     const result = await getTinyTuyaStatus({
       ip: targetIp,
       local_key: targetKey,
       dev_id: targetId,
       version: version || '3.3',
       category: targetCategory,
+      gateway_ip: gatewayIp,
     });
 
     if (result.success && ieee_address) {
@@ -2705,6 +2717,7 @@ app.post('/api/tinytuya/device/set', async (req: Request, res: Response) => {
   }
 
   try {
+    const gatewayIp = req.body?.gateway_ip || (ieee_address ? devices.get(String(ieee_address))?.dongle_gateway_ip : undefined) || dongleMaxConfig.host;
     const result = await executeTinyTuyaCommand({
       ip: targetIp,
       local_key: targetKey,
@@ -2713,6 +2726,7 @@ app.post('/api/tinytuya/device/set', async (req: Request, res: Response) => {
       category: targetCategory,
       command,
       dps,
+      gateway_ip: gatewayIp,
     });
 
     if (result.success && ieee_address) {

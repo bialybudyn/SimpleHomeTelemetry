@@ -12,6 +12,7 @@ export interface Device {
   tuya_dev_id?: string | null;
   tuya_product_name?: string | null;
   tuya_protocol_version?: string | null;
+  dongle_gateway_ip?: string | null;
   last_seen: string | null;
   added_at?: string | null;
   first_seen?: string | null;

@@ -19,6 +19,7 @@ export interface TinyTuyaCommandOptions {
   category?: string;
   command?: Record<string, unknown>;
   dps?: Record<string, unknown>;
+  gateway_ip?: string;
 }
 
 export interface TinyTuyaResult {
@@ -184,6 +185,7 @@ export async function executeTinyTuyaCommand(
     category: opts.category || '',
     command: opts.command || {},
     dps: opts.dps,
+    gateway_ip: opts.gateway_ip || '',
   };
 
   try {
@@ -225,6 +227,7 @@ export async function getTinyTuyaStatus(
     dev_id: devId,
     version: opts.version || '3.3',
     category: opts.category || '',
+    gateway_ip: opts.gateway_ip || '',
   };
 
   try {
@@ -247,6 +250,7 @@ export async function testTinyTuyaConnection(
   localKey: string,
   devId: string,
   version = '3.3',
+  gatewayIp = '',
 ): Promise<{ success: boolean; message: string; dps?: Record<string, unknown> }> {
   const cleanIp = String(ip || '').trim();
   const cleanKey = String(localKey || '').trim();
@@ -267,7 +271,6 @@ export async function testTinyTuyaConnection(
 
   // Wskazówka dla użytkownika gdy podano publiczny adres WAN zamiast lokalnego IP w sieci LAN
   if (!isPrivateIp(cleanIp)) {
-    // Sprawdzamy czy to nie jest próba testu z publicznym adresem routera
     console.warn(`[TINYTUYA] Podany adres ${cleanIp} to publiczny adres IP (WAN). Protokół LAN wymaga adresu lokalnego.`);
   }
 
@@ -277,6 +280,7 @@ export async function testTinyTuyaConnection(
     local_key: cleanKey,
     dev_id: cleanId,
     version,
+    gateway_ip: String(gatewayIp || '').trim(),
   };
 
   try {
