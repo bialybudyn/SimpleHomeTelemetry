@@ -14,6 +14,7 @@ import {
   SceneAction,
   TriggerMetric,
 } from '../../models/telemetry.models';
+import { formatEuropeanDateTime } from '../../utils/date-format';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -495,6 +496,7 @@ import {
                           }
                           <option value="wifi_gow007_fan">Wentylator Götze & Jensen GOW 007 7w1 (Wi-Fi)</option>
                           <option value="sonoff_trvzb_head">Głowica Termostatyczna Sonoff TRVZB</option>
+                          <option value="sonoff_basic_zb1gsp">Przekaźnik DIN Sonoff BASIC-ZB1GSP 32A</option>
                           <option value="sonoff_s26r2_plug">Gniazdko Sonoff S26R2ZB 16A</option>
                         </select>
                       </div>
@@ -576,7 +578,7 @@ export class ScenesBuilder {
       icon: 'air',
       enabled: true,
       trigger_count: 14,
-      last_triggered_at: '2026-10-07 13:20:00',
+      last_triggered_at: '07.10.2026 13:20:00',
       conditions: [
         {
           quantifier: 'IF',
@@ -614,7 +616,7 @@ export class ScenesBuilder {
       icon: 'thermostat',
       enabled: true,
       trigger_count: 8,
-      last_triggered_at: '2026-10-07 08:15:00',
+      last_triggered_at: '07.10.2026 08:15:00',
       conditions: [
         {
           quantifier: 'IF',
@@ -655,6 +657,7 @@ export class ScenesBuilder {
 
     if (ieee.includes('gow007')) return 'Wentylator Götze & Jensen GOW 007';
     if (ieee.includes('trvzb')) return 'Głowica Termostatyczna Sonoff TRVZB';
+    if (ieee.includes('basic') || ieee.includes('zb1gsp')) return 'Przekaźnik DIN Sonoff BASIC-ZB1GSP 32A';
     if (ieee.includes('s26r2')) return 'Gniazdko Sonoff S26R2ZB 16A';
     if (ieee.includes('snzb02d')) return 'Czujnik Temp. SNZB-02D z LCD';
     if (ieee.includes('snzb02')) return 'Czujnik Temp. SNZB-02 v1';
@@ -895,7 +898,7 @@ export class ScenesBuilder {
       this.scenes.update((list) =>
         list.map((s) =>
           s.id === scene.id
-            ? { ...s, trigger_count: s.trigger_count + 1, last_triggered_at: new Date().toLocaleString() }
+            ? { ...s, trigger_count: s.trigger_count + 1, last_triggered_at: formatEuropeanDateTime(new Date()) }
             : s,
         ),
       );

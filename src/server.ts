@@ -13,6 +13,19 @@ import { networkInterfaces } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 import mqtt, { MqttClient } from 'mqtt';
 import nodemailer from 'nodemailer';
+import {
+  generateTuyaQrCode,
+  checkTuyaQrStatus,
+  sendTuyaLocalCommand,
+} from './tuya-sharing';
+import {
+  executeTinyTuyaCommand,
+  getTinyTuyaStatus,
+  testTinyTuyaConnection,
+  scanTinyTuyaLan,
+  isValidIp,
+  isValidLocalKey,
+} from './tinytuya-manager';
 
 // Wykrywanie katalogu zasobow statycznych przegladarki (CSS, JS, Fonts)
 let browserDistFolder = join(import.meta.dirname, '../browser');
@@ -48,7 +61,7 @@ if (existsSync(join(process.cwd(), 'static'))) {
 }
 
 // Modele danych urzadzen i telemetrii dla Sonoff (TRVZB, S26R2, ZBMINI), Tuya oraz Götze & Jensen GOW 007
-type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
+type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'smoke' | 'contact' | 'occupancy' | 'water_leak';
 
 interface Device {
   ieee_address: string;
@@ -58,10 +71,19 @@ interface Device {
   vendor?: string;
   protocol?: 'zigbee' | 'wifi';
   ip_address?: string;
+  local_key?: string | null;
+  tuya_dev_id?: string | null;
+  tuya_product_name?: string | null;
+  tuya_protocol_version?: string | null;
   last_seen: string | null;
   battery: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
+
+  // Czujka dymu Wi-Fi (Tuya Smoke Detector / sensor pożarowy)
+  smoke_alarm?: boolean | null;
+  smoke_status?: string | null;
+  tamper_alarm?: boolean | null;
 
   // Wentylator kolumnowy Tuya / Gotze & Jensen GOW 007 7w1 (WiFi / Tuya)
   fan_speed?: number | string | null;       // 1 - 12 (biegi nawiewu)
@@ -108,12 +130,26 @@ interface Device {
   weekly_schedule_friday?: string | null;
   weekly_schedule_saturday?: string | null;
 
-  // Wlaczniki i gniazdka sterowane (Sonoff S26R2ZB, ZBMINIR2, Tuya Smart Plug)
+  // Wlaczniki i gniazdka sterowane (Sonoff BASIC-ZB1GSP, S26R2ZB, ZBMINIR2, Tuya Smart Plug)
   state?: string | null;
   power?: number | null;
   voltage?: number | null;
   current?: number | null;
   energy?: number | null;
+  energy_today?: number | null;
+  energy_month?: number | null;
+  energy_total?: number | null;
+
+  // SONOFF BASIC-ZB1GSP (Szyna DIN 32A / 7680W Zigbee 3.0)
+  power_on_behavior?: string | null;
+  overload_protection?: boolean | null;
+  overload_power_threshold?: number | null;
+  overload_current_threshold?: number | null;
+  overload_voltage_threshold?: number | null;
+  under_voltage_threshold?: number | null;
+  inching_mode?: boolean | null;
+  inching_time?: number | null;
+  network_indicator?: boolean | null;
 
   // Czujniki kontaktronowe, ruchu, zalania (Sonoff SNZB-03/04/05, Tuya mmWave)
   contact?: boolean | null;
@@ -138,6 +174,8 @@ interface TelemetryPoint {
   battery: number | null;
   linkquality: number | null;
   power?: number | null;
+  voltage?: number | null;
+  current?: number | null;
   energy?: number | null;
   setpoint?: number | null;
   state?: string | null;
@@ -195,31 +233,44 @@ function detectDeviceCategory(model: string, payload?: Record<string, unknown>, 
   ) {
     return 'climate';
   }
-  // 3. Gniazdka Smart Plug
+  // 3. Gniazdka Smart Plug (z wyłączeniem przekaźników DIN takich jak BASIC-ZB1GSP)
   if (
-    m.includes('plug') ||
-    m.includes('s26') ||
-    m.includes('s40') ||
-    m.includes('s31') ||
-    m.includes('ts011f') ||
-    f.includes('gniazdko') ||
-    f.includes('plug') ||
-    payload?.['power'] !== undefined
+    !m.includes('basic') &&
+    !m.includes('zb1gsp') &&
+    !f.includes('basic') &&
+    !f.includes('zb1gsp') &&
+    !f.includes('din') && (
+      m.includes('plug') ||
+      m.includes('s26') ||
+      m.includes('s40') ||
+      m.includes('s31') ||
+      m.includes('ts011f') ||
+      f.includes('gniazdko') ||
+      f.includes('plug') ||
+      (payload?.['power'] !== undefined && !m.includes('switch') && !m.includes('relay'))
+    )
   ) {
     return 'plug';
   }
-  // 4. Włączniki i przekaźniki
+  // 4. Włączniki i przekaźniki (w tym SONOFF BASIC-ZB1GSP na szynę DIN 32A)
   if (
+    m.includes('basic') ||
+    m.includes('zb1gsp') ||
     m.includes('mini') ||
     m.includes('zbmini') ||
     m.includes('switch') ||
     m.includes('relay') ||
     m.includes('m5') ||
+    m.includes('din') ||
+    f.includes('basic') ||
+    f.includes('zb1gsp') ||
+    f.includes('przekaźnik') ||
+    f.includes('przekaznik') ||
     f.includes('włącznik') ||
     f.includes('wlacznik') ||
     f.includes('przełącznik') ||
     f.includes('przelacznik') ||
-    (payload?.['state'] !== undefined && payload?.['power'] === undefined)
+    (payload?.['state'] !== undefined)
   ) {
     return 'switch';
   }
@@ -264,6 +315,21 @@ function detectDeviceCategory(model: string, payload?: Record<string, unknown>, 
   ) {
     return 'water_leak';
   }
+  // 7b. Czujki dymu (Tuya Wi-Fi Smoke Detector)
+  if (
+    m.includes('smoke') ||
+    m.includes('dym') ||
+    m.includes('pozar') ||
+    m.includes('pożar') ||
+    f.includes('smoke') ||
+    f.includes('dym') ||
+    f.includes('czujka dymu') ||
+    payload?.['smoke'] !== undefined ||
+    payload?.['smoke_sensor_status'] !== undefined ||
+    payload?.['smoke_alarm'] !== undefined
+  ) {
+    return 'smoke';
+  }
   // 8. Sensory temperatury i wilgotności
   if (
     m.includes('snzb-02d') ||
@@ -286,7 +352,7 @@ interface NotificationItem {
   type: string;
   level: string;
   message: string;
-  battery: number;
+  battery?: number;
   timestamp: string;
   acknowledged: boolean;
 }
@@ -587,17 +653,18 @@ function getLocalNetworkDetails(): { ip: string; broadcast: string } {
   } catch {
     // ignore
   }
-  return { ip: '192.168.1.100', broadcast: '192.168.1.255' };
+  return { ip: '', broadcast: '' };
 }
 
 function broadcastWifiSmartConfigPacket(ssid: string, pass: string) {
   try {
     const { broadcast } = getLocalNetworkDetails();
+    const destBroadcast = broadcast || '255.255.255.255';
     const udpSocket = createSocket('udp4');
     udpSocket.bind(() => {
       udpSocket.setBroadcast(true);
       const payload = Buffer.from(`TUYA_SMARTCONFIG_EZ:${ssid}:${pass}:SIMPLEHOME_WIFI`);
-      udpSocket.send(payload, 0, payload.length, 6667, broadcast, (err) => {
+      udpSocket.send(payload, 0, payload.length, 6667, destBroadcast, (err) => {
         if (err) console.debug('[Wi-Fi SmartConfig UDP error]:', err);
         try { udpSocket.close(); } catch { /* ignore */ }
       });
@@ -1154,12 +1221,35 @@ interface Z2mDeviceItem {
             dev.smart_temperature_control = Boolean(payload.smart_temperature_control);
           }
 
-          // Pola dla wlacznikow i inteligentnych gniazdek (Sonoff S26R2, ZBMINIR2, Tuya Plug)
+          // Pola dla włączników i inteligentnych gniazdek (Sonoff BASIC-ZB1GSP, S26R2, ZBMINIR2, Tuya Plug)
           if (payload.state !== undefined) dev.state = String(payload.state);
           if (payload.power !== undefined && payload.power !== null) dev.power = parseFloat(payload.power);
           if (payload.voltage !== undefined && payload.voltage !== null) dev.voltage = parseFloat(payload.voltage);
           if (payload.current !== undefined && payload.current !== null) dev.current = parseFloat(payload.current);
           if (payload.energy !== undefined && payload.energy !== null) dev.energy = parseFloat(payload.energy);
+          if (payload.energy_today !== undefined && payload.energy_today !== null) dev.energy_today = parseFloat(payload.energy_today);
+          if (payload.energy_month !== undefined && payload.energy_month !== null) dev.energy_month = parseFloat(payload.energy_month);
+          if (payload.energy_total !== undefined && payload.energy_total !== null) dev.energy_total = parseFloat(payload.energy_total);
+
+          // Pola specyficzne dla SONOFF BASIC-ZB1GSP (szyna DIN 32A)
+          if (payload.power_on_behavior !== undefined) dev.power_on_behavior = String(payload.power_on_behavior);
+          if (payload.overload_protection !== undefined) dev.overload_protection = Boolean(payload.overload_protection);
+          if (payload.overload_power_threshold !== undefined && payload.overload_power_threshold !== null) {
+            dev.overload_power_threshold = parseFloat(payload.overload_power_threshold);
+          }
+          if (payload.overload_current_threshold !== undefined && payload.overload_current_threshold !== null) {
+            dev.overload_current_threshold = parseFloat(payload.overload_current_threshold);
+          }
+          if (payload.overload_voltage_threshold !== undefined && payload.overload_voltage_threshold !== null) {
+            dev.overload_voltage_threshold = parseFloat(payload.overload_voltage_threshold);
+          }
+          if (payload.under_voltage_threshold !== undefined && payload.under_voltage_threshold !== null) {
+            dev.under_voltage_threshold = parseFloat(payload.under_voltage_threshold);
+          }
+          if (payload.inching_mode !== undefined) dev.inching_mode = Boolean(payload.inching_mode);
+          if (payload.inching_time !== undefined && payload.inching_time !== null) dev.inching_time = parseFloat(payload.inching_time);
+          if (payload.network_indicator !== undefined) dev.network_indicator = Boolean(payload.network_indicator);
+          if (payload.child_lock !== undefined) dev.child_lock = String(payload.child_lock);
 
           // Pola dla czujnikow otwarcia, ruchu, zalania (Sonoff SNZB-04/03/05, Tuya mmWave)
           if (payload.contact !== undefined) dev.contact = Boolean(payload.contact);
@@ -1175,6 +1265,8 @@ interface Z2mDeviceItem {
             battery: dev.battery,
             linkquality: dev.linkquality,
             power: dev.power,
+            voltage: dev.voltage,
+            current: dev.current,
             energy: dev.energy,
             setpoint: dev.current_heating_setpoint,
             state: dev.state,
@@ -1227,6 +1319,20 @@ interface Z2mDeviceItem {
 
           if (dev.water_alarm_enabled && (payload.water_leak === true || payload.water_leak === 'true')) {
             triggerDeviceAlarm(dev, 'water_leak_alarm', `🚨 Wykryto wyciek wody pod sondą czujnika!`);
+          }
+
+          // Weryfikacja przeciążenia prądowego i mocowego (Overload Protection dla Sonoff BASIC-ZB1GSP / 32A DIN)
+          const pLimit = dev.overload_power_threshold ?? 7680;
+          const cLimit = dev.overload_current_threshold ?? 32;
+          if (
+            (dev.power !== null && dev.power !== undefined && dev.power > pLimit) ||
+            (dev.current !== null && dev.current !== undefined && dev.current > cLimit)
+          ) {
+            triggerDeviceAlarm(
+              dev,
+              'overload_alarm',
+              `⚠️ OSTRZEŻENIE PRZECIĄŻENIOWE! Obciążenie przekaźnika ${dev.friendly_name} przekroczyło próg bezpieczny (${dev.power ? dev.power + ' W' : ''} ${dev.current ? dev.current + ' A' : ''} / limit: ${pLimit} W / ${cLimit} A)!`,
+            );
           }
         }
       } catch {
@@ -1478,7 +1584,8 @@ app.post('/api/permit-join', (req: Request, res: Response) => {
 
 // 5a-1. Parowanie Czystego Wi-Fi (SmartConfig UDP broadcast dla urzadzen Tuya Wi-Fi bez Zigbee)
 app.post('/api/wifi/pair-smartconfig', (req: Request, res: Response) => {
-  const ssid = String(req.body?.ssid || '').trim() || 'Domowa_Siec_WiFi';
+  const fallbackSsid = dongleMaxConfig.wifi_softap_ssid || '';
+  const ssid = String(req.body?.ssid || '').trim() || fallbackSsid;
   const password = String(req.body?.password || '').trim();
   const duration = req.body?.duration ? parseInt(req.body.duration, 10) : 160;
 
@@ -1572,13 +1679,22 @@ app.post('/api/wifi/scan-lan', (_req: Request, res: Response) => {
 
 // 5a-4. Bezposrednie dodanie uniwersalnego urzadzenia Wi-Fi do rejestru (Dongle-MAX AP / LAN)
 app.post('/api/wifi/add-device', (req: Request, res: Response) => {
-  const { ip_address, name, model, category, vendor } = req.body;
-  const devIp = String(ip_address || '192.168.1.150').trim();
+  const { ip_address, name, model, category, vendor, local_key, tuya_dev_id, tuya_protocol_version, tuya_product_name } = req.body;
+  const devIp = String(ip_address || '').trim();
+  if (!devIp || !isValidIp(devIp)) {
+    res.status(400).json({ error: 'Wymagany jest poprawny adres IPv4 urządzenia Wi-Fi (np. 192.168.1.155)' });
+    return;
+  }
+  const cleanLocalKey = local_key ? String(local_key).trim() : '';
+  if (cleanLocalKey && !isValidLocalKey(cleanLocalKey)) {
+    res.status(400).json({ error: 'Niepoprawny format Local Key (klucz Tuya musi mieć dokładnie 16 znaków)' });
+    return;
+  }
   const devCategory = (category || 'plug') as DeviceCategory;
 
   let defaultName = 'Urządzenie Wi-Fi';
   let defaultModel = 'Smart Wi-Fi Device';
-  let defaultVendor = 'Sonoff / Tuya Wi-Fi (Dongle-MAX AP)';
+  let defaultVendor = 'Wi-Fi Device (Dongle-MAX / LAN)';
 
   if (devCategory === 'plug') {
     defaultName = 'Gniazdko Smart Plug Wi-Fi 16A';
@@ -1587,11 +1703,11 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
     defaultName = 'Przekaźnik / Włącznik Wi-Fi';
     defaultModel = 'Smart Switch / Relay Wi-Fi';
   } else if (devCategory === 'fan') {
-    defaultName = 'Wentylator Wi-Fi 7w1';
-    defaultModel = 'GOW 007 7w1 (Wi-Fi)';
-    defaultVendor = 'Götze & Jensen / Tuya Wi-Fi';
+    defaultName = 'Wentylator Wi-Fi';
+    defaultModel = 'Smart Fan Wi-Fi';
+    defaultVendor = 'Tuya / ESP Wi-Fi';
   } else if (devCategory === 'climate') {
-    defaultName = 'Termostat / Klimat Wi-Fi';
+    defaultName = 'Termostat Wi-Fi';
     defaultModel = 'Smart Thermostat Wi-Fi';
   } else if (devCategory === 'sensor') {
     defaultName = 'Czujnik Środowiskowy Wi-Fi';
@@ -1615,11 +1731,15 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
       vendor: devVendor,
       protocol: 'wifi',
       ip_address: devIp,
+      local_key: local_key ? String(local_key).trim() : null,
+      tuya_dev_id: tuya_dev_id ? String(tuya_dev_id).trim() : null,
+      tuya_protocol_version: tuya_protocol_version ? String(tuya_protocol_version).trim() : '3.3',
+      tuya_product_name: tuya_product_name ? String(tuya_product_name).trim() : null,
       last_seen: nowStr,
-      battery: devCategory === 'sensor' ? 100 : null,
+      battery: null,
       linkquality: 100,
-      last_temperature: devCategory === 'sensor' || devCategory === 'climate' ? 21.5 : null,
-      last_humidity: devCategory === 'sensor' ? 52 : null,
+      last_temperature: null,
+      last_humidity: null,
       fan_speed: devCategory === 'fan' ? 1 : undefined,
       fan_mode: devCategory === 'fan' ? 'normal' : undefined,
       fan_oscillation: devCategory === 'fan' ? false : undefined,
@@ -1632,7 +1752,7 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
       voltage: devCategory === 'plug' ? 230 : undefined,
       current: devCategory === 'plug' ? 0 : undefined,
       current_heating_setpoint: devCategory === 'climate' ? 21.0 : undefined,
-      local_temperature: devCategory === 'climate' ? 20.5 : undefined,
+      local_temperature: undefined,
     };
     devices.set(ieee, dev);
   } else {
@@ -1642,10 +1762,15 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
     dev.vendor = devVendor;
     dev.protocol = 'wifi';
     dev.ip_address = devIp;
+    if (local_key) dev.local_key = String(local_key).trim();
+    if (tuya_dev_id) dev.tuya_dev_id = String(tuya_dev_id).trim();
+    if (tuya_protocol_version) dev.tuya_protocol_version = String(tuya_protocol_version).trim();
+    if (tuya_product_name) dev.tuya_product_name = String(tuya_product_name).trim();
     dev.last_seen = nowStr;
   }
 
   triggerSaveDevices();
+  broadcastEvent({ type: 'device_added', device: dev });
   broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
 
   res.json({
@@ -1723,6 +1848,52 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   if (cmd.contact_alarm_enabled !== undefined) dev.contact_alarm_enabled = cmd.contact_alarm_enabled !== null ? Boolean(cmd.contact_alarm_enabled) : null;
   if (cmd.water_alarm_enabled !== undefined) dev.water_alarm_enabled = cmd.water_alarm_enabled !== null ? Boolean(cmd.water_alarm_enabled) : null;
 
+  // Sterowanie przekaźnikiem SONOFF BASIC-ZB1GSP (Szyna DIN 32A / 7680W)
+  if (cmd.power_on_behavior !== undefined) dev.power_on_behavior = String(cmd.power_on_behavior);
+  if (cmd.overload_protection !== undefined) dev.overload_protection = Boolean(cmd.overload_protection);
+  if (cmd.overload_power_threshold !== undefined) dev.overload_power_threshold = parseFloat(cmd.overload_power_threshold);
+  if (cmd.overload_current_threshold !== undefined) dev.overload_current_threshold = parseFloat(cmd.overload_current_threshold);
+  if (cmd.overload_voltage_threshold !== undefined) dev.overload_voltage_threshold = parseFloat(cmd.overload_voltage_threshold);
+  if (cmd.under_voltage_threshold !== undefined) dev.under_voltage_threshold = parseFloat(cmd.under_voltage_threshold);
+  if (cmd.inching_mode !== undefined) dev.inching_mode = Boolean(cmd.inching_mode);
+  if (cmd.inching_time !== undefined) dev.inching_time = parseFloat(cmd.inching_time);
+  if (cmd.network_indicator !== undefined) dev.network_indicator = Boolean(cmd.network_indicator);
+
+  // Czujka dymu Wi-Fi (Tuya Smoke Detector)
+  if (cmd.smoke_alarm !== undefined) {
+    dev.smoke_alarm = Boolean(cmd.smoke_alarm);
+    dev.smoke_status = dev.smoke_alarm ? 'alarm' : 'normal';
+    if (dev.smoke_alarm) {
+      const notifItem: NotificationItem = {
+        id: notifIdCounter++,
+        device_ieee: dev.ieee_address,
+        device_name: dev.friendly_name,
+        type: 'device_alarm',
+        level: 'critical',
+        message: `⚠️ ALARM POŻAROWY! Wykryto dym na czujce ${dev.friendly_name}!`,
+        timestamp: new Date().toISOString(),
+        acknowledged: false,
+      };
+      notifications.unshift(notifItem);
+      broadcastEvent({
+        type: 'device_alarm',
+        device_ieee: dev.ieee_address,
+        device_name: dev.friendly_name,
+        alarm_type: 'smoke',
+        message: `WYKRYTO DYM: ${dev.friendly_name}`,
+      });
+    }
+  }
+  if (cmd.smoke_status !== undefined) dev.smoke_status = String(cmd.smoke_status);
+  if (cmd.smoke_mute || cmd.silence) {
+    dev.smoke_alarm = false;
+    dev.smoke_status = 'silence';
+  }
+  if (cmd.smoke_reset) {
+    dev.smoke_alarm = false;
+    dev.smoke_status = 'normal';
+  }
+
   dev.last_seen = new Date().toISOString();
 
   // Przekazanie polecenia do brokera Mosquitto MQTT dla Zigbee2MQTT
@@ -1798,6 +1969,17 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
       if (cmd.fan_humidifier !== undefined) publishPayload.fan_humidifier = cmd.fan_humidifier;
       if (cmd.fan_uv !== undefined) publishPayload.fan_uv = cmd.fan_uv;
 
+      // Sterowanie przekaźnikiem SONOFF BASIC-ZB1GSP (Zigbee2MQTT)
+      if (cmd.power_on_behavior !== undefined) publishPayload.power_on_behavior = cmd.power_on_behavior;
+      if (cmd.overload_protection !== undefined) publishPayload.overload_protection = cmd.overload_protection;
+      if (cmd.overload_power_threshold !== undefined) publishPayload.overload_power_threshold = parseFloat(String(cmd.overload_power_threshold));
+      if (cmd.overload_current_threshold !== undefined) publishPayload.overload_current_threshold = parseFloat(String(cmd.overload_current_threshold));
+      if (cmd.overload_voltage_threshold !== undefined) publishPayload.overload_voltage_threshold = parseFloat(String(cmd.overload_voltage_threshold));
+      if (cmd.under_voltage_threshold !== undefined) publishPayload.under_voltage_threshold = parseFloat(String(cmd.under_voltage_threshold));
+      if (cmd.inching_mode !== undefined) publishPayload.inching_mode = cmd.inching_mode;
+      if (cmd.inching_time !== undefined) publishPayload.inching_time = parseFloat(String(cmd.inching_time));
+      if (cmd.network_indicator !== undefined) publishPayload.network_indicator = cmd.network_indicator;
+
       // Publikujemy tylko jeśli zawiera zapisywalne klucze
       if (Object.keys(publishPayload).length > 0) {
         mqttClient.publish(targetTopic, JSON.stringify(publishPayload));
@@ -1808,6 +1990,65 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     }
   }
 
+  // Bezpośrednie sterowanie urządzeniem Wi-Fi przez TinyTuya (Gniazdko, Wentylator, Czujka Dymu) na porcie 6668
+  if (dev.protocol === 'wifi' || dev.category === 'fan' || dev.category === 'smoke' || dev.local_key) {
+    if (dev.ip_address && dev.local_key) {
+      const devId = dev.tuya_dev_id || dev.ieee_address.replace('wifi_', '');
+      executeTinyTuyaCommand({
+        ip: dev.ip_address,
+        local_key: dev.local_key,
+        dev_id: devId,
+        version: dev.tuya_protocol_version || '3.3',
+        category: dev.category,
+        command: cmd,
+      })
+        .then((ttRes) => {
+          if (ttRes.success) {
+            console.log(
+              `[TINYTUYA] Pomyślnie wysłano instrukcję do ${dev.friendly_name} (${dev.ip_address}):`,
+              ttRes.message,
+            );
+            if (ttRes.device_data) {
+              if (ttRes.device_data.state !== undefined) dev.state = ttRes.device_data.state;
+              if (ttRes.device_data.power !== undefined) dev.power = ttRes.device_data.power;
+              if (ttRes.device_data.voltage !== undefined) dev.voltage = ttRes.device_data.voltage;
+              if (ttRes.device_data.current !== undefined) dev.current = ttRes.device_data.current;
+              if (ttRes.device_data.fan_speed !== undefined) dev.fan_speed = ttRes.device_data.fan_speed;
+              if (ttRes.device_data.smoke_alarm !== undefined) dev.smoke_alarm = ttRes.device_data.smoke_alarm;
+              if (ttRes.device_data.smoke_status !== undefined) dev.smoke_status = ttRes.device_data.smoke_status;
+              if (ttRes.device_data.battery !== undefined) dev.battery = ttRes.device_data.battery;
+              broadcastEvent({ type: 'device_updated', device: dev });
+              triggerSaveDevices();
+            }
+          } else {
+            console.warn(
+              `[TINYTUYA] Ostrzeżenie dla ${dev.friendly_name}: ${ttRes.error}. Próba fallbacku do TuyAPI...`,
+            );
+            sendTuyaLocalCommand(
+              dev.ip_address!,
+              dev.local_key!,
+              devId,
+              cmd,
+              dev.tuya_protocol_version || '3.3',
+            )
+              .then((resFallback) => {
+                console.log(`[TUYA FALLBACK] Wynik:`, resFallback.message);
+              })
+              .catch((errFallback) => {
+                console.warn(`[TUYA FALLBACK] Błąd:`, errFallback);
+              });
+          }
+        })
+        .catch((err) => {
+          console.warn(`[TINYTUYA] Błąd wykonania dla ${dev.friendly_name}:`, err);
+        });
+    } else {
+      console.log(
+        `[TINYTUYA] Urządzenie ${dev.friendly_name} oczekuje na skonfigurowanie Local Key i IP do sterowania w sieci LAN.`,
+      );
+    }
+  }
+
   broadcastEvent({
     type: 'device_updated',
     device: dev,
@@ -1815,7 +2056,385 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
 
   triggerSaveDevices();
 
-  res.json({ status: 'ok', device: dev, sent_to_mqtt: !!mqttClient?.connected });
+  res.json({
+    status: 'ok',
+    device: dev,
+    sent_to_mqtt: !!mqttClient?.connected,
+    sent_to_tuya_local: !!(dev.ip_address && dev.local_key),
+  });
+});
+
+// ==========================================
+// ENDPOINTY TUYA LOCAL KEY (SKANOWANIE KODU QR I TUYAPI)
+// ==========================================
+
+// 1. Generowanie kodu QR dla podanego User Code z aplikacji Tuya Smart / Smart Life
+app.post('/api/tuya/qr/generate', async (req: Request, res: Response) => {
+  const { user_code } = req.body || {};
+  const code = String(user_code || '').trim();
+  if (!code) {
+    res.status(400).json({ success: false, error: 'Wymagany jest Kod Użytkownika (User Code)' });
+    return;
+  }
+
+  try {
+    const result = await generateTuyaQrCode(code);
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, error: msg });
+  }
+});
+
+// 2. Sprawdzenie statusu autoryzacji kodu QR w telefonie i pobranie urządzeń z Local Key
+app.get('/api/tuya/qr/status', async (req: Request, res: Response) => {
+  const token = String(req.query['token'] || '').trim();
+  const userCode = String(req.query['user_code'] || '').trim();
+  if (!token) {
+    res.status(400).json({ status: 'error', message: 'Brak tokenu QR' });
+    return;
+  }
+
+  try {
+    const result = await checkTuyaQrStatus(token, userCode);
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ status: 'error', message: msg });
+  }
+});
+
+// 3. Przypisanie klucza Local Key do urządzenia w rejestrze lub dodanie nowego
+app.post('/api/tuya/device/bind', (req: Request, res: Response) => {
+  const { ieee_address, local_key, tuya_dev_id, ip_address, product_name, protocol_version } = req.body || {};
+  const targetIeee = String(ieee_address || '').trim();
+  const key = String(local_key || '').trim();
+
+  if (!targetIeee || !key) {
+    res.status(400).json({ success: false, message: 'Wymagany jest identyfikator urządzenia i Local Key' });
+    return;
+  }
+
+  let dev = devices.get(targetIeee);
+  if (!dev) {
+    // Utwórz nowe urządzenie Wi-Fi na podstawie danych z Tuya
+    const ip = String(ip_address || '192.168.1.150').trim();
+    const name = String(product_name || 'Urządzenie Tuya Wi-Fi').trim();
+    const isFan = name.toLowerCase().includes('gow') || name.toLowerCase().includes('fan') || name.toLowerCase().includes('wentylator');
+    dev = {
+      ieee_address: targetIeee,
+      friendly_name: name,
+      model: isFan ? 'GÖTZE & JENSEN GOW 007 7w1' : (product_name || 'Tuya Wi-Fi Device'),
+      category: isFan ? 'fan' : 'plug',
+      vendor: 'Tuya Smart / Wi-Fi',
+      protocol: 'wifi',
+      ip_address: ip,
+      local_key: key,
+      tuya_dev_id: tuya_dev_id ? String(tuya_dev_id) : undefined,
+      tuya_product_name: product_name ? String(product_name) : undefined,
+      tuya_protocol_version: protocol_version ? String(protocol_version) : '3.3',
+      last_seen: new Date().toISOString(),
+      battery: null,
+      linkquality: 100,
+      last_temperature: null,
+      last_humidity: null,
+      state: 'OFF',
+      fan_speed: isFan ? 1 : undefined,
+      fan_mode: isFan ? 'normal' : undefined,
+      fan_oscillation: isFan ? false : undefined,
+      fan_timer: isFan ? 0 : undefined,
+      fan_ionizer: isFan ? false : undefined,
+      fan_humidifier: isFan ? false : undefined,
+      fan_uv: isFan ? false : undefined,
+    };
+    devices.set(targetIeee, dev);
+  } else {
+    // Aktualizuj istniejące urządzenie
+    dev.local_key = key;
+    if (tuya_dev_id) dev.tuya_dev_id = String(tuya_dev_id);
+    if (ip_address) dev.ip_address = String(ip_address);
+    if (product_name) dev.tuya_product_name = String(product_name);
+    if (protocol_version) dev.tuya_protocol_version = String(protocol_version);
+    dev.last_seen = new Date().toISOString();
+  }
+
+  triggerSaveDevices();
+  broadcastEvent({ type: 'device_updated', device: dev });
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    message: `Pomyślnie powiązano Tuya Local Key z ${dev.friendly_name}!`,
+    device: dev,
+  });
+});
+
+// 4. Test połączenia z lokalnym urządzeniem Tuya
+app.post('/api/tuya/device/test', async (req: Request, res: Response) => {
+  const { ip_address, local_key, tuya_dev_id, protocol_version } = req.body || {};
+  const ip = String(ip_address || '').trim();
+  const key = String(local_key || '').trim();
+  const devId = String(tuya_dev_id || 'test_device').trim();
+
+  if (!ip || !key) {
+    res.status(400).json({ success: false, message: 'Wymagany jest adres IP i Local Key do testu' });
+    return;
+  }
+
+  try {
+    const result = await sendTuyaLocalCommand(
+      ip,
+      key,
+      devId,
+      {},
+      protocol_version || '3.3',
+    );
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: `Błąd testu TuyAPI: ${msg}` });
+  }
+});
+
+// ==========================================
+// ENDPOINTY TINYTUYA (BEZPIECZNE STEROWANIE WI-FI, GNIAZDKA, WENTYLATORY, CZUJKI DYMU)
+// ==========================================
+
+// 1. Test połączenia z urządzeniem przez bibliotekę TinyTuya
+app.post('/api/tinytuya/device/test', async (req: Request, res: Response) => {
+  const { ip, local_key, dev_id, version } = req.body || {};
+  const targetIp = String(ip || '').trim();
+  const targetKey = String(local_key || '').trim();
+  const targetId = String(dev_id || '').trim();
+
+  if (!targetIp || !targetKey || !targetId) {
+    res.status(400).json({
+      success: false,
+      message: 'Wymagane parametry: Adres IP, 16-znakowy Local Key oraz Device ID.',
+    });
+    return;
+  }
+
+  try {
+    const result = await testTinyTuyaConnection(
+      targetIp,
+      targetKey,
+      targetId,
+      version || '3.3',
+    );
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: `Błąd TinyTuya: ${msg}` });
+  }
+});
+
+// 2. Skanowanie sieci lokalnej w poszukiwaniu urządzeń Tuya Wi-Fi (TinyTuya Scan)
+app.post('/api/tinytuya/scan', async (_req: Request, res: Response) => {
+  try {
+    const result = await scanTinyTuyaLan();
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      success: false,
+      discovered_count: 0,
+      devices: [],
+      message: `Błąd skanowania TinyTuya: ${msg}`,
+    });
+  }
+});
+
+// 3. Pobranie statusu i aktualnych odczytów DPS urządzenia przez TinyTuya
+app.post('/api/tinytuya/device/status', async (req: Request, res: Response) => {
+  const { ip, local_key, dev_id, version, category, ieee_address } = req.body || {};
+  let targetIp = String(ip || '').trim();
+  let targetKey = String(local_key || '').trim();
+  let targetId = String(dev_id || '').trim();
+  let targetCategory = category as DeviceCategory | undefined;
+
+  // Jeśli podano ieee_address, pobierz dane z rejestru urządzenia
+  if (ieee_address && (!targetIp || !targetKey)) {
+    const dev = devices.get(String(ieee_address));
+    if (dev) {
+      targetIp = dev.ip_address || targetIp;
+      targetKey = dev.local_key || targetKey;
+      targetId = dev.tuya_dev_id || dev.ieee_address.replace('wifi_', '');
+      targetCategory = dev.category;
+    }
+  }
+
+  if (!targetIp || !targetKey || !targetId) {
+    res.status(400).json({
+      success: false,
+      error: 'Brak wymaganych parametrów: IP, Local Key lub Device ID',
+    });
+    return;
+  }
+
+  try {
+    const result = await getTinyTuyaStatus({
+      ip: targetIp,
+      local_key: targetKey,
+      dev_id: targetId,
+      version: version || '3.3',
+      category: targetCategory,
+    });
+
+    if (result.success && ieee_address) {
+      const dev = devices.get(String(ieee_address));
+      if (dev && result.device_data) {
+        if (result.device_data.state !== undefined) dev.state = result.device_data.state;
+        if (result.device_data.power !== undefined) dev.power = result.device_data.power;
+        if (result.device_data.voltage !== undefined) dev.voltage = result.device_data.voltage;
+        if (result.device_data.current !== undefined) dev.current = result.device_data.current;
+        if (result.device_data.fan_speed !== undefined) dev.fan_speed = result.device_data.fan_speed;
+        if (result.device_data.smoke_alarm !== undefined) dev.smoke_alarm = result.device_data.smoke_alarm;
+        if (result.device_data.smoke_status !== undefined) dev.smoke_status = result.device_data.smoke_status;
+        if (result.device_data.battery !== undefined) dev.battery = result.device_data.battery;
+        dev.last_seen = new Date().toISOString();
+        broadcastEvent({ type: 'device_updated', device: dev });
+        triggerSaveDevices();
+      }
+    }
+
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, error: msg });
+  }
+});
+
+// 4. Bezpośrednie wysłanie polecenia do urządzenia przez TinyTuya
+app.post('/api/tinytuya/device/set', async (req: Request, res: Response) => {
+  const { ip, local_key, dev_id, version, category, command, dps, ieee_address } = req.body || {};
+  let targetIp = String(ip || '').trim();
+  let targetKey = String(local_key || '').trim();
+  let targetId = String(dev_id || '').trim();
+  let targetCategory = category as DeviceCategory | undefined;
+
+  if (ieee_address && (!targetIp || !targetKey)) {
+    const dev = devices.get(String(ieee_address));
+    if (dev) {
+      targetIp = dev.ip_address || targetIp;
+      targetKey = dev.local_key || targetKey;
+      targetId = dev.tuya_dev_id || dev.ieee_address.replace('wifi_', '');
+      targetCategory = dev.category;
+    }
+  }
+
+  if (!targetIp || !targetKey || !targetId) {
+    res.status(400).json({
+      success: false,
+      error: 'Brak parametrów IP, Local Key lub Device ID do wysłania komendy TinyTuya',
+    });
+    return;
+  }
+
+  try {
+    const result = await executeTinyTuyaCommand({
+      ip: targetIp,
+      local_key: targetKey,
+      dev_id: targetId,
+      version: version || '3.3',
+      category: targetCategory,
+      command,
+      dps,
+    });
+
+    if (result.success && ieee_address) {
+      const dev = devices.get(String(ieee_address));
+      if (dev && result.device_data) {
+        if (result.device_data.state !== undefined) dev.state = result.device_data.state;
+        if (result.device_data.power !== undefined) dev.power = result.device_data.power;
+        if (result.device_data.voltage !== undefined) dev.voltage = result.device_data.voltage;
+        if (result.device_data.current !== undefined) dev.current = result.device_data.current;
+        if (result.device_data.fan_speed !== undefined) dev.fan_speed = result.device_data.fan_speed;
+        if (result.device_data.smoke_alarm !== undefined) dev.smoke_alarm = result.device_data.smoke_alarm;
+        if (result.device_data.smoke_status !== undefined) dev.smoke_status = result.device_data.smoke_status;
+        if (result.device_data.battery !== undefined) dev.battery = result.device_data.battery;
+        dev.last_seen = new Date().toISOString();
+        broadcastEvent({ type: 'device_updated', device: dev });
+        triggerSaveDevices();
+      }
+    }
+
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, error: msg });
+  }
+});
+
+// 5. Zapis / aktualizacja konfiguracji Tuya (Local Key, Dev ID, IP, kategoria) dla urządzenia
+app.post('/api/tinytuya/device/config', (req: Request, res: Response) => {
+  const {
+    ieee_address,
+    local_key,
+    tuya_dev_id,
+    tuya_protocol_version,
+    ip_address,
+    category,
+    friendly_name,
+  } = req.body || {};
+
+  const targetIeee = String(ieee_address || '').trim();
+  const cleanKey = String(local_key || '').trim();
+
+  if (!targetIeee || !cleanKey) {
+    res.status(400).json({
+      success: false,
+      message: 'Wymagany jest identyfikator urządzenia (ieee_address) oraz Local Key.',
+    });
+    return;
+  }
+
+  let dev = devices.get(targetIeee);
+  if (!dev) {
+    const ip = String(ip_address || '192.168.1.150').trim();
+    const cat = (category || 'plug') as DeviceCategory;
+    const name = String(friendly_name || `Urządzenie Tuya Wi-Fi`).trim();
+
+    dev = {
+      ieee_address: targetIeee,
+      friendly_name: name,
+      model: cat === 'fan' ? 'GÖTZE & JENSEN GOW 007' : (cat === 'smoke' ? 'Tuya Wi-Fi Smoke Detector' : 'Tuya Smart Device'),
+      category: cat,
+      vendor: 'Tuya Smart / Wi-Fi',
+      protocol: 'wifi',
+      ip_address: ip,
+      local_key: cleanKey,
+      tuya_dev_id: tuya_dev_id ? String(tuya_dev_id).trim() : null,
+      tuya_protocol_version: tuya_protocol_version ? String(tuya_protocol_version).trim() : '3.3',
+      last_seen: new Date().toISOString(),
+      battery: null,
+      linkquality: 100,
+      last_temperature: null,
+      last_humidity: null,
+      state: 'OFF',
+      smoke_alarm: false,
+      smoke_status: 'normal',
+    };
+    devices.set(targetIeee, dev);
+  } else {
+    dev.local_key = cleanKey;
+    if (tuya_dev_id) dev.tuya_dev_id = String(tuya_dev_id).trim();
+    if (ip_address) dev.ip_address = String(ip_address).trim();
+    if (tuya_protocol_version) dev.tuya_protocol_version = String(tuya_protocol_version).trim();
+    if (category) dev.category = category as DeviceCategory;
+    if (friendly_name) dev.friendly_name = String(friendly_name).trim();
+    dev.last_seen = new Date().toISOString();
+  }
+
+  triggerSaveDevices();
+  broadcastEvent({ type: 'device_updated', device: dev });
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    message: `Zaktualizowano konfigurację TinyTuya dla ${dev.friendly_name}!`,
+    device: dev,
+  });
 });
 
 // Endpointy konfiguracji powiadomień SMTP i Telegram
@@ -1910,6 +2529,7 @@ app.get('/api/catalog', (_req: Request, res: Response) => {
     featured: [
       { id: 'trvzb-gen2', brand: 'Sonoff', name: 'TRVZB Gen 2', type: 'climate', desc: 'Glowica termostatyczna nowej generacji z silnikiem krokowym i PID' },
       { id: 'trvzb', brand: 'Sonoff', name: 'TRVZB', type: 'climate', desc: 'Inteligentna glowica grzejnikowa Zigbee 3.0 M30x1.5' },
+      { id: 'basic-zb1gsp', brand: 'Sonoff', name: 'BASIC-ZB1GSP', type: 'switch', desc: 'Przekaźnik na szynę DIN 32A 7680W Zigbee 3.0 z pomiarem energii, ochroną przeciążeniową i rozłączaniem L+N' },
       { id: 's26r2zb', brand: 'Sonoff', name: 'S26R2ZB', type: 'plug', desc: 'Gniazdko sterowane 16A 4000W z funkcja routera Zigbee' },
       { id: 's40zb', brand: 'Sonoff', name: 'S40ZB / S31', type: 'plug', desc: 'Gniazdko z pomiarem mocy chwilowej (W) i zuzycia energii (kWh)' },
       { id: 'zbminir2', brand: 'Sonoff', name: 'ZBMINIR2', type: 'switch', desc: 'Kompaktowy przekaznik dopuszkowy Zigbee 3.0 do puszek podtynkowych' },
@@ -1926,7 +2546,27 @@ app.get('/api/catalog', (_req: Request, res: Response) => {
 
 // 6. Symulacja wstrzykniecia pomiaru (Testing Console)
 app.post('/api/simulate', (req: Request, res: Response) => {
-  const { device_ieee, temperature, humidity, battery, linkquality } = req.body;
+  const {
+    device_ieee,
+    friendly_name,
+    model,
+    category,
+    temperature,
+    humidity,
+    battery,
+    linkquality,
+    state,
+    power,
+    voltage,
+    current,
+    energy,
+    energy_today,
+    energy_month,
+    power_on_behavior,
+    overload_protection,
+    overload_power_threshold,
+    overload_current_threshold,
+  } = req.body;
   if (!device_ieee) {
     res.status(400).json({ detail: 'device_ieee required' });
     return;
@@ -1936,24 +2576,45 @@ app.post('/api/simulate', (req: Request, res: Response) => {
   const nowStr = new Date().toISOString();
 
   if (!dev) {
+    const assignedModel = model || 'Zigbee Device';
+    const assignedName = friendly_name || `Urządzenie ${device_ieee.slice(-4)}`;
     dev = {
       ieee_address: device_ieee,
-      friendly_name: `Czujnik ${device_ieee.slice(-4)}`,
-      model: 'Zigbee Sensor',
+      friendly_name: assignedName,
+      model: assignedModel,
+      category: (category as DeviceCategory) || detectDeviceCategory(assignedModel, req.body, assignedName),
       last_seen: nowStr,
       battery: battery !== undefined && battery !== null ? parseInt(battery, 10) : null,
       last_temperature: temperature !== undefined && temperature !== null ? parseFloat(temperature) : null,
       last_humidity: humidity !== undefined && humidity !== null ? parseFloat(humidity) : null,
-      linkquality: linkquality !== undefined && linkquality !== null ? parseInt(linkquality, 10) : null,
+      linkquality: linkquality !== undefined && linkquality !== null ? parseInt(linkquality, 10) : 120,
     };
     devices.set(device_ieee, dev);
   } else {
+    if (model) dev.model = model;
+    if (friendly_name) dev.friendly_name = friendly_name;
+    if (category) dev.category = category as DeviceCategory;
     if (temperature !== undefined) dev.last_temperature = temperature !== null ? parseFloat(temperature) : null;
     if (humidity !== undefined) dev.last_humidity = humidity !== null ? parseFloat(humidity) : null;
     if (battery !== undefined) dev.battery = battery !== null ? parseInt(battery, 10) : null;
     if (linkquality !== undefined) dev.linkquality = linkquality !== null ? parseInt(linkquality, 10) : null;
     dev.last_seen = nowStr;
   }
+
+  // Pomiary energii i stanu włącznika
+  if (state !== undefined) dev.state = String(state);
+  if (power !== undefined) dev.power = power !== null ? parseFloat(power) : null;
+  if (voltage !== undefined) dev.voltage = voltage !== null ? parseFloat(voltage) : null;
+  if (current !== undefined) dev.current = current !== null ? parseFloat(current) : null;
+  if (energy !== undefined) dev.energy = energy !== null ? parseFloat(energy) : null;
+  if (energy_today !== undefined) dev.energy_today = energy_today !== null ? parseFloat(energy_today) : null;
+  if (energy_month !== undefined) dev.energy_month = energy_month !== null ? parseFloat(energy_month) : null;
+
+  // Parametry SONOFF BASIC-ZB1GSP
+  if (power_on_behavior !== undefined) dev.power_on_behavior = String(power_on_behavior);
+  if (overload_protection !== undefined) dev.overload_protection = Boolean(overload_protection);
+  if (overload_power_threshold !== undefined) dev.overload_power_threshold = parseFloat(overload_power_threshold);
+  if (overload_current_threshold !== undefined) dev.overload_current_threshold = parseFloat(overload_current_threshold);
 
   const record: TelemetryPoint = {
     id: currentId++,
@@ -1962,6 +2623,11 @@ app.post('/api/simulate', (req: Request, res: Response) => {
     humidity: dev.last_humidity,
     battery: dev.battery,
     linkquality: dev.linkquality,
+    power: dev.power,
+    voltage: dev.voltage,
+    current: dev.current,
+    energy: dev.energy,
+    state: dev.state,
     timestamp: nowStr,
   };
 
@@ -1980,6 +2646,19 @@ app.post('/api/simulate', (req: Request, res: Response) => {
 
   if (dev.battery !== undefined && dev.battery !== null && dev.battery <= 15) {
     checkBatteryLevelAndNotify(device_ieee, dev.battery, dev.friendly_name);
+  }
+
+  const pLimit = dev.overload_power_threshold ?? 7680;
+  const cLimit = dev.overload_current_threshold ?? 32;
+  if (
+    (dev.power !== null && dev.power !== undefined && dev.power > pLimit) ||
+    (dev.current !== null && dev.current !== undefined && dev.current > cLimit)
+  ) {
+    triggerDeviceAlarm(
+      dev,
+      'overload_alarm',
+      `⚠️ OSTRZEŻENIE PRZECIĄŻENIOWE! Obciążenie przekaźnika ${dev.friendly_name} przekroczyło próg bezpieczny (${dev.power ? dev.power + ' W' : ''} ${dev.current ? dev.current + ' A' : ''} / limit: ${pLimit} W / ${cLimit} A)!`,
+    );
   }
 
   res.json({ status: 'simulated', record });

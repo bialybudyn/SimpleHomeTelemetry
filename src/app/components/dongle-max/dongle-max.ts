@@ -446,11 +446,11 @@ export class DongleMaxManager {
     port: new FormControl<number>(6638, { nonNullable: true, validators: [Validators.required] }),
     serial_port: new FormControl<string>('/dev/ttyACM0', { nonNullable: true }),
     adapter: new FormControl<string>('ember', { nonNullable: true }),
-    wifi_softap_mode: new FormControl<boolean>(true, { nonNullable: true }),
-    wifi_softap_ssid: new FormControl<string>('Sonoff-Dongle-M-AP', { nonNullable: true }),
-    wifi_softap_password: new FormControl<string>('simplehome123', { nonNullable: true }),
+    wifi_softap_mode: new FormControl<boolean>(false, { nonNullable: true }),
+    wifi_softap_ssid: new FormControl<string>('', { nonNullable: true }),
+    wifi_softap_password: new FormControl<string>('', { nonNullable: true }),
     wifi_softap_channel: new FormControl<number>(6, { nonNullable: true }),
-    wifi_softap_ip: new FormControl<string>('192.168.4.1', { nonNullable: true }),
+    wifi_softap_ip: new FormControl<string>('', { nonNullable: true }),
   });
 
   constructor() {
@@ -464,20 +464,20 @@ export class DongleMaxManager {
     this.configForm.patchValue({
       connection_mode: cur.connection_mode || 'network_tcp',
       operating_mode: cur.operating_mode || 'coordinator',
-      host: cur.host || 'Dongle-M.local',
+      host: cur.host || '',
       port: cur.port || 6638,
       serial_port: cur.serial_port || '/dev/ttyACM0',
       adapter: cur.adapter || 'ember',
-      wifi_softap_mode: cur.wifi_softap_mode ?? true,
-      wifi_softap_ssid: cur.wifi_softap_ssid || 'Sonoff-Dongle-M-AP',
-      wifi_softap_password: cur.wifi_softap_password || 'simplehome123',
+      wifi_softap_mode: cur.wifi_softap_mode ?? false,
+      wifi_softap_ssid: cur.wifi_softap_ssid || '',
+      wifi_softap_password: cur.wifi_softap_password || '',
       wifi_softap_channel: cur.wifi_softap_channel || 6,
-      wifi_softap_ip: cur.wifi_softap_ip || '192.168.4.1',
+      wifi_softap_ip: cur.wifi_softap_ip || '',
     });
   }
 
   currentHost(): string {
-    return this.configForm.get('host')?.value || 'Dongle-M.local';
+    return this.configForm.get('host')?.value || '';
   }
 
   currentPort(): number {

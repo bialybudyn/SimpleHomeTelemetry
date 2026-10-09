@@ -1,4 +1,4 @@
-export type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'contact' | 'occupancy' | 'water_leak';
+export type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'smoke' | 'contact' | 'occupancy' | 'water_leak';
 
 export interface Device {
   ieee_address: string;
@@ -8,10 +8,19 @@ export interface Device {
   vendor?: string;
   protocol?: 'zigbee' | 'wifi';
   ip_address?: string;
+  local_key?: string | null;
+  tuya_dev_id?: string | null;
+  tuya_product_name?: string | null;
+  tuya_protocol_version?: string | null;
   last_seen: string | null;
   battery: number | null;
   linkquality: number | null;
   isRecentlyUpdated?: boolean;
+
+  // Czujka dymu Wi-Fi (Tuya Smoke Detector / sensor pożarowy)
+  smoke_alarm?: boolean | null;
+  smoke_status?: 'normal' | 'alarm' | 'silence' | string | null;
+  tamper_alarm?: boolean | null;
 
   // Wentylator kolumnowy Tuya / Gotze & Jensen GOW 007 7w1 (WiFi / Tuya)
   fan_speed?: number | string | null;       // 1 - 12 (biegi nawiewu)
@@ -62,12 +71,26 @@ export interface Device {
   weekly_schedule_friday?: string | null;
   weekly_schedule_saturday?: string | null;
 
-  // Włączniki i inteligentne gniazdka (Sonoff S26R2ZB, S40ZB, ZBMINIR2, Tuya Smart Plug)
+  // Włączniki i inteligentne gniazdka (Sonoff BASIC-ZB1GSP, S26R2ZB, S40ZB, ZBMINIR2, Tuya Smart Plug)
   state?: 'ON' | 'OFF' | string | null;
   power?: number | null;      // W (Moc chwilowa)
   voltage?: number | null;    // V (Napięcie)
   current?: number | null;    // A (Natężenie)
   energy?: number | null;     // kWh (Łączne zużycie energii)
+  energy_today?: number | null;
+  energy_month?: number | null;
+  energy_total?: number | null;
+
+  // Zaawansowane parametry SONOFF BASIC-ZB1GSP (Szyna DIN 32A / 7680W Zigbee 3.0)
+  power_on_behavior?: 'on' | 'off' | 'previous' | string | null;
+  overload_protection?: boolean | null;
+  overload_power_threshold?: number | null;   // W (np. max 7680W)
+  overload_current_threshold?: number | null; // A (np. max 32A)
+  overload_voltage_threshold?: number | null; // V (np. max 255V)
+  under_voltage_threshold?: number | null;    // V (np. min 190V)
+  inching_mode?: boolean | null;
+  inching_time?: number | null;               // sekundy
+  network_indicator?: boolean | null;
 
   // Czujniki kontaktronowe, ruchu, zalania (Sonoff SNZB-03/04/05, Tuya mmWave)
   contact?: boolean | null;       // true = zamknięte, false = otwarte
@@ -92,6 +115,8 @@ export interface TelemetryPoint {
   battery: number | null;
   linkquality: number | null;
   power?: number | null;
+  voltage?: number | null;
+  current?: number | null;
   energy?: number | null;
   setpoint?: number | null;
   state?: string | null;
@@ -316,3 +341,51 @@ export interface AutomationScene {
   last_triggered_at?: string | null;
   trigger_count: number;
 }
+
+export interface TuyaDeviceExtracted {
+  id: string;
+  name: string;
+  local_key: string;
+  category: string;
+  product_name: string;
+  product_id?: string;
+  ip?: string;
+  online?: boolean;
+}
+
+export interface TuyaQrGenerateResponse {
+  success: boolean;
+  token?: string;
+  qr_data_url?: string;
+  qr_string?: string;
+  expires_in?: number;
+  error?: string;
+}
+
+export interface TuyaQrStatusResponse {
+  status: 'waiting' | 'authorized' | 'expired' | 'error';
+  message: string;
+  username?: string;
+  devices?: TuyaDeviceExtracted[];
+}
+
+export interface TinyTuyaTestResponse {
+  success: boolean;
+  message: string;
+  dps?: Record<string, unknown>;
+}
+
+export interface TinyTuyaScanResponse {
+  success: boolean;
+  discovered_count: number;
+  devices: {
+    id: string;
+    ip: string;
+    version: string;
+    product_key?: string;
+  }[];
+  message: string;
+  error?: string;
+}
+
+

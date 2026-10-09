@@ -30,8 +30,10 @@
     "motion": "^12.23.24",
     "mqtt": "^5.16.0",
     "nodemailer": "^10.0.16",
+    "qrcode": "^1.5.4",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
+    "tuyapi": "^7.7.1",
     "ws": "^8.22.0"
   },
   "devDependencies": {
@@ -43,6 +45,7 @@
     "@types/express": "^5.0.1",
     "@types/node": "^20.17.19",
     "@types/nodemailer": "^8.0.2",
+    "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.18.2",
     "angular-eslint": "21.1.0",
     "cross-env": "^10.1.0",

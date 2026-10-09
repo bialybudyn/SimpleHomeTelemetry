@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { Device, DeviceCategory } from '../../models/telemetry.models';
+import { formatEuropeanDateTime, formatEuropeanDate, format24hTime } from '../../utils/date-format';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -20,9 +21,46 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
       (click)="cardClicked.emit(device())"
       (keydown.enter)="cardClicked.emit(device())"
       (keydown.space)="cardClicked.emit(device())"
-      class="group relative bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl hover:shadow-cyan-950/20 focus:outline-none focus:border-cyan-500"
+      class="group relative bg-slate-900/90 hover:bg-slate-900 border rounded-2xl p-5 transition-all duration-300 cursor-pointer shadow-md focus:outline-none"
+      [class.border-slate-800]="!tempRank()"
+      [class.hover:border-slate-700/80]="!tempRank()"
+      [class.hover:shadow-xl]="!tempRank()"
+      [class.hover:shadow-cyan-950/20]="!tempRank()"
+      [class.focus:border-cyan-500]="!tempRank()"
+      [class.border-red-500]="tempRank() === 'max'"
+      [class.ring-2]="!!tempRank()"
+      [class.ring-red-500/70]="tempRank() === 'max'"
+      [class.shadow-2xl]="!!tempRank()"
+      [class.shadow-red-600/30]="tempRank() === 'max'"
+      [class.bg-gradient-to-b]="!!tempRank()"
+      [class.from-red-950/50]="tempRank() === 'max'"
+      [class.via-slate-900/95]="!!tempRank()"
+      [class.to-slate-900]="!!tempRank()"
+      [class.border-sky-400]="tempRank() === 'min'"
+      [class.ring-sky-400/70]="tempRank() === 'min'"
+      [class.shadow-sky-500/30]="tempRank() === 'min'"
+      [class.from-sky-950/50]="tempRank() === 'min'"
       [class.telemetry-updated]="device().isRecentlyUpdated"
     >
+      <!-- Wskaźnik skrajnych temperatur (Najwyższa / Najniższa - wykluczając termostaty) -->
+      @if (tempRank() === 'max') {
+        <div class="mb-3 px-3 py-1.5 rounded-xl bg-red-500/20 border border-red-500/60 flex items-center justify-between text-red-200 text-xs font-mono font-bold animate-pulse shadow-md shadow-red-950/50">
+          <div class="flex items-center gap-1.5">
+            <mat-icon class="text-sm !w-4 !h-4 text-red-400">local_fire_department</mat-icon>
+            <span>NAJWYŻSZA TEMPERATURA (MAX)</span>
+          </div>
+          <span class="text-red-200 font-extrabold text-sm">{{ formattedTemp() }}°C</span>
+        </div>
+      } @else if (tempRank() === 'min') {
+        <div class="mb-3 px-3 py-1.5 rounded-xl bg-sky-500/20 border border-sky-400/60 flex items-center justify-between text-sky-200 text-xs font-mono font-bold animate-pulse shadow-md shadow-sky-950/50">
+          <div class="flex items-center gap-1.5">
+            <mat-icon class="text-sm !w-4 !h-4 text-sky-400">ac_unit</mat-icon>
+            <span>NAJNIŻSZA TEMPERATURA (MIN)</span>
+          </div>
+          <span class="text-sky-200 font-extrabold text-sm">{{ formattedTemp() }}°C</span>
+        </div>
+      }
+
       <!-- Górny wiersz: Badge Kategorii, Nazwa, Zmiana Nazwy oraz Bateria / Zasilanie -->
       <div class="flex items-start justify-between gap-3 mb-3.5">
         <div class="min-w-0 flex-1">
@@ -38,6 +76,36 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
                 <mat-icon class="text-[10px] !w-3 !h-3">wifi</mat-icon>
                 <span>Wi-Fi</span>
               </span>
+            }
+            @if (isBasicZb1gsp()) {
+              <span class="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold" title="Urządzenie na szynę DIN 35mm (32A / 7680W)">
+                <mat-icon class="text-[10px] !w-3 !h-3">electrical_services</mat-icon>
+                <span>Szyna DIN • 32A</span>
+              </span>
+              <span class="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30" title="Wzmacniacz sygnału sieci Zigbee Mesh (Router)">
+                <mat-icon class="text-[10px] !w-3 !h-3">router</mat-icon>
+                <span>Router Mesh</span>
+              </span>
+            }
+            @if (category() === 'fan' || category() === 'smoke' || category() === 'plug' || isWifiDevice()) {
+              @if (device().local_key) {
+                <span
+                  class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                  title="Sterowanie lokalne TinyTuya aktywne w sieci LAN (Local Key skonfigurowany)"
+                >
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-emerald-400">vpn_key</mat-icon>
+                  <span>TinyTuya: ••••{{ localKeyLast4() }}</span>
+                </span>
+              } @else {
+                <button
+                  (click)="openTuyaQr($event)"
+                  class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
+                  title="Kliknij aby pobrać klucz Tuya Local Key przez kod QR lub skonfigurować TinyTuya"
+                >
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-amber-400">qr_code_scanner</mat-icon>
+                  <span>Pobierz Local Key (QR)</span>
+                </button>
+              }
             }
             @if (device().vendor) {
               <span class="text-[10px] font-mono text-slate-500 truncate max-w-[120px]">
@@ -593,6 +661,45 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
               <span class="text-cyan-300 font-bold capitalize">{{ device().fan_mode ?? 'normal' }}</span>
             </div>
           </div>
+
+          <!-- Status integracji Tuya Local Key i sterowania domowego -->
+          <div class="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs font-mono">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <mat-icon
+                class="text-sm !w-4 !h-4"
+                [class.text-emerald-400]="device().local_key"
+                [class.text-amber-400]="!device().local_key"
+              >
+                {{ device().local_key ? 'verified_user' : 'vpn_key_alert' }}
+              </mat-icon>
+              <div class="truncate">
+                @if (device().local_key) {
+                  <span class="text-emerald-300 font-semibold">Tuya Local:</span>
+                  <span class="text-slate-300 ml-1">Klucz aktywny (••••{{ localKeyLast4() }})</span>
+                } @else {
+                  <span class="text-amber-400 font-semibold">Brak Local Key</span>
+                  <span class="text-slate-400 ml-1 hidden sm:inline">(wymagany w sieci)</span>
+                }
+              </div>
+            </div>
+
+            <button
+              (click)="openTuyaQr($event)"
+              class="px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-all cursor-pointer shrink-0 shadow-sm"
+              [class.bg-emerald-500/15]="device().local_key"
+              [class.border-emerald-500/30]="device().local_key"
+              [class.text-emerald-300]="device().local_key"
+              [class.hover:bg-emerald-500/25]="device().local_key"
+              [class.bg-amber-500/20]="!device().local_key"
+              [class.border-amber-500/50]="!device().local_key"
+              [class.text-amber-300]="!device().local_key"
+              [class.hover:bg-amber-500/30]="!device().local_key"
+              title="Pobierz lub zaktualizuj Local Key przez skanowanie kodu QR"
+            >
+              <mat-icon class="text-xs !w-3.5 !h-3.5">qr_code_scanner</mat-icon>
+              <span>{{ device().local_key ? 'Klucz QR' : 'Pobierz QR' }}</span>
+            </button>
+          </div>
         </div>
       }
 
@@ -643,37 +750,155 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
         </div>
       }
 
-      <!-- 3. WYŁĄCZNIK / PRZEKAŹNIK (Sonoff ZBMINIR2 / ZBMINI / Tuya Switch) -->
+      <!-- 3. WYŁĄCZNIK / PRZEKAŹNIK (Sonoff BASIC-ZB1GSP 32A DIN / ZBMINIR2 / Tuya Switch) -->
       @else if (category() === 'switch') {
-        <div class="space-y-3 mb-4">
-          <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3">
-            <div>
-              <div class="text-[11px] font-medium text-slate-400">Przekaźnik obwodu</div>
-              <div class="text-base font-bold font-mono tracking-tight mt-0.5" [class.text-emerald-400]="isStateOn()" [class.text-slate-500]="!isStateOn()">
-                {{ isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}
+        @if (isHighPowerSwitch()) {
+          <div class="space-y-3 mb-4">
+            <!-- Pasek statusu przekaźnika 32A z rozłączaniem dwubiegunowym L+N -->
+            <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3 shadow-inner">
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                  <mat-icon class="text-xs !w-3.5 !h-3.5 text-amber-400">power</mat-icon>
+                  <span>Przekaźnik DIN 32A (Rozłączanie L+N)</span>
+                </div>
+                <div
+                  class="text-base font-bold font-mono tracking-tight mt-0.5 flex items-center gap-2 flex-wrap"
+                  [class.text-emerald-400]="isStateOn()"
+                  [class.text-slate-500]="!isStateOn()"
+                >
+                  <span>{{ isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}</span>
+                  <span
+                    class="text-[10px] font-normal px-1.5 py-0.5 rounded border"
+                    [class.bg-emerald-500/10]="isStateOn()"
+                    [class.border-emerald-500/30]="isStateOn()"
+                    [class.text-emerald-300]="isStateOn()"
+                    [class.bg-slate-900]="!isStateOn()"
+                    [class.border-slate-800]="!isStateOn()"
+                    [class.text-slate-500]="!isStateOn()"
+                  >
+                    {{ isStateOn() ? 'L+N ZWARTE' : 'L+N ROZWARTE' }}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                (click)="togglePowerState($event)"
+                class="px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer shrink-0"
+                [class.bg-emerald-600]="isStateOn()"
+                [class.hover:bg-emerald-500]="isStateOn()"
+                [class.text-white]="isStateOn()"
+                [class.shadow-emerald-950/60]="isStateOn()"
+                [class.bg-slate-800]="!isStateOn()"
+                [class.hover:bg-slate-700]="!isStateOn()"
+                [class.text-slate-300]="!isStateOn()"
+                title="Przełącz stan przekaźnika 32A (L+N)"
+              >
+                <mat-icon class="text-sm !w-4 !h-4">{{ isStateOn() ? 'power_settings_new' : 'toggle_on' }}</mat-icon>
+                <span>{{ isStateOn() ? 'ROZŁĄCZ 32A' : 'ZAŁĄCZ 32A' }}</span>
+              </button>
+            </div>
+
+            <!-- Ostrzeżenie o przeciążeniu lub zbliżaniu się do progu -->
+            @if (isOverloadWarning()) {
+              <div class="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-mono flex items-center gap-2 animate-pulse">
+                <mat-icon class="text-rose-400 text-base shrink-0">warning</mat-icon>
+                <span class="leading-tight">
+                  Wysokie obciążenie obwodu! Pobór: <strong>{{ device().power }} W / {{ device().current }} A</strong> (Limit: {{ device().overload_power_threshold || 7680 }} W).
+                </span>
+              </div>
+            }
+
+            <!-- 4-kolumnowy panel pomiarów telemetrycznych energii -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+              <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                  <span>Moc czynna</span>
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-amber-400">bolt</mat-icon>
+                </div>
+                <div class="text-white font-bold text-sm mt-0.5" [class.text-amber-300]="(device().power || 0) > 3000" [class.text-rose-400]="(device().power || 0) > 6000">
+                  {{ device().power !== undefined && device().power !== null ? device().power + ' W' : '0 W' }}
+                </div>
+              </div>
+
+              <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                  <span>Napięcie</span>
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-cyan-400">speed</mat-icon>
+                </div>
+                <div class="text-cyan-300 font-bold text-sm mt-0.5">
+                  {{ device().voltage !== undefined && device().voltage !== null ? device().voltage + ' V' : '230 V' }}
+                </div>
+              </div>
+
+              <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                  <span>Prąd (32A max)</span>
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-emerald-400">electric_meter</mat-icon>
+                </div>
+                <div class="text-emerald-300 font-bold text-sm mt-0.5">
+                  {{ device().current !== undefined && device().current !== null ? device().current + ' A' : '0.0 A' }}
+                </div>
+                <div class="w-full bg-slate-800 rounded-full h-1 mt-1 overflow-hidden" title="Wykorzystanie dopuszczalnego prądu 32A">
+                  <div
+                    class="h-full rounded-full transition-all"
+                    [class.bg-emerald-500]="currentLoadPercent() < 60"
+                    [class.bg-amber-500]="currentLoadPercent() >= 60 && currentLoadPercent() < 90"
+                    [class.bg-rose-500]="currentLoadPercent() >= 90"
+                    [style.width.%]="currentLoadPercent()"
+                  ></div>
+                </div>
+              </div>
+
+              <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                  <span>Licznik energii</span>
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-purple-400">energy_savings_leaf</mat-icon>
+                </div>
+                <div class="text-purple-300 font-bold text-sm mt-0.5">
+                  {{ device().energy !== undefined && device().energy !== null ? device().energy + ' kWh' : '0.0 kWh' }}
+                </div>
               </div>
             </div>
 
-            <button
-              (click)="togglePowerState($event)"
-              class="px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
-              [class.bg-emerald-600]="isStateOn()"
-              [class.hover:bg-emerald-500]="isStateOn()"
-              [class.text-white]="isStateOn()"
-              [class.bg-slate-800]="!isStateOn()"
-              [class.hover:bg-slate-700]="!isStateOn()"
-              [class.text-slate-300]="!isStateOn()"
-              title="Przełącz przekaźnik"
-            >
-              <mat-icon class="text-sm !w-4 !h-4">toggle_on</mat-icon>
-              <span>{{ isStateOn() ? 'ROZŁĄCZ' : 'ZAŁĄCZ' }}</span>
-            </button>
+            <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 text-[11px] font-mono text-slate-400 flex items-center justify-between">
+              <span class="flex items-center gap-1.5">
+                <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">router</mat-icon>
+                <span>Router Zigbee 3.0 Mesh (Szyna DIN 35mm):</span>
+              </span>
+              <span class="text-amber-400 font-semibold">{{ isBasicZb1gsp() ? 'SONOFF BASIC-ZB1GSP' : (device().model || 'Smart Switch') }}</span>
+            </div>
           </div>
-          <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs font-mono text-slate-400 flex items-center justify-between">
-            <span>Sterowanie zdalne / bistabilne:</span>
-            <span class="text-cyan-400 font-semibold">ZBMINIR2 Zigbee 3.0</span>
+        } @else {
+          <div class="space-y-3 mb-4">
+            <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3">
+              <div>
+                <div class="text-[11px] font-medium text-slate-400">Przekaźnik obwodu</div>
+                <div class="text-base font-bold font-mono tracking-tight mt-0.5" [class.text-emerald-400]="isStateOn()" [class.text-slate-500]="!isStateOn()">
+                  {{ isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}
+                </div>
+              </div>
+
+              <button
+                (click)="togglePowerState($event)"
+                class="px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                [class.bg-emerald-600]="isStateOn()"
+                [class.hover:bg-emerald-500]="isStateOn()"
+                [class.text-white]="isStateOn()"
+                [class.bg-slate-800]="!isStateOn()"
+                [class.hover:bg-slate-700]="!isStateOn()"
+                [class.text-slate-300]="!isStateOn()"
+                title="Przełącz przekaźnik"
+              >
+                <mat-icon class="text-sm !w-4 !h-4">toggle_on</mat-icon>
+                <span>{{ isStateOn() ? 'ROZŁĄCZ' : 'ZAŁĄCZ' }}</span>
+              </button>
+            </div>
+            <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs font-mono text-slate-400 flex items-center justify-between">
+              <span>Sterowanie zdalne / bistabilne:</span>
+              <span class="text-cyan-400 font-semibold">ZBMINIR2 Zigbee 3.0</span>
+            </div>
           </div>
-        </div>
+        }
       }
 
       <!-- 4. CZUJNIK KONTAKTRONOWY DRZWI / OKIEN (Sonoff SNZB-04) -->
@@ -753,21 +978,135 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
         </div>
       }
 
+      <!-- 6b. CZUJKA DYMU / SENSOR POŻAROWY (Tuya Wi-Fi Smoke Detector - TinyTuya) -->
+      @else if (category() === 'smoke') {
+        <div class="space-y-3 mb-4">
+          <!-- Główny status dymu: BEZPIECZNIE vs WYKRYTO DYM -->
+          <div
+            class="p-4 rounded-xl border flex items-center justify-between transition-all"
+            [class.bg-red-950/50]="isSmokeAlarm()"
+            [class.border-red-500/80]="isSmokeAlarm()"
+            [class.animate-pulse]="isSmokeAlarm()"
+            [class.shadow-lg]="isSmokeAlarm()"
+            [class.shadow-red-950/70]="isSmokeAlarm()"
+            [class.bg-slate-950/90]="!isSmokeAlarm()"
+            [class.border-slate-800]="!isSmokeAlarm()"
+          >
+            <div class="flex items-center gap-3">
+              <div
+                class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
+                [class.bg-red-500/20]="isSmokeAlarm()"
+                [class.text-red-400]="isSmokeAlarm()"
+                [class.border]="isSmokeAlarm()"
+                [class.border-red-500/50]="isSmokeAlarm()"
+                [class.bg-emerald-500/10]="!isSmokeAlarm()"
+                [class.text-emerald-400]="!isSmokeAlarm()"
+              >
+                <mat-icon>{{ isSmokeAlarm() ? 'local_fire_department' : 'detector_smoke' }}</mat-icon>
+              </div>
+              <div>
+                <span class="text-xs font-bold block" [class.text-red-300]="isSmokeAlarm()" [class.text-slate-300]="!isSmokeAlarm()">
+                  {{ isSmokeAlarm() ? '⚠️ WYKRYTO DYM (ALARM!)' : 'Czujka dymu: Stan bezpieczny' }}
+                </span>
+                <span class="text-[11px] font-mono text-slate-400">
+                  Status: <strong [class.text-red-400]="isSmokeAlarm()" [class.text-emerald-400]="!isSmokeAlarm()">{{ device().smoke_status || (isSmokeAlarm() ? 'alarm' : 'normal') }}</strong>
+                </span>
+              </div>
+            </div>
+
+            <!-- Przyciski akcji: Test / Wyciszenie -->
+            <div class="flex items-center gap-1.5">
+              @if (isSmokeAlarm()) {
+                <button
+                  (click)="silenceSmokeAlarm($event)"
+                  class="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer"
+                  title="Wycisz syrenę alarmu dymu (silence)"
+                >
+                  <mat-icon class="text-xs !w-3.5 !h-3.5">volume_off</mat-icon>
+                  <span>Wycisz</span>
+                </button>
+              }
+              <button
+                (click)="testSmokeAlarm($event)"
+                class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-mono flex items-center gap-1 border border-slate-700 transition-all cursor-pointer"
+                title="Przeprowadź autotest czujki dymu przez TinyTuya"
+              >
+                <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">notifications_active</mat-icon>
+                <span>Autotest</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Pomiary czujki dymu: Poziom baterii i sabotaż (tamper) -->
+          <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+            <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+              <span class="text-slate-400 text-[11px]">Bateria:</span>
+              <span class="font-bold flex items-center gap-1" [class.text-emerald-400]="(device().battery ?? 100) > 20" [class.text-red-400]="(device().battery ?? 100) <= 20">
+                <mat-icon class="text-xs !w-3.5 !h-3.5">battery_std</mat-icon>
+                {{ device().battery ?? 100 }}%
+              </span>
+            </div>
+            <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+              <span class="text-slate-400 text-[11px]">Sabotaż (Tamper):</span>
+              <span class="font-bold" [class.text-red-400]="device().tamper_alarm" [class.text-emerald-400]="!device().tamper_alarm">
+                {{ device().tamper_alarm ? 'ZDJĘTA' : 'OK' }}
+              </span>
+            </div>
+          </div>
+        </div>
+      }
+
       <!-- 7. STANDARDOWY CZUJNIK TEMPERATURY I WILGOTNOŚCI (SNZB-02D / LCD) -->
       @else {
         <div class="grid grid-cols-2 gap-3 mb-4">
           <!-- Kafelek Temperatura -->
-          <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
-            <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
-              <mat-icon class="text-cyan-400 text-xs !w-3.5 !h-3.5">thermostat</mat-icon>
-              <span>Temperatura</span>
+          <div
+            class="p-3 rounded-xl border transition-all"
+            [class.bg-slate-950/80]="!tempRank()"
+            [class.border-slate-800/80]="!tempRank()"
+            [class.bg-red-950/30]="tempRank() === 'max'"
+            [class.border-red-500/60]="tempRank() === 'max'"
+            [class.shadow-md]="!!tempRank()"
+            [class.shadow-red-950/40]="tempRank() === 'max'"
+            [class.bg-sky-950/30]="tempRank() === 'min'"
+            [class.border-sky-500/60]="tempRank() === 'min'"
+            [class.shadow-sky-950/40]="tempRank() === 'min'"
+          >
+            <div class="flex items-center gap-1 text-[11px] font-medium mb-1">
+              <mat-icon
+                class="text-xs !w-3.5 !h-3.5"
+                [class.text-cyan-400]="!tempRank()"
+                [class.text-red-400]="tempRank() === 'max'"
+                [class.text-sky-400]="tempRank() === 'min'"
+              >
+                {{ tempRank() === 'max' ? 'local_fire_department' : (tempRank() === 'min' ? 'ac_unit' : 'thermostat') }}
+              </mat-icon>
+              <span
+                [class.text-slate-400]="!tempRank()"
+                [class.text-red-300]="tempRank() === 'max'"
+                [class.text-sky-300]="tempRank() === 'min'"
+                [class.font-semibold]="!!tempRank()"
+              >
+                Temperatura
+              </span>
             </div>
             <div class="flex items-baseline gap-1">
               @if (hasTemp()) {
-                <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
+                <span
+                  class="text-2xl font-bold font-mono tabular-nums tracking-tight"
+                  [class.text-white]="!tempRank()"
+                  [class.text-red-400]="tempRank() === 'max'"
+                  [class.text-sky-300]="tempRank() === 'min'"
+                  [class.text-3xl]="!!tempRank()"
+                >
                   {{ formattedTemp() }}
                 </span>
-                <span class="text-xs font-mono text-cyan-400">°C</span>
+                <span
+                  class="text-xs font-mono"
+                  [class.text-cyan-400]="!tempRank()"
+                  [class.text-red-400]="tempRank() === 'max'"
+                  [class.text-sky-400]="tempRank() === 'min'"
+                >°C</span>
               } @else {
                 <span class="text-xs font-medium font-mono text-slate-500 italic">brak danych</span>
               }
@@ -892,12 +1231,134 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
               </div>
             </div>
           }
+
+          <!-- Zaawansowana konfiguracja dla przekaźnika DIN 32A (BASIC-ZB1GSP) -->
+          @if (isHighPowerSwitch()) {
+            <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-3 pt-2 mt-2">
+              <div class="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 border-b border-slate-800 pb-1.5">
+                <mat-icon class="text-xs !w-3.5 !h-3.5">tune</mat-icon>
+                <span>Konfiguracja Przekaźnika DIN (BASIC-ZB1GSP)</span>
+              </div>
+
+              <!-- Power-On Behavior -->
+              <div class="space-y-1 text-xs">
+                <span class="text-slate-400 text-[10px] block">Stan po zaniku zasilania (Power-On Behavior):</span>
+                <div class="grid grid-cols-3 gap-1.5">
+                  <button
+                    (click)="setPowerOnBehavior('previous', $event)"
+                    class="px-2 py-1 rounded text-[10px] font-mono font-semibold border transition-all cursor-pointer"
+                    [class.bg-amber-500/20]="(device().power_on_behavior || 'previous') === 'previous'"
+                    [class.text-amber-300]="(device().power_on_behavior || 'previous') === 'previous'"
+                    [class.border-amber-500/40]="(device().power_on_behavior || 'previous') === 'previous'"
+                    [class.bg-slate-900]="(device().power_on_behavior || 'previous') !== 'previous'"
+                    [class.text-slate-400]="(device().power_on_behavior || 'previous') !== 'previous'"
+                    [class.border-slate-800]="(device().power_on_behavior || 'previous') !== 'previous'"
+                  >
+                    Poprzedni
+                  </button>
+                  <button
+                    (click)="setPowerOnBehavior('on', $event)"
+                    class="px-2 py-1 rounded text-[10px] font-mono font-semibold border transition-all cursor-pointer"
+                    [class.bg-emerald-500/20]="device().power_on_behavior === 'on'"
+                    [class.text-emerald-300]="device().power_on_behavior === 'on'"
+                    [class.border-emerald-500/40]="device().power_on_behavior === 'on'"
+                    [class.bg-slate-900]="device().power_on_behavior !== 'on'"
+                    [class.text-slate-400]="device().power_on_behavior !== 'on'"
+                    [class.border-slate-800]="device().power_on_behavior !== 'on'"
+                  >
+                    Zawsze Włącz
+                  </button>
+                  <button
+                    (click)="setPowerOnBehavior('off', $event)"
+                    class="px-2 py-1 rounded text-[10px] font-mono font-semibold border transition-all cursor-pointer"
+                    [class.bg-rose-500/20]="device().power_on_behavior === 'off'"
+                    [class.text-rose-300]="device().power_on_behavior === 'off'"
+                    [class.border-rose-500/40]="device().power_on_behavior === 'off'"
+                    [class.bg-slate-900]="device().power_on_behavior !== 'off'"
+                    [class.text-slate-400]="device().power_on_behavior !== 'off'"
+                    [class.border-slate-800]="device().power_on_behavior !== 'off'"
+                  >
+                    Zawsze Wyłącz
+                  </button>
+                </div>
+              </div>
+
+              <!-- Ochrona przeciążeniowa (Overload Thresholds) -->
+              <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+                <div>
+                  <span class="text-slate-400 text-[10px] block mb-1">Próg mocy (max 7680 W):</span>
+                  <div class="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="500"
+                      max="7680"
+                      step="100"
+                      [value]="device().overload_power_threshold || 7680"
+                      (click)="$event.stopPropagation()"
+                      (change)="setAdvancedAttr('overload_power_threshold', $any($event.target).value)"
+                      class="w-full px-2 py-1 rounded bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:border-amber-500 focus:outline-none"
+                    />
+                    <span class="text-slate-500 text-[10px]">W</span>
+                  </div>
+                </div>
+                <div>
+                  <span class="text-slate-400 text-[10px] block mb-1">Próg prądu (max 32 A):</span>
+                  <div class="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="32"
+                      step="1"
+                      [value]="device().overload_current_threshold || 32"
+                      (click)="$event.stopPropagation()"
+                      (change)="setAdvancedAttr('overload_current_threshold', $any($event.target).value)"
+                      class="w-full px-2 py-1 rounded bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:border-amber-500 focus:outline-none"
+                    />
+                    <span class="text-slate-500 text-[10px]">A</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tryb Inching (Impulsowy) oraz Dioda LED -->
+              <div class="grid grid-cols-2 gap-2 text-xs font-mono pt-1 border-t border-slate-800/60">
+                <div>
+                  <span class="text-slate-400 text-[10px] block mb-1">Tryb impulsowy (Inching s):</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="3600"
+                    step="1"
+                    [value]="device().inching_time || 0"
+                    (click)="$event.stopPropagation()"
+                    (change)="setInchingTime($any($event.target).value)"
+                    placeholder="0 (wyłączony)"
+                    class="w-full px-2 py-1 rounded bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <span class="text-slate-400 text-[10px] block mb-1">Dioda LED w szafie:</span>
+                  <button
+                    (click)="toggleNetworkIndicator($event)"
+                    class="w-full px-2 py-1 rounded text-[10px] font-mono font-semibold border transition-all cursor-pointer"
+                    [class.bg-cyan-500/20]="device().network_indicator !== false"
+                    [class.text-cyan-300]="device().network_indicator !== false"
+                    [class.border-cyan-500/40]="device().network_indicator !== false"
+                    [class.bg-slate-900]="device().network_indicator === false"
+                    [class.text-slate-500]="device().network_indicator === false"
+                    [class.border-slate-800]="device().network_indicator === false"
+                  >
+                    {{ device().network_indicator !== false ? 'ŚWIECI (WŁ)' : 'TRYB NOCNY' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
         </div>
       }
 
       <!-- Stopka kafelka: Znacznik czasu oraz jakość sygnału (LQI) -->
       <div class="flex items-center justify-between text-[11px] text-slate-400 pt-3 border-t border-slate-800/60">
-        <div class="flex items-center gap-1.5">
+        <div class="flex items-center gap-1.5" [title]="formattedAbsoluteTime()">
           <mat-icon class="text-xs text-slate-500 !w-3.5 !h-3.5">schedule</mat-icon>
           <span>{{ relativeTime() }}</span>
         </div>
@@ -923,12 +1384,25 @@ import { Device, DeviceCategory } from '../../models/telemetry.models';
 })
 export class DeviceCard {
   readonly device = input.required<Device>();
+  readonly tempRank = input<'max' | 'min' | null>(null);
   readonly cardClicked = output<Device>();
   readonly renameRequested = output<Device>();
   readonly commandRequested = output<{ device: Device; command: Record<string, unknown> }>();
+  readonly tuyaQrRequested = output<Device>();
 
   readonly showAdvanced = signal<boolean>(false);
   readonly showSchedule = signal<boolean>(false);
+
+  readonly localKeyLast4 = computed(() => {
+    const k = this.device().local_key;
+    if (!k) return '';
+    return k.length > 4 ? k.slice(-4) : k;
+  });
+
+  openTuyaQr(event: MouseEvent): void {
+    event.stopPropagation();
+    this.tuyaQrRequested.emit(this.device());
+  }
 
   readonly isAlarmActive = computed(() => {
     const d = this.device();
@@ -948,8 +1422,32 @@ export class DeviceCard {
     if (cat === 'water_leak') {
       return !!(d.water_alarm_enabled && d.water_leak);
     }
+    if (cat === 'smoke') {
+      return !!d.smoke_alarm;
+    }
     return false;
   });
+
+  readonly isSmokeAlarm = computed(() => {
+    const d = this.device();
+    return !!(d.smoke_alarm || d.smoke_status === 'alarm');
+  });
+
+  silenceSmokeAlarm(event: MouseEvent): void {
+    event.stopPropagation();
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { smoke_mute: true, silence: true },
+    });
+  }
+
+  testSmokeAlarm(event: MouseEvent): void {
+    event.stopPropagation();
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { smoke_test: true },
+    });
+  }
 
   toggleAlarmState(feature: string, event: MouseEvent): void {
     event.stopPropagation();
@@ -1021,18 +1519,49 @@ export class DeviceCard {
     const f = (d.friendly_name || '').toLowerCase();
 
     if (f.includes('czujnik c') || f.includes('czujnik temp') || f.includes('temperatura') || f.includes('wilgotn') || m.includes('snzb-02d') || m.includes('snzb-02')) return 'sensor';
+    if (m.includes('smoke') || m.includes('dym') || m.includes('pozar') || m.includes('pożar') || f.includes('smoke') || f.includes('dym') || d.smoke_alarm !== undefined) return 'smoke';
     if (m.includes('gow') || m.includes('gow 007') || m.includes('fan') || m.includes('wentylator') || f.includes('wentylator') || f.includes('fan') || d.fan_speed !== undefined) return 'fan';
     if (m.includes('trv') || m.includes('thermostat') || m.includes('termostat') || m.includes('sonoff trvzb') || f.includes('termostat') || f.includes('glowica') || f.includes('głowica') || (f.includes('grzejnik') && !f.includes('czujnik')) || d.occupied_heating_setpoint !== undefined) return 'climate';
-    if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || f.includes('gniazdko') || f.includes('plug') || d.power !== undefined) return 'plug';
-    if (m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || f.includes('włącznik') || f.includes('wlacznik') || f.includes('przełącznik') || f.includes('przelacznik') || (d.state !== undefined && d.power === undefined)) return 'switch';
+    if (m.includes('plug') || m.includes('s26') || m.includes('s40') || m.includes('s31') || m.includes('ts011f') || f.includes('gniazdko') || f.includes('plug') || (d.power !== undefined && !m.includes('basic') && !m.includes('zb1gsp'))) return 'plug';
+    if (m.includes('basic') || m.includes('zb1gsp') || m.includes('mini') || m.includes('zbmini') || m.includes('switch') || m.includes('relay') || f.includes('basic') || f.includes('zb1gsp') || f.includes('włącznik') || f.includes('wlacznik') || f.includes('przełącznik') || f.includes('przelacznik') || (d.state !== undefined && (d.power === undefined || m.includes('basic') || m.includes('zb1gsp')))) return 'switch';
     if (m.includes('snzb-04') || m.includes('contact') || m.includes('door') || f.includes('drzwi') || f.includes('okno') || f.includes('otwarcie') || f.includes('kontaktron') || d.contact !== undefined) return 'contact';
     if (m.includes('snzb-03') || m.includes('motion') || m.includes('pir') || m.includes('presence') || m.includes('occupancy') || f.includes('ruch') || f.includes('ruchu') || f.includes('obecno') || f.includes('korytarz') || f.includes('góra') || f.includes('gora') || d.occupancy !== undefined) return 'occupancy';
     if (m.includes('snzb-05') || m.includes('water') || m.includes('leak') || f.includes('zalani') || f.includes('woda') || d.water_leak !== undefined) return 'water_leak';
     return 'sensor';
   });
 
+  readonly isBasicZb1gsp = computed<boolean>(() => {
+    const d = this.device();
+    const m = (d.model || '').toLowerCase();
+    const f = (d.friendly_name || '').toLowerCase();
+    return m.includes('zb1gsp') || m.includes('basic-zb1') || f.includes('zb1gsp') || f.includes('basic-zb1');
+  });
+
+  readonly isHighPowerSwitch = computed<boolean>(() => {
+    const d = this.device();
+    if (this.isBasicZb1gsp()) return true;
+    return this.category() === 'switch' && (d.power !== undefined || d.voltage !== undefined || d.current !== undefined || d.energy !== undefined);
+  });
+
+  readonly currentLoadPercent = computed<number>(() => {
+    const c = this.device().current ?? 0;
+    const maxA = this.device().overload_current_threshold ?? 32;
+    return Math.min(100, Math.max(0, Math.round((c / maxA) * 100)));
+  });
+
+  readonly isOverloadWarning = computed<boolean>(() => {
+    const d = this.device();
+    const p = d.power ?? 0;
+    const pMax = d.overload_power_threshold ?? 7680;
+    const c = d.current ?? 0;
+    const cMax = d.overload_current_threshold ?? 32;
+    return (p > 0 && p >= pMax * 0.9) || (c > 0 && c >= cMax * 0.9);
+  });
+
   readonly categoryBadgeLabel = computed(() => {
     switch (this.category()) {
+      case 'smoke':
+        return 'Czujka Dymu Wi-Fi';
       case 'fan':
         return 'Wentylator 7w1';
       case 'climate':
@@ -1040,6 +1569,7 @@ export class DeviceCard {
       case 'plug':
         return 'Gniazdko 16A';
       case 'switch':
+        if (this.isBasicZb1gsp()) return 'Przekaźnik DIN 32A';
         return 'Wyłącznik';
       case 'contact':
         return 'Kontaktron';
@@ -1054,6 +1584,8 @@ export class DeviceCard {
 
   readonly categoryBadgeClass = computed(() => {
     switch (this.category()) {
+      case 'smoke':
+        return 'bg-red-500/10 text-red-400 border-red-500/30';
       case 'fan':
         return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
       case 'climate':
@@ -1061,6 +1593,7 @@ export class DeviceCard {
       case 'plug':
         return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
       case 'switch':
+        if (this.isBasicZb1gsp()) return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
         return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
       case 'contact':
         return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
@@ -1132,6 +1665,12 @@ export class DeviceCard {
     return 'text-amber-400';
   });
 
+  readonly formattedAbsoluteTime = computed(() => {
+    const dateStr = this.device().last_seen;
+    if (!dateStr) return 'Brak zarejestrowanej transmisji';
+    return `Ostatnia transmisja: ${formatEuropeanDateTime(dateStr, true)}`;
+  });
+
   readonly relativeTime = computed(() => {
     const dateStr = this.device().last_seen;
     if (!dateStr) return 'brak danych';
@@ -1149,7 +1688,8 @@ export class DeviceCard {
     if (h === 1) return '1 godzinę temu';
     if (h < 5) return `${h} godziny temu`;
     if (h < 24) return `${h} godzin temu`;
-    return `${Math.floor(h / 24)} dni temu`;
+    if (diffSec < 86400 * 2) return `Wczoraj (${format24hTime(d)})`;
+    return formatEuropeanDate(d);
   });
 
   onRenameClick(event: MouseEvent): void {
@@ -1209,6 +1749,34 @@ export class DeviceCard {
     this.commandRequested.emit({
       device: this.device(),
       command: { [feature]: !currentVal },
+    });
+  }
+
+  setPowerOnBehavior(behavior: 'previous' | 'on' | 'off', event: MouseEvent): void {
+    event.stopPropagation();
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { power_on_behavior: behavior },
+    });
+  }
+
+  setInchingTime(timeSec: string | number): void {
+    const parsed = Number(timeSec) || 0;
+    this.commandRequested.emit({
+      device: this.device(),
+      command: {
+        inching_time: parsed,
+        inching_mode: parsed > 0,
+      },
+    });
+  }
+
+  toggleNetworkIndicator(event: MouseEvent): void {
+    event.stopPropagation();
+    const current = this.device().network_indicator !== false;
+    this.commandRequested.emit({
+      device: this.device(),
+      command: { network_indicator: !current },
     });
   }
 }

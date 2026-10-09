@@ -340,8 +340,8 @@ export class TopologyGraph implements OnInit, OnDestroy {
     // Budowa węzłów i połączeń
     const cfg = this.telemetry.dongleMaxConfig();
     const coordAddress = cfg?.connection_mode === 'network_tcp'
-      ? `tcp://${cfg?.host || 'Dongle-M.local'}:${cfg?.port || 6638}`
-      : (cfg?.serial_port || '/dev/ttyACM0');
+      ? (cfg?.host ? `tcp://${cfg.host}:${cfg?.port || 6638}` : 'Dongle-MAX (TCP)')
+      : (cfg?.serial_port || 'USB Dongle');
 
     const coordinatorNode: TopologyNode = {
       id: 'sonoff-dongle-max',

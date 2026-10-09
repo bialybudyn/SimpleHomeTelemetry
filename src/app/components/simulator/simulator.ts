@@ -36,7 +36,7 @@ import { Telemetry } from '../../services/telemetry';
       </div>
 
       <!-- Presety testowe -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
         <button
           (click)="injectPreset('overheat')"
           class="p-3.5 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-rose-700/80 text-left transition-all group"
@@ -73,6 +73,32 @@ import { Telemetry } from '../../services/telemetry';
           </div>
           <p class="text-[11px] text-slate-400">
             Wstrzyknij 11% baterii do czujnika (uruchamia system powiadomień REST API & WebSocket).
+          </p>
+        </button>
+
+        <button
+          (click)="injectPreset('basic_zb1gsp')"
+          class="p-3.5 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-amber-700/80 text-left transition-all group"
+        >
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold text-white group-hover:text-amber-400 transition-colors">Sonoff BASIC-ZB1GSP</span>
+            <mat-icon class="text-amber-400 text-sm !w-4 !h-4">electrical_services</mat-icon>
+          </div>
+          <p class="text-[11px] text-slate-400">
+            Paruj przekaźnik na szynę DIN (32A, 3420W, 230V, 14.8A, stan ON).
+          </p>
+        </button>
+
+        <button
+          (click)="injectPreset('basic_overload')"
+          class="p-3.5 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-rose-700/80 text-left transition-all group"
+        >
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold text-white group-hover:text-rose-400 transition-colors">Przeciążenie DIN &gt;32A</span>
+            <mat-icon class="text-rose-400 text-sm !w-4 !h-4">warning</mat-icon>
+          </div>
+          <p class="text-[11px] text-slate-400">
+            Wstrzyknij 7550W / 32.8A (wyzwala alarm przeciążenia rozdzielnicy).
           </p>
         </button>
 
@@ -227,8 +253,42 @@ export class Simulator {
     this.telemetry.resetAllData();
   }
 
-  injectPreset(preset: 'overheat' | 'freeze' | 'low_battery' | 'new_sensor' | 'null_data_sensor'): void {
-    if (preset === 'overheat') {
+  injectPreset(preset: 'overheat' | 'freeze' | 'low_battery' | 'new_sensor' | 'null_data_sensor' | 'basic_zb1gsp' | 'basic_overload'): void {
+    if (preset === 'basic_zb1gsp') {
+      this.telemetry.simulatePacket({
+        device_ieee: '0x00124b0028e34c99',
+        friendly_name: 'Sonoff BASIC-ZB1GSP (Rozdzielnica DIN)',
+        model: 'BASIC-ZB1GSP',
+        category: 'switch',
+        state: 'ON',
+        power: 3420.5,
+        voltage: 231.4,
+        current: 14.8,
+        energy: 42.6,
+        energy_today: 5.8,
+        overload_protection: true,
+        overload_power_threshold: 7680,
+        overload_current_threshold: 32,
+        power_on_behavior: 'previous',
+        linkquality: 175,
+      }).subscribe();
+    } else if (preset === 'basic_overload') {
+      this.telemetry.simulatePacket({
+        device_ieee: '0x00124b0028e34c99',
+        friendly_name: 'Sonoff BASIC-ZB1GSP (Rozdzielnica DIN)',
+        model: 'BASIC-ZB1GSP',
+        category: 'switch',
+        state: 'ON',
+        power: 7550.0,
+        voltage: 230.1,
+        current: 32.8,
+        energy: 43.1,
+        overload_protection: true,
+        overload_power_threshold: 7680,
+        overload_current_threshold: 32,
+        linkquality: 180,
+      }).subscribe();
+    } else if (preset === 'overheat') {
       this.telemetry.simulatePacket({
         device_ieee: '0x00124b0028e34c56',
         temperature: 33.2,

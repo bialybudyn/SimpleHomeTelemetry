@@ -97,7 +97,7 @@ import { Telemetry } from '../../services/telemetry';
               <h3 class="text-sm font-bold text-white">Raport Weryfikacji Usług Systemowych i Plików Konfiguracyjnych</h3>
             </div>
             <span class="text-xs font-mono text-slate-400">
-              Sprawdzono: {{ report.timestamp | date:'HH:mm:ss' }}
+              Sprawdzono: {{ report.timestamp | date:'dd.MM.yyyy HH:mm:ss' }}
             </span>
           </div>
 
@@ -166,7 +166,7 @@ import { Telemetry } from '../../services/telemetry';
               </div>
               <div class="flex justify-between text-slate-300">
                 <span class="text-slate-500">Ostatni pakiet:</span>
-                <span>{{ telemetry.mqttStatus()?.last_message_at ? (telemetry.mqttStatus()?.last_message_at | date:'HH:mm:ss') : 'brak danych' }}</span>
+                <span>{{ telemetry.mqttStatus()?.last_message_at ? (telemetry.mqttStatus()?.last_message_at | date:'dd.MM.yyyy HH:mm:ss') : 'brak danych' }}</span>
               </div>
             </div>
           </div>

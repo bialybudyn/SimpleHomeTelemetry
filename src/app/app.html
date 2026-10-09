@@ -116,6 +116,26 @@
         </mat-icon>
       </button>
 
+      <!-- Przycisk Testu Głośnego Alarmu Budzika -->
+      <button
+        (click)="telemetry.playAlarmAudio(true)"
+        class="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm transition-all cursor-pointer"
+        title="Przetestuj głośny alarm budzika w przeglądarce"
+      >
+        <mat-icon class="text-sm !w-4 !h-4 text-amber-400">alarm</mat-icon>
+        <span class="hidden lg:inline font-bold">Test budzika</span>
+      </button>
+
+      <!-- Przycisk Narzędzia Tuya Local Key QR Code -->
+      <button
+        (click)="openTuyaQrModal()"
+        class="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm transition-all cursor-pointer"
+        title="Pobierz klucze Tuya Local Key przez kod QR (bez konta dewelopera)"
+      >
+        <mat-icon class="text-sm !w-4 !h-4 text-cyan-400">qr_code_scanner</mat-icon>
+        <span class="hidden md:inline font-bold">Klucze Tuya (QR)</span>
+      </button>
+
       <!-- Przycisk Synchronizacji z Zigbee2MQTT -->
       <button
         (click)="telemetry.syncMqttDevices()"
@@ -297,7 +317,7 @@
         <div class="truncate">
           <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Koordynator Dongle-M</div>
           <div class="text-cyan-300 truncate font-semibold">
-            {{ telemetry.dongleMaxConfig()?.connection_mode === 'network_tcp' ? 'tcp://Dongle-M.local:6638' : '/dev/ttyACM0' }}
+            {{ telemetry.dongleMaxConfig()?.connection_mode === 'network_tcp' ? (telemetry.dongleMaxConfig()?.host ? 'tcp://' + telemetry.dongleMaxConfig()?.host + ':' + (telemetry.dongleMaxConfig()?.port || 6638) : 'Dongle-MAX TCP') : (telemetry.dongleMaxConfig()?.serial_port || '/dev/ttyACM0') }}
           </div>
         </div>
       </div>
@@ -523,9 +543,11 @@
 
                 <app-device-card
                   [device]="device"
+                  [tempRank]="getTempRank(device.ieee_address)"
                   (cardClicked)="openAnalytics($event)"
                   (renameRequested)="openRenameDialog($event)"
                   (commandRequested)="handleDeviceCommand($event)"
+                  (tuyaQrRequested)="openTuyaQrModal($event)"
                 />
               </div>
             }
@@ -553,7 +575,7 @@
                   Oczekiwanie na urządzenia Sonoff & Tuya
                 </h3>
                 <p class="text-xs text-slate-400 leading-relaxed">
-                  Broker Mosquitto oraz demon Zigbee2MQTT działają w tle. Obsługujemy głowice <strong class="text-white">TRVZB i TRVZB Gen 2</strong>, inteligentne gniazdka <strong class="text-white">S26R2ZB</strong>, wyłączniki <strong class="text-white">ZBMINIR2</strong> oraz sensory Tuya.
+                  Broker Mosquitto oraz demon Zigbee2MQTT działają w tle. Obsługujemy przekaźniki na szynę DIN <strong class="text-white">BASIC-ZB1GSP (32A)</strong>, głowice <strong class="text-white">TRVZB / Gen 2</strong>, inteligentne gniazdka <strong class="text-white">S26R2ZB</strong>, wyłączniki <strong class="text-white">ZBMINIR2</strong> oraz sensory Tuya.
                 </p>
               </div>
             </div>
@@ -576,7 +598,7 @@
                   <h4 class="text-xs font-bold text-white">Aktywuj urządzenie</h4>
                 </div>
                 <p class="text-[11px] text-slate-400 leading-relaxed">
-                  Przytrzymaj przycisk parowania na urządzeniu (TRVZB, S26R2ZB, ZBMINIR2, Tuya) przez <strong class="text-slate-200">5 sekund</strong>, aż dioda LED zamiga.
+                  Przytrzymaj przycisk parowania na urządzeniu (BASIC-ZB1GSP, TRVZB, S26R2ZB, ZBMINIR2, Tuya) przez <strong class="text-slate-200">5 sekund</strong>, aż dioda LED zamiga.
                 </p>
               </div>
 
@@ -669,6 +691,14 @@
             <span>Urządzenia Wi-Fi:</span>
             <span class="text-white font-bold ml-1">{{ allWifiDevices().length }}</span>
           </div>
+          <button
+            (click)="openTuyaQrModal()"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/40 text-cyan-200 border border-cyan-500/40 font-semibold shadow-sm transition-all cursor-pointer"
+            title="Pobierz klucze Tuya Local Key przez kod QR dla wentylatora i urządzeń Wi-Fi"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">qr_code_scanner</mat-icon>
+            <span>Klucz Tuya QR</span>
+          </button>
           <button
             (click)="openWifiModal()"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md shadow-indigo-950/40 transition-all cursor-pointer"
@@ -826,9 +856,11 @@
 
                 <app-device-card
                   [device]="device"
+                  [tempRank]="getTempRank(device.ieee_address)"
                   (cardClicked)="openAnalytics($event)"
                   (renameRequested)="openRenameDialog($event)"
                   (commandRequested)="handleDeviceCommand($event)"
+                  (tuyaQrRequested)="openTuyaQrModal($event)"
                 />
               </div>
             }
@@ -1006,7 +1038,18 @@
   </div>
 }
 
-<!-- Modal Parowania Wi-Fi (Czyste Wi-Fi bez Zigbee) -->
+<!-- Modal Parowania Urządzeń Wi-Fi -->
 @if (showWifiModal()) {
-  <app-wifi-pairing-modal (closeModal)="closeWifiModal()"></app-wifi-pairing-modal>
+  <app-wifi-pairing-modal
+    (closeModal)="closeWifiModal()"
+    (openTuyaQrModal)="closeWifiModal(); openTuyaQrModal()"
+  ></app-wifi-pairing-modal>
+}
+
+<!-- Modal Skanowania Kodu QR Tuya Local Key -->
+@if (showTuyaQrModal()) {
+  <app-tuya-qr-modal
+    [targetDevice]="selectedTuyaDevice()"
+    (closeModal)="closeTuyaQrModal()"
+  ></app-tuya-qr-modal>
 }

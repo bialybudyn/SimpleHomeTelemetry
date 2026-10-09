@@ -18,6 +18,7 @@ import { WifiPairingModal } from './components/wifi-pairing-modal/wifi-pairing-m
 import { TopologyGraph } from './components/topology-graph/topology-graph';
 import { ServerSettings } from './components/server-settings/server-settings';
 import { ScenesBuilder } from './components/scenes-builder/scenes-builder';
+import { TuyaQrModal } from './components/tuya-qr-modal/tuya-qr-modal';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -34,6 +35,7 @@ import { ScenesBuilder } from './components/scenes-builder/scenes-builder';
     TopologyGraph,
     ServerSettings,
     ScenesBuilder,
+    TuyaQrModal,
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -62,6 +64,78 @@ export class App {
   readonly renamingDevice = signal<Device | null>(null);
   readonly renameValue = signal<string>('');
   readonly showWifiModal = signal<boolean>(false);
+
+  // Modal skanowania kodu QR Tuya Local Key
+  readonly showTuyaQrModal = signal<boolean>(false);
+  readonly selectedTuyaDevice = signal<Device | null>(null);
+
+  openTuyaQrModal(dev?: Device): void {
+    this.selectedTuyaDevice.set(dev || null);
+    this.showTuyaQrModal.set(true);
+  }
+
+  closeTuyaQrModal(): void {
+    this.showTuyaQrModal.set(false);
+    this.selectedTuyaDevice.set(null);
+  }
+
+  // Identyfikacja czujników z najwyższą (czerwony) i najniższą (niebieski) temperaturą
+  // ZGODNIE Z ŻYCZENIEM: Wykluczamy głowice/termostaty ('climate'), bierzemy pod uwagę TYLKO czujniki temperatury ('sensor')!
+  readonly maxTempSensorIeee = computed<string | null>(() => {
+    const sensorDevices = this.telemetry.devices().filter((d) => {
+      const cat = d.category || this.inferCategory(d);
+      return (
+        cat === 'sensor' &&
+        d.last_temperature !== null &&
+        d.last_temperature !== undefined &&
+        !isNaN(Number(d.last_temperature))
+      );
+    });
+
+    if (sensorDevices.length === 0) return null;
+    let maxDev = sensorDevices[0];
+    for (const d of sensorDevices) {
+      if (Number(d.last_temperature) > Number(maxDev.last_temperature)) {
+        maxDev = d;
+      }
+    }
+    return maxDev.ieee_address;
+  });
+
+  readonly minTempSensorIeee = computed<string | null>(() => {
+    const sensorDevices = this.telemetry.devices().filter((d) => {
+      const cat = d.category || this.inferCategory(d);
+      return (
+        cat === 'sensor' &&
+        d.last_temperature !== null &&
+        d.last_temperature !== undefined &&
+        !isNaN(Number(d.last_temperature))
+      );
+    });
+
+    // Wymagamy minimum 2 czujników temperatury, aby wyróżnić skrajne wartości min i max
+    if (sensorDevices.length < 2) return null;
+
+    let minDev = sensorDevices[0];
+    for (const d of sensorDevices) {
+      if (Number(d.last_temperature) < Number(minDev.last_temperature)) {
+        minDev = d;
+      }
+    }
+
+    // Jeśli minimalna temperatura jest identyczna jak maksymalna (wszystkie mają tyle samo), nie dublujemy
+    if (minDev.ieee_address === this.maxTempSensorIeee()) {
+      return null;
+    }
+
+    return minDev.ieee_address;
+  });
+
+  getTempRank(ieee: string): 'max' | 'min' | null {
+    if (ieee === this.maxTempSensorIeee()) return 'max';
+    if (ieee === this.minTempSensorIeee()) return 'min';
+    return null;
+  }
 
   // Sprawdzanie czy urządzenie jest urządzeniem Wi-Fi (nie Zigbee)
   isWifiDevice(d: Device): boolean {

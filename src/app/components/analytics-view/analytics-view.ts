@@ -16,6 +16,7 @@ import { Telemetry } from '../../services/telemetry';
 import { Chart, ChartDataset, registerables } from 'chart.js';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-format';
 
 export interface DeviceHistoryData {
   device: Device;
@@ -635,16 +636,7 @@ export class AnalyticsView {
   }
 
   formatPointTime(timestamp: string): string {
-    const d = new Date(timestamp);
-    if (isNaN(d.getTime())) return timestamp;
-    return d.toLocaleString([], {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    return formatEuropeanDateTime(timestamp, true);
   }
 
   toggleSensor(ieee: string): void {
@@ -770,14 +762,7 @@ export class AnalyticsView {
       (a, b) => new Date(a).getTime() - new Date(b).getTime(),
     );
 
-    const labels = sortedTimestamps.map((ts) => {
-      const d = new Date(ts);
-      if (isNaN(d.getTime())) return ts;
-      if (range === '6h' || range === '24h') {
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-      return `${d.toLocaleDateString([], { month: 'numeric', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    });
+    const labels = sortedTimestamps.map((ts) => formatChartTimeLabel(ts, range));
 
     const datasets: ChartDataset<'line'>[] = [];
 

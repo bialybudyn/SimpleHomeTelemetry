@@ -174,7 +174,18 @@ System obsługuje pełną gamę produktów marki **Sonoff (https://sonoff.tech/p
 - Zdalne przełączanie ON/OFF z natychmiastową reakcją: `{"state": "ON"}` / `{"state": "OFF"}`.
 - Telemetria energii elektrycznej: moc chwilowa (`power` w W), napięcie (`voltage` w V), natężenie (`current` w A), łączne zużycie (`energy` w kWh).
 
-### C. Wyłączniki i przekaźniki dopuszkowe (Sonoff ZBMINIR2, ZBMINI-L2, Tuya Switch):
+### C. Przekaźnik na szynę DIN Sonoff BASIC-ZB1GSP (32A / 7680W Zigbee 3.0 DIN Rail):
+- Montaż na standardowej szynie DIN 35mm (1 moduł szerokości 18mm) w domowej rozdzielnicy elektrycznej.
+- **Wysoka obciążalność 32A (do 7680W)**: idealny do zasilania i sterowania pompami ciepła, bojlerami CWU, klimatyzacją, obwodami gniazd siłowych oraz ładowarkami pojazdów elektrycznych.
+- **Bezpieczeństwo**: rozłączanie dwubiegunowe (jednoczesne odcięcie fazy L oraz neutralnego N) dla pełnej izolacji galwanicznej obwodu.
+- **Monitoring energii w czasie rzeczywistym**:
+  - Moc czynna (`power` w W / kW), napięcie sieci (`voltage` w V), natężenie prądu (`current` w A), zużycie energii (`energy`, `energy_today` w kWh).
+- **Zabezpieczenie przeciążeniowe (Overload Protection)**:
+  - Automatyczne rozłączenie przy przekroczeniu konfigurowalnych progów mocy (`overload_power_threshold`), prądu (`overload_current_threshold`) lub napięcia.
+- **Konfiguracja i router Zigbee 3.0 Mesh**:
+  - Stan po powrocie zasilania (`power_on_behavior`: `previous`, `on`, `off`), tryb impulsowy (`inching_mode`, `inching_time`), blokada fizycznego przycisku w rozdzielnicy (`child_lock`) oraz tryb nocny diody LED (`network_indicator`).
+
+### D. Wyłączniki i przekaźniki dopuszkowe (Sonoff ZBMINIR2, ZBMINI-L2, Tuya Switch):
 - Montaż w puszce podtynkowej 60mm za tradycyjnym włącznikiem ściennym.
 - Zdalne bistabilne przełączanie obwodu oświetleniowego (`state`: `ON`/`OFF`).
 

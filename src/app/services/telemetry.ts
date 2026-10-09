@@ -14,7 +14,12 @@ import {
   SystemNotification,
   SystemStatus,
   TelemetryPoint,
+  TuyaQrGenerateResponse,
+  TuyaQrStatusResponse,
+  TinyTuyaTestResponse,
+  TinyTuyaScanResponse,
 } from '../models/telemetry.models';
+import { format24hTime } from '../utils/date-format';
 
 @Injectable({
   providedIn: 'root',
@@ -291,9 +296,23 @@ export class Telemetry {
     });
   }
 
-  addWifiDevice(ip_address: string, name?: string, model?: string, category: DeviceCategory = 'plug', vendor?: string): Promise<boolean> {
+  addWifiDevice(
+    ip_address: string,
+    name?: string,
+    model?: string,
+    category: DeviceCategory = 'plug',
+    vendor?: string,
+    extra?: { local_key?: string; tuya_dev_id?: string; tuya_protocol_version?: string; tuya_product_name?: string },
+  ): Promise<boolean> {
     return new Promise((resolve) => {
-      this.http.post<{ success: boolean; device: Device }>('/api/wifi/add-device', { ip_address, name, model, category, vendor }).subscribe({
+      this.http.post<{ success: boolean; device: Device }>('/api/wifi/add-device', {
+        ip_address,
+        name,
+        model,
+        category,
+        vendor,
+        ...extra,
+      }).subscribe({
         next: (res) => {
           if (res?.device) {
             this.devices.update((list) => {
@@ -354,7 +373,7 @@ export class Telemetry {
     );
   }
 
-  simulatePacket(payload: Partial<TelemetryPoint>) {
+  simulatePacket(payload: Partial<TelemetryPoint> & Record<string, unknown>) {
     return this.http.post('/api/simulate', payload);
   }
 
@@ -632,7 +651,7 @@ export class Telemetry {
   }
 
   private updateDeviceFromTelemetry(ieee: string, data: Partial<TelemetryPoint>): void {
-    this.lastTransmissionTime.set(new Date().toLocaleTimeString());
+    this.lastTransmissionTime.set(format24hTime(new Date(), true));
 
     // Wyzwolenie efektu pulsu na karcie
     this.devices.update((list) => {
@@ -688,44 +707,190 @@ export class Telemetry {
     this.pulseResetTimeouts.set(ieee, timer);
   }
 
-  playAlarmAudio(): void {
-    if (this.isMuted()) return;
+  /**
+   * Odtwarza głośny, donośny alarm w stylu klasycznego budzika (kadencja 4 ostrych pisków x 2 serie)
+   * Używa kompresora dynamiki i dwóch zsynchronizowanych generatorów piezo/square dla maksymalnej słyszalności.
+   */
+  playAlarmAudio(force = false): void {
+    if (!force && this.isMuted()) return;
     if (typeof window === 'undefined') return;
     try {
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) return;
       const ctx = new AudioContextClass();
-      
-      const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc1.type = 'sawtooth';
-      osc2.type = 'sine';
-      
-      osc1.frequency.setValueAtTime(880, ctx.currentTime);
-      osc2.frequency.setValueAtTime(440, ctx.currentTime);
-      
-      // Siren dual sweeps
-      osc1.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.15);
-      osc1.frequency.linearRampToValueAtTime(880, ctx.currentTime + 0.3);
-      osc1.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.45);
-      osc1.frequency.linearRampToValueAtTime(880, ctx.currentTime + 0.6);
-      
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
-      
-      osc1.connect(gain);
-      osc2.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc1.start();
-      osc2.start();
-      
-      osc1.stop(ctx.currentTime + 0.8);
-      osc2.stop(ctx.currentTime + 0.8);
+
+      // Kompresor dynamiki dla podbicia głośności i zapobiegania przesterom
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-18, ctx.currentTime);
+      compressor.knee.setValueAtTime(24, ctx.currentTime);
+      compressor.ratio.setValueAtTime(12, ctx.currentTime);
+      compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+      compressor.release.setValueAtTime(0.2, ctx.currentTime);
+
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.85, ctx.currentTime);
+
+      compressor.connect(masterGain);
+      masterGain.connect(ctx.destination);
+
+      // Kadencja budzika cyfrowego: 4 impulsy 'BEEP-BEEP-BEEP-BEEP', przerwa 0.25s, i ponowne 4 impulsy
+      const beepDuration = 0.085;
+      const pauseDuration = 0.045;
+      const cyclePause = 0.24;
+
+      let currentTimeOffset = 0.02;
+
+      // 2 serie budzika
+      for (let cycle = 0; cycle < 2; cycle++) {
+        for (let beep = 0; beep < 4; beep++) {
+          const startTime = ctx.currentTime + currentTimeOffset;
+          const endTime = startTime + beepDuration;
+
+          // Dwa oscylatory: wysoki przenikliwy ton budzika 2048Hz + harmoniczny 1024Hz
+          const osc1 = ctx.createOscillator();
+          const osc2 = ctx.createOscillator();
+          const beepGain = ctx.createGain();
+
+          osc1.type = 'square';
+          osc2.type = 'sawtooth';
+
+          osc1.frequency.setValueAtTime(2048, startTime);
+          osc2.frequency.setValueAtTime(1024, startTime);
+
+          // Szybki, ostry atak piezo
+          beepGain.gain.setValueAtTime(0, startTime);
+          beepGain.gain.linearRampToValueAtTime(0.9, startTime + 0.008);
+          beepGain.gain.setValueAtTime(0.9, endTime - 0.01);
+          beepGain.gain.exponentialRampToValueAtTime(0.01, endTime);
+
+          osc1.connect(beepGain);
+          osc2.connect(beepGain);
+          beepGain.connect(compressor);
+
+          osc1.start(startTime);
+          osc2.start(startTime);
+          osc1.stop(endTime);
+          osc2.stop(endTime);
+
+          currentTimeOffset += beepDuration + pauseDuration;
+        }
+        currentTimeOffset += cyclePause;
+      }
+
+      // Bezpieczne zamknięcie kontekstu po zakończeniu sekwencji
+      setTimeout(() => {
+        try {
+          ctx.close();
+        } catch (closeErr) {
+          console.debug('AudioContext close error:', closeErr);
+        }
+      }, (currentTimeOffset + 0.3) * 1000);
     } catch (err) {
       console.debug('Failed to play alarm audio:', err);
     }
   }
+
+  // ==========================================
+  // METODY DLA TUYA LOCAL KEY (SKANOWANIE KODU QR)
+  // ==========================================
+
+  generateTuyaQr(userCode: string) {
+    return this.http.post<TuyaQrGenerateResponse>('/api/tuya/qr/generate', { user_code: userCode });
+  }
+
+  checkTuyaQrStatus(token: string, userCode: string) {
+    return this.http.get<TuyaQrStatusResponse>(
+      `/api/tuya/qr/status?token=${encodeURIComponent(token)}&user_code=${encodeURIComponent(userCode)}`
+    );
+  }
+
+  bindTuyaDevice(payload: {
+    ieee_address: string;
+    local_key: string;
+    tuya_dev_id?: string;
+    ip_address?: string;
+    product_name?: string;
+    protocol_version?: string;
+  }) {
+    return this.http.post<{ success: boolean; device: Device; message?: string }>(
+      '/api/tuya/device/bind',
+      payload
+    );
+  }
+
+  testTuyaLocal(payload: {
+    ip_address: string;
+    local_key: string;
+    tuya_dev_id?: string;
+    protocol_version?: string;
+  }) {
+    return this.http.post<{ success: boolean; message: string }>('/api/tuya/device/test', payload);
+  }
+
+  // ==========================================
+  // METODY DLA TINYTUYA (ZARZĄDZANIE WI-FI / LOCAL KEY / STATUS / SCAN)
+  // ==========================================
+
+  testTinyTuya(payload: {
+    ip: string;
+    local_key: string;
+    dev_id: string;
+    version?: string;
+  }) {
+    return this.http.post<TinyTuyaTestResponse>('/api/tinytuya/device/test', payload);
+  }
+
+  scanTinyTuya() {
+    return this.http.post<TinyTuyaScanResponse>('/api/tinytuya/scan', {});
+  }
+
+  getTinyTuyaDeviceStatus(payload: {
+    ip: string;
+    local_key: string;
+    dev_id: string;
+    version?: string;
+    category?: DeviceCategory;
+  }) {
+    return this.http.post<{
+      success: boolean;
+      device_data?: Record<string, unknown>;
+      raw_dps?: Record<string, unknown>;
+      message?: string;
+      error?: string;
+    }>('/api/tinytuya/device/status', payload);
+  }
+
+  sendTinyTuyaDirectCommand(payload: {
+    ip: string;
+    local_key: string;
+    dev_id: string;
+    version?: string;
+    category?: DeviceCategory;
+    command?: Record<string, unknown>;
+    dps?: Record<string, unknown>;
+  }) {
+    return this.http.post<{
+      success: boolean;
+      message?: string;
+      error?: string;
+      device_data?: Record<string, unknown>;
+    }>('/api/tinytuya/device/set', payload);
+  }
+
+  saveDeviceTuyaConfig(ieee_address: string, config: {
+    local_key: string;
+    tuya_dev_id?: string;
+    tuya_protocol_version?: string;
+    ip_address?: string;
+    category?: DeviceCategory;
+    friendly_name?: string;
+  }) {
+    return this.http.post<{ success: boolean; message: string; device?: Device }>(
+      '/api/tinytuya/device/config',
+      { ieee_address, ...config }
+    );
+  }
 }
+

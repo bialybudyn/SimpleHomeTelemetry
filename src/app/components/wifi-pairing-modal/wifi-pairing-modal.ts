@@ -106,11 +106,11 @@ import { DeviceCategory } from '../../models/telemetry.models';
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-mono">
                   <div class="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800">
                     <span class="text-slate-500 text-[10px] block">SSID Access Pointa:</span>
-                    <span class="text-indigo-300 font-bold">{{ telemetry.dongleMaxAp().ssid || 'Auto Dongle-MAX AP' }}</span>
+                    <span class="text-indigo-300 font-bold">{{ telemetry.dongleMaxAp().ssid || (telemetry.dongleMaxConfig()?.wifi_softap_ssid || 'Dongle-MAX-AP (w gotowości)') }}</span>
                   </div>
                   <div class="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800">
                     <span class="text-slate-500 text-[10px] block">Adres IP Bramy AP:</span>
-                    <span class="text-cyan-300 font-bold">{{ telemetry.dongleMaxAp().ip || telemetry.wifiLocalIp() || 'Lokalna brama' }}</span>
+                    <span class="text-cyan-300 font-bold">{{ telemetry.dongleMaxAp().ip || (telemetry.wifiLocalIp() || 'Wykrywanie...') }}</span>
                   </div>
                   <div class="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 col-span-2 sm:col-span-1">
                     <span class="text-slate-500 text-[10px] block">Pula DHCP / Podsieć:</span>
@@ -267,6 +267,7 @@ import { DeviceCategory } from '../../models/telemetry.models';
                     <option value="plug">Gniazdko inteligentne (Smart Plug Wi-Fi 16A)</option>
                     <option value="switch">Przekaźnik / Włącznik światła (Smart Switch Wi-Fi)</option>
                     <option value="fan">Wentylator / Klimatyzacja / HVAC (Smart Fan 7w1)</option>
+                    <option value="smoke">Czujka dymu / Sensor pożarowy (Tuya Wi-Fi Smoke Detector)</option>
                     <option value="climate">Termostat / Ogrzewanie (Wi-Fi Thermostat)</option>
                     <option value="sensor">Czujnik środowiskowy (Wi-Fi Sensor)</option>
                   </select>
@@ -281,9 +282,113 @@ import { DeviceCategory } from '../../models/telemetry.models';
                     type="text"
                     [value]="manualModel()"
                     (input)="manualModel.set($any($event.target).value)"
-                    placeholder="np. Smart Plug Wi-Fi 16A"
+                    placeholder="np. Smart Plug Wi-Fi 16A, GOW 007 lub Czujka Dymu"
                     class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
                   />
+                </div>
+
+                <!-- Opcjonalne klucze Tuya Local Key dla wentylatora, gniazdek i czujek dymu -->
+                <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800/80 space-y-3">
+                  <div class="flex items-center justify-between flex-wrap gap-2">
+                    <div class="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                      <mat-icon class="text-xs !w-4 !h-4 text-amber-400">vpn_key</mat-icon>
+                      <span>Integracja TinyTuya (Local Key & Sterowanie LAN)</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        (click)="scanLan()"
+                        [disabled]="isScanning()"
+                        class="px-2 py-1 rounded-lg text-[10px] font-bold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 flex items-center gap-1 transition-all cursor-pointer"
+                        title="Skanuj sieć lokalną za pomocą TinyTuya, aby znaleźć urządzenia Tuya"
+                      >
+                        <mat-icon class="text-[11px] !w-3 !h-3" [class.animate-spin]="isScanning()">radar</mat-icon>
+                        <span>{{ isScanning() ? 'Skanowanie...' : 'Skanuj LAN (TinyTuya)' }}</span>
+                      </button>
+                      <button
+                        type="button"
+                        (click)="openTuyaQrModal.emit()"
+                        class="px-2 py-1 rounded-lg text-[10px] font-bold bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-500/40 flex items-center gap-1 transition-all cursor-pointer"
+                        title="Uruchom skaner kodu QR Tuya, aby automatycznie wyciągnąć klucz"
+                      >
+                        <mat-icon class="text-[11px] !w-3 !h-3 text-cyan-400">qr_code_scanner</mat-icon>
+                        <span>Skaner QR Tuya</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  @if (scanDiscovered().length > 0) {
+                    <div class="p-2.5 rounded-lg bg-indigo-950/50 border border-indigo-500/40 space-y-1.5">
+                      <span class="text-[10px] font-mono font-bold text-indigo-300 block">Wykryto w sieci (kliknij aby uzupełnić formularz):</span>
+                      <div class="space-y-1 max-h-32 overflow-y-auto">
+                        @for (d of scanDiscovered(); track d.id) {
+                          <div
+                            role="button"
+                            tabindex="0"
+                            (click)="selectDiscovered(d)"
+                            (keydown.enter)="selectDiscovered(d)"
+                            class="p-1.5 rounded bg-slate-900/80 hover:bg-indigo-900/60 border border-slate-700/60 flex items-center justify-between text-[11px] font-mono cursor-pointer transition-colors"
+                          >
+                            <span class="text-white font-semibold">{{ d.ip }}</span>
+                            <span class="text-slate-400 truncate max-w-[140px]">ID: {{ d.id }}</span>
+                            <span class="text-cyan-300 text-[10px]">v{{ d.version }}</span>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  }
+
+                  <p class="text-[11px] text-slate-400 leading-relaxed">
+                    Dla wentylatora (np. GOW 007), gniazdka lub czujki dymu TinyTuya do lokalnego sterowania LAN wymagany jest 16-znakowy <strong class="text-slate-200">Local Key</strong>.
+                  </p>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div class="space-y-1">
+                      <label for="manualLocalKeyField" class="text-[11px] font-semibold text-slate-400 block">
+                        Local Key (16 znaków):
+                      </label>
+                      <input
+                        id="manualLocalKeyField"
+                        type="text"
+                        [value]="manualLocalKey()"
+                        (input)="manualLocalKey.set($any($event.target).value)"
+                        placeholder="np. a1b2c3d4e5f6g7h8"
+                        class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                    <div class="space-y-1">
+                      <label for="manualDevIdField" class="text-[11px] font-semibold text-slate-400 block">
+                        Device ID (ID Tuya):
+                      </label>
+                      <input
+                        id="manualDevIdField"
+                        type="text"
+                        [value]="manualDevId()"
+                        (input)="manualDevId.set($any($event.target).value)"
+                        placeholder="np. bf9123456789abcdef"
+                        class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  @if (manualIp() && manualLocalKey() && manualDevId()) {
+                    <div class="pt-1 flex items-center justify-between">
+                      <button
+                        type="button"
+                        (click)="testConnection()"
+                        [disabled]="isTesting()"
+                        class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 flex items-center gap-1 transition-all cursor-pointer"
+                      >
+                        <mat-icon class="text-xs !w-3.5 !h-3.5" [class.animate-spin]="isTesting()">network_check</mat-icon>
+                        <span>{{ isTesting() ? 'Testowanie...' : 'Testuj połączenie TinyTuya' }}</span>
+                      </button>
+
+                      @if (testMessage()) {
+                        <span class="text-[11px] font-mono" [class.text-emerald-400]="testOk()" [class.text-rose-400]="!testOk()">
+                          {{ testMessage() }}
+                        </span>
+                      }
+                    </div>
+                  }
                 </div>
 
                 <button
@@ -316,44 +421,89 @@ import { DeviceCategory } from '../../models/telemetry.models';
 export class WifiPairingModal {
   readonly telemetry = inject(Telemetry);
   readonly closeModal = output<void>();
+  readonly openTuyaQrModal = output<void>();
 
   readonly activeMethod = signal<'dongle_ap' | 'smartconfig' | 'manual_ip'>('dongle_ap');
 
-  readonly manualIp = signal<string>('192.168.1.150');
-  readonly manualName = signal<string>('Gniazdko Smart Plug Wi-Fi 16A');
+  readonly manualIp = signal<string>('');
+  readonly manualName = signal<string>('');
   readonly manualCategory = signal<DeviceCategory>('plug');
-  readonly manualModel = signal<string>('Smart Plug 16A Wi-Fi');
+  readonly manualModel = signal<string>('');
+  readonly manualLocalKey = signal<string>('');
+  readonly manualDevId = signal<string>('');
   readonly isAdding = signal<boolean>(false);
 
+  readonly isScanning = signal<boolean>(false);
+  readonly scanDiscovered = signal<{ id: string; ip: string; version: string }[]>([]);
+  readonly isTesting = signal<boolean>(false);
+  readonly testMessage = signal<string>('');
+  readonly testOk = signal<boolean>(false);
+
   readonly wifiForm = new FormGroup({
-    ssid: new FormControl('Domowa_Siec_WiFi', [Validators.required]),
+    ssid: new FormControl('', [Validators.required]),
     password: new FormControl(''),
   });
 
   onCategoryChange(cat: string): void {
     const c = cat as DeviceCategory;
     this.manualCategory.set(c);
-    if (c === 'plug') {
-      this.manualName.set('Gniazdko Smart Plug Wi-Fi 16A');
-      this.manualModel.set('Smart Plug 16A Wi-Fi');
-    } else if (c === 'switch') {
-      this.manualName.set('Przekaźnik Wi-Fi');
-      this.manualModel.set('Smart Switch Wi-Fi');
-    } else if (c === 'fan') {
-      this.manualName.set('Wentylator Wi-Fi 7w1');
-      this.manualModel.set('GOW 007 7w1 (Wi-Fi)');
-    } else if (c === 'climate') {
-      this.manualName.set('Termostat Wi-Fi');
-      this.manualModel.set('Smart Thermostat Wi-Fi');
-    } else if (c === 'sensor') {
-      this.manualName.set('Czujnik Środowiskowy Wi-Fi');
-      this.manualModel.set('Smart Sensor Wi-Fi');
-    }
+  }
+
+  scanLan(): void {
+    this.isScanning.set(true);
+    this.telemetry.scanTinyTuya().subscribe({
+      next: (res) => {
+        this.isScanning.set(false);
+        if (res.devices && res.devices.length > 0) {
+          this.scanDiscovered.set(res.devices);
+        } else {
+          this.testMessage.set('Brak urządzeń w pasywnym skanie UDP');
+          this.testOk.set(false);
+        }
+      },
+      error: (err) => {
+        this.isScanning.set(false);
+        console.debug('Scan error:', err);
+      },
+    });
+  }
+
+  selectDiscovered(d: { id: string; ip: string; version: string }): void {
+    this.manualIp.set(d.ip);
+    this.manualDevId.set(d.id);
+  }
+
+  testConnection(): void {
+    const ip = this.manualIp().trim();
+    const key = this.manualLocalKey().trim();
+    const devId = this.manualDevId().trim();
+    if (!ip || !key || !devId) return;
+
+    this.isTesting.set(true);
+    this.testMessage.set('');
+    this.telemetry.testTinyTuya({ ip, local_key: key, dev_id: devId }).subscribe({
+      next: (res) => {
+        this.isTesting.set(false);
+        this.testOk.set(res.success);
+        this.testMessage.set(res.message);
+      },
+      error: (err) => {
+        this.isTesting.set(false);
+        this.testOk.set(false);
+        this.testMessage.set(err?.error?.message || 'Błąd połączenia TinyTuya');
+      },
+    });
   }
 
   startPairing(): void {
+    if (this.activeMethod() === 'dongle_ap') {
+      const apSsid = this.telemetry.dongleMaxAp().ssid || this.telemetry.dongleMaxConfig()?.wifi_softap_ssid || 'Dongle-MAX-AP';
+      this.telemetry.triggerWifiPairing(apSsid, '', 160);
+      return;
+    }
+
     if (this.wifiForm.invalid) return;
-    const ssid = this.wifiForm.value.ssid || 'Domowa_Siec_WiFi';
+    const ssid = this.wifiForm.value.ssid || '';
     const password = this.wifiForm.value.password || '';
 
     this.telemetry.triggerWifiPairing(ssid, password, 160);
@@ -364,11 +514,18 @@ export class WifiPairingModal {
     if (!ip) return;
 
     this.isAdding.set(true);
+    const extra = {
+      local_key: this.manualLocalKey().trim() || undefined,
+      tuya_dev_id: this.manualDevId().trim() || undefined,
+      tuya_protocol_version: '3.3',
+    };
     const ok = await this.telemetry.addWifiDevice(
       ip,
       this.manualName().trim(),
       this.manualModel().trim(),
       this.manualCategory(),
+      undefined,
+      extra,
     );
     this.isAdding.set(false);
 

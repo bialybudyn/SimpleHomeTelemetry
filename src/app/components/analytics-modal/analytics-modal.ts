@@ -16,6 +16,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { Device, HistoryResponse, HistoryStats, TelemetryPoint } from '../../models/telemetry.models';
 import { Telemetry } from '../../services/telemetry';
 import { Chart, registerables } from 'chart.js';
+import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-format';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -538,16 +539,7 @@ export class AnalyticsModal {
   });
 
   formatPointTime(timestamp: string): string {
-    const d = new Date(timestamp);
-    if (isNaN(d.getTime())) return timestamp;
-    return d.toLocaleString([], {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    return formatEuropeanDateTime(timestamp, true);
   }
 
   private chartInstance: Chart | null = null;
@@ -612,14 +604,7 @@ export class AnalyticsModal {
       this.chartInstance = null;
     }
 
-    const labels = history.map((item) => {
-      const d = new Date(item.timestamp);
-      if (isNaN(d.getTime())) return item.timestamp;
-      if (range === '6h' || range === '24h') {
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-      return `${d.toLocaleDateString([], { month: 'numeric', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    });
+    const labels = history.map((item) => formatChartTimeLabel(item.timestamp, range));
 
     const tempData = history.map((p) => p.temperature);
     const humData = history.map((p) => p.humidity);
