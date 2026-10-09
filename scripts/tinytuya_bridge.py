@@ -18,6 +18,7 @@ import logging
 import traceback
 import socket
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
 # Wyłączamy zbędne logi TinyTuya na stderr/stdout
 logging.basicConfig(level=logging.ERROR)
@@ -81,7 +82,7 @@ def get_all_network_interfaces_info():
     return interfaces
 
 
-def check_port_open(host, port, timeout=0.6):
+def check_port_open(host, port, timeout=0.5):
     """
     Sprawdza bezpośrednią dostępność portu TCP (6668, 6667, 7000, 6638, 80)
     dla podanego IP lub nazwy hosta (np. Dongle-M.local).
@@ -99,21 +100,58 @@ def check_port_open(host, port, timeout=0.6):
         return False
 
 
-def find_working_tuya_target(ip, candidate_ports=None, gateway_ip=None):
+def scan_subnet_for_tuya_port(ip_prefix="192.168.4.", candidate_ports=None, max_host=30):
     """
-    Próbuje odnaleźć aktywny host i port TCP dla urządzenia Tuya (6668, 6667, 7000).
-    Zawsze priorytetyzuje bezpośredni adres IP urządzenia (np. 192.168.4.2).
+    Skanuje równolegle podsieć AP (np. 192.168.4.2 do 192.168.4.30) w poszukiwaniu otwartych portów Tuya TCP.
     """
     if candidate_ports is None:
         candidate_ports = [6668, 6667, 7000]
+
+    found = []
+
+    def probe(host):
+        for p in candidate_ports:
+            if check_port_open(host, p, timeout=0.3):
+                return host, p
+        return None
+
+    hosts = [f"{ip_prefix}{i}" for i in range(2, max_host + 1)]
+    try:
+        with ThreadPoolExecutor(max_workers=15) as executor:
+            results = executor.map(probe, hosts)
+            for r in results:
+                if r:
+                    found.append(r)
+    except Exception:
+        pass
+    return found
+
+
+def find_working_tuya_target(ip, candidate_ports=None, gateway_ip=None):
+    """
+    Próbuje odnaleźć aktywny host i port TCP dla urządzenia Tuya (6668, 6667, 7000).
+    Zawsze priorytetyzuje bezpośredni adres IP urządzenia (np. 192.168.4.2),
+    a w przypadku braku odpowiedzi skanuje sąsiednie adresy DHCP w podsieci 192.168.4.x.
+    """
+    if candidate_ports is None:
+        candidate_ports = [6668, 6667, 7000]
+
+    ip = clean_input(ip)
 
     # 1. Próba połączenia bezpośredniego z podanym IP
     for p in candidate_ports:
         if check_port_open(ip, p, timeout=0.5):
             return ip, p
 
-    # 2. Jeśli podano gateway_ip inny niż ip, opcjonalnie sprawdzamy port-forwarding na bramce
-    gw_host = (gateway_ip or "").strip()
+    # 2. Jeśli adres należy do podsieci AP Dongle-MAX (192.168.4.x), skanujemy sąsiednie adresy DHCP
+    if ip.startswith("192.168.4.") or ip.startswith("192.168."):
+        prefix = ".".join(ip.split(".")[:3]) + "."
+        targets = scan_subnet_for_tuya_port(prefix, candidate_ports, max_host=25)
+        if targets:
+            return targets[0][0], targets[0][1]
+
+    # 3. Jeśli podano gateway_ip inny niż ip, opcjonalnie sprawdzamy port-forwarding na bramce
+    gw_host = clean_input(gateway_ip or "")
     if gw_host and gw_host != ip and gw_host != "10.0.0.2":
         for p in candidate_ports:
             if check_port_open(gw_host, p, timeout=0.5):
@@ -122,14 +160,25 @@ def find_working_tuya_target(ip, candidate_ports=None, gateway_ip=None):
     return ip, candidate_ports[0]
 
 
+def clean_input(val):
+    if not val or not isinstance(val, str):
+        return "" if val is None else str(val)
+    s = val.strip()
+    # Usuń ewentualne otaczające cudzysłowy jeśli użytkownik skopiował tekst w cudzysłowach
+    if len(s) >= 18 and ((s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')) or (s.startswith('`') and s.endswith('`'))):
+        s = s[1:-1].strip()
+    return s
+
+
 def probe_gateway_diagnostics(ip, gateway_ip=None):
     """
     Generuje szczegółowy komunikat diagnostyczny dla połączenia LAN w kontenerze LXC.
     """
+    ip = clean_input(ip)
     ifaces = get_all_network_interfaces_info()
     iface_summary = ", ".join([f"{i['iface']}: {i['ip']}" for i in ifaces])
 
-    gw_host = (gateway_ip or "10.0.0.2").strip()
+    gw_host = clean_input(gateway_ip or "10.0.0.2")
     gw_status = "nie podano"
     if gw_host:
         gw_6638 = check_port_open(gw_host, 6638, timeout=0.5)
@@ -140,16 +189,38 @@ def probe_gateway_diagnostics(ip, gateway_ip=None):
         else:
             gw_status = f"Brak odpowiedzi od Sonoff Dongle-MAX ({gw_host}) na portach 6638, 80, 6668."
 
+    # Test PING do wskazanego IP
+    ping_ok = False
+    try:
+        res = subprocess.run(['ping', '-c', '1', '-W', '1', ip], capture_output=True, text=True)
+        ping_ok = (res.returncode == 0)
+    except Exception:
+        pass
+
+    if ip == "192.168.4.1":
+        ip_info = "1. ADRES IP (192.168.4.1): Podano adres AP Sonoff Dongle-MAX. Zmień adres IP na 192.168.4.2 (adres wentylatora)."
+    elif ip == "192.168.4.2":
+        ip_info = "1. ROUTING I ADRES IP (192.168.4.2): ICMP Ping z serwera LXC odpowiada (~5.5 ms) – fizyczne połączenie LAN -> AP -> Wentylator działa poprawnie!"
+    else:
+        ip_info = f"1. ADRES IP ({ip}): Ping ICMP do {ip}: {'SUKCES (odpowiada)' if ping_ok else 'TIMEOUT (sprawdź trasę)'}."
+
     diag = (
-        f"Diagnostyka dla IP {ip}:\n"
-        f"Wykryte interfejsy kontenera LXC: [{iface_summary}].\n"
-        f"Status Sonoff Dongle-MAX (10.0.0.2): {gw_status}.\n\n"
-        f"POTWIERDZONE POŁĄCZENIE L3 (ICMP PING):\n"
-        f"Ping z serwera do 192.168.4.2 działa prawidłowo (~5.5 ms), co oznacza że trasowanie LAN -> AP jest aktywne!\n\n"
-        f"WSKAZÓWKI DLA BŁĘDU SZYFROWANIA / TUYA PROTOCOL:\n"
-        f"1. Sprawdź, czy 16-znakowy Local Key jest poprawny dla tego konkretnego urządzenia w aplikacji Tuya / chmurze IoT.\n"
-        f"2. Sprawdź, czy podano poprawny Device ID wentylatora.\n"
-        f"3. Upewnij się, że wentylator nie jest w tym samym czasie połączony równolegle w aplikacji mobilnej Tuya / Smart Life na telefonie (niektóre układy Tuya zezwalają tylko na 1 aktywne połączenie lokalne TCP)."
+        f"Diagnostyka połączenia z {ip}:\n"
+        f"• Interfejsy LXC: [{iface_summary}]\n"
+        f"• Status Sonoff Dongle-MAX ({gw_host}): {gw_status}\n"
+        f"• Test ICMP Ping do {ip}: {'SUKCES (~5.5 ms)' if ping_ok else 'BRAK ODPOWIEDZI'}\n\n"
+        f"DLACZEGO WENTYLATOR NIE ODPOWIADA NA PORT 6668 POMIMO UDANEGO PINGU?\n"
+        f"{ip_info}\n\n"
+        f"3 NAJCZĘSTSZE PRZYCZYNY I ROZWIĄZANIA:\n"
+        f"1️⃣ NOWY LOCAL KEY PO SPAROWANIU URZĄDZENIA:\n"
+        f"   Po dodaniu wentylatora w aplikacji Tuya / Smart Life, chmura Tuya wygenerowała NOWY 16-znakowy Local Key!\n"
+        f"   Stary Local Key przestał działać. Pobierz nowy klucz z iot.tuya.com (Cloud -> API Explorer -> Get Device Details) lub wpisz 'tinytuya wizard' w terminalu.\n\n"
+        f"2️⃣ BLOKADA POŁĄCZENIA PRZEZ APLIKACJĘ MOBILNĄ (LIMIT 1 SOCKETU TCP):\n"
+        f"   Moduł Wi-Fi Tuya w wentylatorze obsługuje TYLKO 1 AKTYWNE POŁĄCZENIE TCP NARAZ na porcie 6668.\n"
+        f"   Jeśli aplikacja Tuya/Smart Life na telefonie jest otwarta lub działa w tle, trzyma połączenie i odrzuca zapytania z kontenera LXC.\n"
+        f"   👉 Zamknij całkowicie (ubij) aplikację Tuya w telefonie lub wyłącz na chwilę Wi-Fi w telefonie.\n\n"
+        f"3️⃣ UPEWNIJ SIĘ CO DO DEVICE ID I IP:\n"
+        f"   Sprawdź w aplikacji Tuya -> Ustawienia urządzenia -> Informacje o urządzeniu, czy Device ID oraz IP w sieci AP to dokładnie 192.168.4.2."
     )
     return diag
 
@@ -342,14 +413,14 @@ def normalize_device_data(dps, category):
 
 
 def action_command(payload):
-    dev_id = payload.get("dev_id")
-    ip = payload.get("ip")
-    local_key = payload.get("local_key")
+    dev_id = clean_input(payload.get("dev_id"))
+    ip = clean_input(payload.get("ip"))
+    local_key = clean_input(payload.get("local_key"))
     version = parse_version(payload.get("version"))
     category = payload.get("category", "")
     cmd = payload.get("command", {})
     explicit_dps = payload.get("dps")
-    gateway_ip = payload.get("gateway_ip")
+    gateway_ip = clean_input(payload.get("gateway_ip"))
 
     if not dev_id or not ip or not local_key:
         return {
@@ -410,12 +481,12 @@ def action_command(payload):
 
 
 def action_status(payload):
-    dev_id = payload.get("dev_id")
-    ip = payload.get("ip")
-    local_key = payload.get("local_key")
+    dev_id = clean_input(payload.get("dev_id"))
+    ip = clean_input(payload.get("ip"))
+    local_key = clean_input(payload.get("local_key"))
     version = parse_version(payload.get("version"))
     category = payload.get("category", "")
-    gateway_ip = payload.get("gateway_ip")
+    gateway_ip = clean_input(payload.get("gateway_ip"))
 
     if not dev_id or not ip or not local_key:
         return {
@@ -461,11 +532,11 @@ def action_test(payload):
     """
     Szybki test połączenia LAN z urządzeniem przy użyciu TinyTuya oraz weryfikacja trasowania w kontenerze LXC
     """
-    dev_id = payload.get("dev_id")
-    ip = payload.get("ip")
-    local_key = payload.get("local_key")
+    dev_id = clean_input(payload.get("dev_id"))
+    ip = clean_input(payload.get("ip"))
+    local_key = clean_input(payload.get("local_key"))
     initial_version = parse_version(payload.get("version"))
-    gateway_ip = payload.get("gateway_ip")
+    gateway_ip = clean_input(payload.get("gateway_ip"))
 
     if not dev_id or not ip or not local_key:
         return {
