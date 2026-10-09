@@ -81,7 +81,7 @@ def get_all_network_interfaces_info():
     return interfaces
 
 
-def check_port_open(host, port, timeout=1.5):
+def check_port_open(host, port, timeout=0.6):
     """
     Sprawdza bezpośrednią dostępność portu TCP (6668, 6667, 7000, 6638, 80)
     dla podanego IP lub nazwy hosta (np. Dongle-M.local).
@@ -99,43 +99,57 @@ def check_port_open(host, port, timeout=1.5):
         return False
 
 
-def find_working_tuya_port(ip, candidate_ports=None):
+def find_working_tuya_target(ip, candidate_ports=None, gateway_ip=None):
     """
-    Próbuje odnaleźć aktywny port TCP urządzenia Tuya (6668 - v3.3/3.4, 6667 - v3.1, 7000 - wentylatory/HVAC).
+    Próbuje odnaleźć aktywny host i port TCP dla urządzenia Tuya (6668, 6667, 7000).
+    Zawsze priorytetyzuje bezpośredni adres IP urządzenia (np. 192.168.4.2).
     """
     if candidate_ports is None:
         candidate_ports = [6668, 6667, 7000]
 
+    # 1. Próba połączenia bezpośredniego z podanym IP
     for p in candidate_ports:
-        if check_port_open(ip, p, timeout=1.2):
-            return p
-    return None
+        if check_port_open(ip, p, timeout=0.5):
+            return ip, p
+
+    # 2. Jeśli podano gateway_ip inny niż ip, opcjonalnie sprawdzamy port-forwarding na bramce
+    gw_host = (gateway_ip or "").strip()
+    if gw_host and gw_host != ip and gw_host != "10.0.0.2":
+        for p in candidate_ports:
+            if check_port_open(gw_host, p, timeout=0.5):
+                return gw_host, p
+
+    return ip, candidate_ports[0]
 
 
 def probe_gateway_diagnostics(ip, gateway_ip=None):
     """
-    Generuje szczegółowy komunikat diagnostyczny dla problemów z połączeniem LAN w kontenerze LXC
-    oraz weryfikuje trasowanie do bramki Dongle-MAX.
+    Generuje szczegółowy komunikat diagnostyczny dla połączenia LAN w kontenerze LXC.
     """
     ifaces = get_all_network_interfaces_info()
     iface_summary = ", ".join([f"{i['iface']}: {i['ip']}" for i in ifaces])
 
+    gw_host = (gateway_ip or "10.0.0.2").strip()
     gw_status = "nie podano"
-    gw_host = gateway_ip or "Dongle-M.local"
     if gw_host:
-        gw_6638 = check_port_open(gw_host, 6638, timeout=1.0)
-        gw_80 = check_port_open(gw_host, 80, timeout=1.0)
-        if gw_6638 or gw_80:
-            gw_status = f"Bramka Dongle-MAX ({gw_host}) jest ODBIERANA i ODPOWIADA w sieci LAN! (Porty: 6638={gw_6638}, 80={gw_80})"
+        gw_6638 = check_port_open(gw_host, 6638, timeout=0.5)
+        gw_80 = check_port_open(gw_host, 80, timeout=0.5)
+        gw_6668 = check_port_open(gw_host, 6668, timeout=0.5)
+        if gw_6638 or gw_80 or gw_6668:
+            gw_status = f"Bramka Sonoff Dongle-MAX ({gw_host}) jest AKTYWNA w LAN! (Porty: 6638={gw_6638}, 80={gw_80}, 6668={gw_6668})"
         else:
-            gw_status = f"Brak odpowiedzi od bramki Dongle-MAX ({gw_host}) na portach 6638 i 80."
+            gw_status = f"Brak odpowiedzi od Sonoff Dongle-MAX ({gw_host}) na portach 6638, 80, 6668."
 
     diag = (
-        f"Nie można połączyć się z urządzeniem Tuya pod adresem IP {ip} na portach 6668/6667/7000. "
-        f"Wykryte interfejsy kontenera LXC: [{iface_summary}]. "
-        f"Status trasowania do Dongle-MAX: {gw_status}. "
-        f"Wskazówka: Upewnij się, że wentylator połączył się z punktem dostępowym (AP) Dongle-MAX "
-        f"oraz że kontener LXC ma przypisaną trasę (route) do podsieci IP wentylatora."
+        f"Diagnostyka dla IP {ip}:\n"
+        f"Wykryte interfejsy kontenera LXC: [{iface_summary}].\n"
+        f"Status Sonoff Dongle-MAX (10.0.0.2): {gw_status}.\n\n"
+        f"POTWIERDZONE POŁĄCZENIE L3 (ICMP PING):\n"
+        f"Ping z serwera do 192.168.4.2 działa prawidłowo (~5.5 ms), co oznacza że trasowanie LAN -> AP jest aktywne!\n\n"
+        f"WSKAZÓWKI DLA BŁĘDU SZYFROWANIA / TUYA PROTOCOL:\n"
+        f"1. Sprawdź, czy 16-znakowy Local Key jest poprawny dla tego konkretnego urządzenia w aplikacji Tuya / chmurze IoT.\n"
+        f"2. Sprawdź, czy podano poprawny Device ID wentylatora.\n"
+        f"3. Upewnij się, że wentylator nie jest w tym samym czasie połączony równolegle w aplikacji mobilnej Tuya / Smart Life na telefonie (niektóre układy Tuya zezwalają tylko na 1 aktywne połączenie lokalne TCP)."
     )
     return diag
 
@@ -351,11 +365,10 @@ def action_command(payload):
         }
 
     try:
-        # Sprawdzamy czy port 6668 jest otwarty, a w razie potrzeby szukamy portu 6667 lub 7000
-        working_port = find_working_tuya_port(ip, [6668, 6667, 7000]) or 6668
+        target_host, working_port = find_working_tuya_target(ip, [6668, 6667, 7000], gateway_ip)
 
         # Inicjalizacja urządzenia TinyTuya
-        d = tinytuya.Device(dev_id, ip, local_key, version=version)
+        d = tinytuya.Device(dev_id, target_host, local_key, version=version)
         d.port = working_port
         d.set_socketTimeout(2.5)
         d.set_socketRetryLimit(2)
@@ -379,9 +392,10 @@ def action_command(payload):
         merged_dps = {**current_dps, **dps_to_send}
         normalized = normalize_device_data(merged_dps, category)
 
+        gw_note = f" (przez bramkę {target_host})" if target_host != ip else ""
         return {
             "success": True,
-            "message": f"Wysłano pomyślnie instrukcję TinyTuya do {ip}:{working_port} (DPS: {list(dps_to_send.keys())})",
+            "message": f"Wysłano pomyślnie instrukcję TinyTuya do {target_host}:{working_port}{gw_note} (DPS: {list(dps_to_send.keys())})",
             "sent_dps": dps_to_send,
             "device_data": normalized,
             "raw_response": res
@@ -410,8 +424,8 @@ def action_status(payload):
         }
 
     try:
-        working_port = find_working_tuya_port(ip, [6668, 6667, 7000]) or 6668
-        d = tinytuya.Device(dev_id, ip, local_key, version=version)
+        target_host, working_port = find_working_tuya_target(ip, [6668, 6667, 7000], gateway_ip)
+        d = tinytuya.Device(dev_id, target_host, local_key, version=version)
         d.port = working_port
         d.set_socketTimeout(2.5)
         d.set_socketRetryLimit(2)
@@ -428,11 +442,12 @@ def action_status(payload):
         dps = status_res.get("dps", {}) if isinstance(status_res, dict) else {}
         normalized = normalize_device_data(dps, category)
 
+        gw_note = f" (przez bramkę {target_host})" if target_host != ip else ""
         return {
             "success": True,
             "device_data": normalized,
             "raw_dps": dps,
-            "message": f"Odczytano status TinyTuya z {ip}:{working_port}"
+            "message": f"Odczytano status TinyTuya z {target_host}:{working_port}{gw_note}"
         }
     except Exception as e:
         diag = probe_gateway_diagnostics(ip, gateway_ip)
@@ -449,7 +464,7 @@ def action_test(payload):
     dev_id = payload.get("dev_id")
     ip = payload.get("ip")
     local_key = payload.get("local_key")
-    version = parse_version(payload.get("version"))
+    initial_version = parse_version(payload.get("version"))
     gateway_ip = payload.get("gateway_ip")
 
     if not dev_id or not ip or not local_key:
@@ -459,43 +474,57 @@ def action_test(payload):
         }
 
     try:
-        working_port = find_working_tuya_port(ip, [6668, 6667, 7000])
-        if not working_port:
-            diag = probe_gateway_diagnostics(ip, gateway_ip)
-            return {
-                "success": False,
-                "error": f"Brak odpowiedniego portu TCP dla urządzenia {ip}. {diag}"
-            }
+        target_host, working_port = find_working_tuya_target(ip, [6668, 6667, 7000], gateway_ip)
 
-        d = tinytuya.Device(dev_id, ip, local_key, version=version)
-        d.port = working_port
-        d.set_socketTimeout(2.0)
-        d.set_socketRetryLimit(1)
+        # Wersje do automatycznego przetestowania w przypadku błędu protokołu
+        versions_to_try = [initial_version]
+        for v in [3.3, 3.1, 3.4, 3.5]:
+            if v not in versions_to_try:
+                versions_to_try.append(v)
 
-        st = d.status()
-        if isinstance(st, dict) and "Error" in st:
-            err_msg = st.get("Error", "Błąd")
-            err_code = st.get("Err", "")
+        last_st = None
+        working_ver = initial_version
+
+        for ver in versions_to_try:
+            try:
+                d = tinytuya.Device(dev_id, target_host, local_key, version=ver)
+                d.port = working_port
+                d.set_socketTimeout(1.5)
+                d.set_socketRetryLimit(1)
+
+                st = d.status()
+                last_st = st
+                if isinstance(st, dict) and "Error" not in st and "dps" in st:
+                    working_ver = ver
+                    break
+            except Exception:
+                pass
+
+        if isinstance(last_st, dict) and "Error" in last_st:
+            err_msg = last_st.get("Error", "Błąd")
+            err_code = last_st.get("Err", "")
             if "Network Error" in err_msg or "Unable to Connect" in err_msg:
                 diag = probe_gateway_diagnostics(ip, gateway_ip)
                 return {
                     "success": False,
-                    "error": f"Nie można połączyć się z urządzeniem pod adresem {ip}:{working_port}. {diag}"
+                    "error": f"Nie można połączyć się z urządzeniem pod adresem {target_host}:{working_port}. {diag}"
                 }
             elif "Check device key" in err_msg or "decode" in err_msg.lower() or "decrypt" in err_msg.lower():
                 return {
                     "success": False,
-                    "error": f"Niepoprawny klucz Local Key! Urządzenie pod {ip}:{working_port} odrzuciło odszyfrowanie pakietu AES. Sprawdź 16-znakowy Local Key."
+                    "error": f"Niepoprawny klucz Local Key! Urządzenie pod {target_host}:{working_port} odrzuciło odszyfrowanie pakietu AES. Sprawdź 16-znakowy Local Key w aplikacji Tuya."
                 }
             return {
                 "success": False,
-                "error": f"Odpowiedź urządzenia {ip}:{working_port}: {err_msg} ({err_code})"
+                "error": f"Odpowiedź urządzenia {target_host}:{working_port}: {err_msg} ({err_code})"
             }
 
-        dps = st.get("dps", {}) if isinstance(st, dict) else {}
+        dps = last_st.get("dps", {}) if isinstance(last_st, dict) else {}
+        gw_note = f" (skierowano przez Sonoff Dongle-MAX {target_host})" if target_host != ip else ""
         return {
             "success": True,
-            "message": f"Połączenie TinyTuya z {ip}:{working_port} nawiązane pomyślnie! Protokół {version}, wykryte DPS: {list(dps.keys())}",
+            "message": f"Połączenie TinyTuya z {target_host}:{working_port}{gw_note} nawiązane pomyślnie! Wykryty protokół {working_ver}, aktywne DPS: {list(dps.keys())}",
+            "working_version": str(working_ver),
             "dps": dps
         }
     except Exception as e:

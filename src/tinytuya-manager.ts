@@ -70,7 +70,7 @@ const scriptPath = join(process.cwd(), 'scripts', 'tinytuya_bridge.py');
 /**
  * Bezpieczne wywołanie skryptu Python tinytuya_bridge.py
  */
-function runBridgeScript(payload: Record<string, unknown>, timeoutMs = 4500): Promise<string> {
+function runBridgeScript(payload: Record<string, unknown>, timeoutMs = 12000): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!existsSync(scriptPath)) {
       reject(new Error(`Nie odnaleziono skryptu pomocniczego TinyTuya: ${scriptPath}`));
@@ -189,7 +189,7 @@ export async function executeTinyTuyaCommand(
   };
 
   try {
-    const rawOutput = await runBridgeScript(payload, 4500);
+    const rawOutput = await runBridgeScript(payload, 10000);
     const parsed = JSON.parse(rawOutput) as TinyTuyaResult;
     return parsed;
   } catch (err) {
@@ -231,7 +231,7 @@ export async function getTinyTuyaStatus(
   };
 
   try {
-    const rawOutput = await runBridgeScript(payload, 4000);
+    const rawOutput = await runBridgeScript(payload, 10000);
     const parsed = JSON.parse(rawOutput) as TinyTuyaResult;
     return parsed;
   } catch (err) {
@@ -284,7 +284,7 @@ export async function testTinyTuyaConnection(
   };
 
   try {
-    const rawOutput = await runBridgeScript(payload, 3500);
+    const rawOutput = await runBridgeScript(payload, 10000);
     const parsed = JSON.parse(rawOutput);
     if (parsed.success) {
       return {
@@ -324,7 +324,7 @@ export async function testTinyTuyaConnection(
  */
 export async function scanTinyTuyaLan(): Promise<TinyTuyaScanResult> {
   try {
-    const rawOutput = await runBridgeScript({ action: 'scan' }, 4000);
+    const rawOutput = await runBridgeScript({ action: 'scan' }, 10000);
     const parsed = JSON.parse(rawOutput) as TinyTuyaScanResult;
     return parsed;
   } catch (err) {
