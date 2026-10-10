@@ -1126,21 +1126,66 @@ export class Telemetry {
     });
   }
 
-  isAutoDiscovering = signal<boolean>(false);
+  readonly isAutoDiscovering = signal<boolean>(false);
+  readonly dongleMaxDiscoveredDevices = signal<Array<{
+    ip: string;
+    deviceId?: string;
+    model: string;
+    switch?: string;
+    rssi?: number;
+    power?: number;
+    voltage?: number;
+    current?: number;
+    isAlreadyAdded: boolean;
+  }>>([]);
 
-  autoDiscoverDongleMaxSubnet(): Promise<{ success: boolean; message: string; discoveredCount: number }> {
+  autoDiscoverDongleMaxSubnet(subnet?: string): Promise<{
+    success: boolean;
+    message: string;
+    discoveredCount: number;
+    allDetected: Array<{
+      ip: string;
+      deviceId?: string;
+      model: string;
+      switch?: string;
+      rssi?: number;
+      power?: number;
+      voltage?: number;
+      current?: number;
+      isAlreadyAdded: boolean;
+    }>;
+  }> {
     this.isAutoDiscovering.set(true);
     return new Promise((resolve) => {
       this.http
-        .post<{ success: boolean; message: string; discovered: Device[] }>('/api/dongle-max/auto-discover', {})
+        .post<{
+          success: boolean;
+          message: string;
+          discovered: Device[];
+          allDetected?: Array<{
+            ip: string;
+            deviceId?: string;
+            model: string;
+            switch?: string;
+            rssi?: number;
+            power?: number;
+            voltage?: number;
+            current?: number;
+            isAlreadyAdded: boolean;
+          }>;
+        }>('/api/dongle-max/auto-discover', { subnet })
         .subscribe({
           next: (res) => {
             this.isAutoDiscovering.set(false);
+            if (res?.allDetected) {
+              this.dongleMaxDiscoveredDevices.set(res.allDetected);
+            }
             this.fetchDevices();
             resolve({
               success: res?.success || false,
               message: res?.message || 'Ukończono skanowanie podsieci.',
               discoveredCount: res?.discovered?.length || 0,
+              allDetected: res?.allDetected || [],
             });
           },
           error: (err) => {
@@ -1149,6 +1194,7 @@ export class Telemetry {
               success: false,
               message: `Błąd podczas auto-odkrywania: ${err.message || 'Brak odpowiedzi'}`,
               discoveredCount: 0,
+              allDetected: [],
             });
           },
         });

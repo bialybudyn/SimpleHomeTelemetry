@@ -74,6 +74,13 @@ import { DongleMaxConfig } from '../../models/telemetry.models';
         </div>
       </div>
 
+      @if (autoDiscoverMessage()) {
+        <div class="p-3 rounded-xl bg-cyan-950/80 border border-cyan-800 text-cyan-200 text-xs flex items-center gap-2">
+          <mat-icon class="text-sm !w-4 !h-4 text-cyan-400">info</mat-icon>
+          <span>{{ autoDiscoverMessage() }}</span>
+        </div>
+      }
+
       <!-- Kafelki architektury (Koordynator vs Router) -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
         <!-- Kafelek Tryb 1: Koordynator Sieciowy -->
@@ -527,9 +534,12 @@ export class DongleMaxManager {
     this.telemetry.testDongleMaxConnection(host, port);
   }
 
+  readonly autoDiscoverMessage = signal<string>('');
+
   triggerAutoDiscover(): void {
     this.telemetry.autoDiscoverDongleMaxSubnet().then((res) => {
-      alert(res.message);
+      this.autoDiscoverMessage.set(res.message);
+      setTimeout(() => this.autoDiscoverMessage.set(''), 6000);
     });
   }
 

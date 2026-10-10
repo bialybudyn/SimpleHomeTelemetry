@@ -3213,9 +3213,20 @@ app.post('/api/sonoff/device/add', (req: Request, res: Response) => {
 // ==========================================
 // AUTOMATYCZNE ODKRYWANIE GNIAZDEK W PODSIECI DONGLEMAX & ZIGBEE MESH
 // ==========================================
-async function performDongleMaxAutoDiscovery(): Promise<{
+async function performDongleMaxAutoDiscovery(customSubnet?: string, customIps?: string[]): Promise<{
   success: boolean;
   discovered: Device[];
+  allDetected: Array<{
+    ip: string;
+    deviceId?: string;
+    model: string;
+    switch?: string;
+    rssi?: number;
+    power?: number;
+    voltage?: number;
+    current?: number;
+    isAlreadyAdded: boolean;
+  }>;
   message: string;
 }> {
   console.log('[AUTO-DISCOVERY] Uruchamianie automatycznego skanowania podsieci DongleMAX & Zigbee Mesh...');
@@ -3231,11 +3242,30 @@ async function performDongleMaxAutoDiscovery(): Promise<{
   }
 
   const newlyDiscovered: Device[] = [];
+  const allDetectedMap = new Map<string, {
+    ip: string;
+    deviceId?: string;
+    model: string;
+    switch?: string;
+    rssi?: number;
+    power?: number;
+    voltage?: number;
+    current?: number;
+    isAlreadyAdded: boolean;
+  }>();
 
-  // 2. Określ podsieć Dongle MAX na podstawie konfiguracji hosta oraz lokalnych interfejsów
+  // 2. Określ podsieci do przeskanowania
   const subnetsToScan = new Set<string>();
 
-  // A. Z interfejsu sieciowego hosta
+  // A. Zawsze skanuj podsieć Access Pointa Dongle-MAX (domyślnie 192.168.4.x)
+  subnetsToScan.add('192.168.4');
+
+  // B. Z opcjonalnego parametru zapytania
+  if (customSubnet && /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(customSubnet.trim())) {
+    subnetsToScan.add(customSubnet.trim());
+  }
+
+  // C. Z interfejsu sieciowego hosta
   const localNet = getLocalNetworkDetails();
   if (localNet.ip) {
     const parts = localNet.ip.split('.');
@@ -3244,7 +3274,7 @@ async function performDongleMaxAutoDiscovery(): Promise<{
     }
   }
 
-  // B. Z adresu Dongle MAX (host)
+  // D. Z adresu Dongle MAX (host)
   if (dongleMaxConfig.host) {
     const cleanH = dongleMaxConfig.host.trim();
     if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(cleanH)) {
@@ -3253,26 +3283,64 @@ async function performDongleMaxAutoDiscovery(): Promise<{
     }
   }
 
-  // C. Z trybu SoftAP jeśli aktywny
+  // E. Z trybu SoftAP jeśli aktywny
   if (dongleMaxConfig.wifi_softap_ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(dongleMaxConfig.wifi_softap_ip)) {
     const parts = dongleMaxConfig.wifi_softap_ip.split('.');
     subnetsToScan.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
   }
 
-  // Domyślne znane podsieci domowe
-  if (subnetsToScan.size === 0) {
-    subnetsToScan.add('192.168.1');
-    subnetsToScan.add('192.168.0');
+  // F. Domyślne podsieci domowe
+  subnetsToScan.add('192.168.1');
+  subnetsToScan.add('192.168.0');
+
+  // Zbieranie adresów IP z tablicy ARP
+  const arpIps: string[] = [];
+  try {
+    if (existsSync('/proc/net/arp')) {
+      const arpContent = readFileSync('/proc/net/arp', 'utf-8');
+      const lines = arpContent.split('\n').slice(1);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts[0] && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(parts[0])) {
+          arpIps.push(parts[0]);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  if (Array.isArray(customIps)) {
+    for (const ip of customIps) {
+      if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip.trim())) {
+        arpIps.push(ip.trim());
+      }
+    }
   }
 
   // 3. Skanuj każdą podsieć w poszukiwaniu urządzeń Sonoff eWeLink LAN (port 8081)
   for (const baseSubnet of subnetsToScan) {
     try {
-      const scanRes = await scanSonoffLan(baseSubnet);
+      const relevantArp = arpIps.filter((ip) => ip.startsWith(`${baseSubnet}.`));
+      const scanRes = await scanSonoffLan(baseSubnet, relevantArp);
       if (scanRes.success && Array.isArray(scanRes.discovered)) {
         for (const found of scanRes.discovered) {
           const ieee = `wifi_${found.ip.replace(/\./g, '_')}`;
-          if (!devices.has(ieee)) {
+          const isAdded = devices.has(ieee);
+
+          allDetectedMap.set(found.ip, {
+            ip: found.ip,
+            deviceId: found.deviceId,
+            model: found.model || 'SONOFF Smartplug S60TFP Wi-Fi 16A',
+            switch: found.switch || 'off',
+            rssi: found.rssi,
+            power: found.power,
+            voltage: found.voltage,
+            current: found.current,
+            isAlreadyAdded: isAdded,
+          });
+
+          if (!isAdded) {
             const nowIso = new Date().toISOString();
             const newPlug: Device = {
               ieee_address: ieee,
@@ -3294,9 +3362,9 @@ async function performDongleMaxAutoDiscovery(): Promise<{
               last_temperature: null,
               last_humidity: null,
               state: found.switch === 'on' ? 'ON' : 'OFF',
-              power: found.switch === 'on' ? 140 : 0,
-              voltage: 230,
-              current: found.switch === 'on' ? 0.6 : 0,
+              power: found.power ?? (found.switch === 'on' ? 140 : 0),
+              voltage: found.voltage ?? 230,
+              current: found.current ?? (found.switch === 'on' ? 0.6 : 0),
               energy: 0.1,
               overload_protection: true,
               overload_power_threshold: 4000,
@@ -3304,13 +3372,16 @@ async function performDongleMaxAutoDiscovery(): Promise<{
             };
             devices.set(ieee, newPlug);
             newlyDiscovered.push(newPlug);
-            addDeviceLog('created', ieee, newPlug.friendly_name, `[AUTO-DISCOVERY] Wykryto nowe gniazdko Sonoff S60 w podsieci DongleMAX (${found.ip})`);
+            addDeviceLog('created', ieee, newPlug.friendly_name, `[AUTO-DISCOVERY] Wykryto i automatycznie zarejestrowano nowe gniazdko Sonoff S60 w podsieci DongleMAX (${found.ip})`);
           } else {
             const existing = devices.get(ieee)!;
             existing.connection_status = 'online';
             existing.last_seen = new Date().toISOString();
             if (found.switch) {
               existing.state = found.switch === 'on' ? 'ON' : 'OFF';
+            }
+            if (typeof found.power === 'number') {
+              existing.power = found.power;
             }
           }
         }
@@ -3325,25 +3396,30 @@ async function performDongleMaxAutoDiscovery(): Promise<{
     broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
   }
 
+  const allDetected = Array.from(allDetectedMap.values());
   const totalCount = devices.size;
   const msg = newlyDiscovered.length > 0
-    ? `Wykryto i automatycznie połączono ${newlyDiscovered.length} nowych gniazdek w podsieci DongleMAX! Razem w panelu: ${totalCount} urządzeń.`
-    : `Skanowanie ukończone. Wszystkie sparowane gniazdka w podsieci DongleMAX (${totalCount}) są już widoczne w panelu.`;
+    ? `Wykryto i automatycznie dodano ${newlyDiscovered.length} nowych gniazdek w podsieci DongleMAX! Razem w panelu: ${totalCount} urządzeń.`
+    : allDetected.length > 0
+      ? `Znaleziono ${allDetected.length} urządzeń Sonoff w podsieci DongleMAX. Wszystkie są zsynchronizowane z panelem.`
+      : `Skanowanie podsieci Dongle-MAX ukończone. Brak nowych urządzeń w trybie parowania.`;
 
   return {
     success: true,
     discovered: newlyDiscovered,
+    allDetected,
     message: msg,
   };
 }
 
-app.post(['/api/dongle-max/auto-discover', '/api/devices/scan-donglemax-subnet'], async (_req: Request, res: Response) => {
+app.post(['/api/dongle-max/auto-discover', '/api/devices/scan-donglemax-subnet'], async (req: Request, res: Response) => {
   try {
-    const result = await performDongleMaxAutoDiscovery();
+    const { subnet, ips } = req.body || {};
+    const result = await performDongleMaxAutoDiscovery(subnet, ips);
     res.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ success: false, discovered: [], message: `Błąd auto-odkrywania: ${msg}` });
+    res.status(500).json({ success: false, discovered: [], allDetected: [], message: `Błąd auto-odkrywania: ${msg}` });
   }
 });
 

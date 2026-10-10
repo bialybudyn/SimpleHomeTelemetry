@@ -338,30 +338,91 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
 }
 
 /**
- * Skanowanie sieci lokalnej w poszukiwaniu urządzeń Sonoff na porcie 8081
+ * Skanowanie sieci lokalnej oraz podsieci Dongle-MAX w poszukiwaniu urządzeń Sonoff na porcie 8081
  */
-export async function scanSonoffLan(baseSubnet = '192.168.1'): Promise<{
+export async function scanSonoffLan(baseSubnet = '192.168.1', extraIps: string[] = []): Promise<{
   success: boolean;
-  discovered: Array<{ ip: string; deviceId?: string; model: string; switch?: string }>;
+  discovered: Array<{
+    ip: string;
+    deviceId?: string;
+    model: string;
+    switch?: string;
+    rssi?: number;
+    power?: number;
+    voltage?: number;
+    current?: number;
+  }>;
   message: string;
 }> {
-  // Sprawdzamy kilka najczęstszych adresów w podsieci z krótkim timeoutem
-  const candidateIps: string[] = [];
-  for (let i = 100; i <= 140; i++) {
-    candidateIps.push(`${baseSubnet}.${i}`);
+  const candidateIps = new Set<string>();
+
+  // Dodatkowe adresy z argumentu (np. z tabeli ARP lub Web Console)
+  for (const ip of extraIps) {
+    if (ip && ip.trim()) candidateIps.add(ip.trim());
   }
 
-  const results: Array<{ ip: string; deviceId?: string; model: string; switch?: string }> = [];
+  // Dla podsieci Access Pointa Dongle-MAX (192.168.4.x) sprawdzamy od .2 do .30 oraz .100-.120
+  if (baseSubnet === '192.168.4') {
+    for (let i = 2; i <= 30; i++) {
+      candidateIps.add(`${baseSubnet}.${i}`);
+    }
+    for (let i = 100; i <= 120; i++) {
+      candidateIps.add(`${baseSubnet}.${i}`);
+    }
+  } else {
+    // Standardowa podsieć domowa (np. 192.168.1.x, 192.168.0.x)
+    for (let i = 2; i <= 25; i++) {
+      candidateIps.add(`${baseSubnet}.${i}`);
+    }
+    for (let i = 100; i <= 165; i++) {
+      candidateIps.add(`${baseSubnet}.${i}`);
+    }
+  }
 
-  const checks = candidateIps.map(async (ip) => {
+  // Sprawdzenie Dongle-M Web Console pod adresem bramy (np. 192.168.4.1 lub baseSubnet.1)
+  try {
+    const gatewayIp = `${baseSubnet}.1`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const resp = await fetch(`http://${gatewayIp}/api/dhcp/clients`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timer);
+    if (resp && resp.ok) {
+      const data = await resp.json().catch(() => null);
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          if (item?.ip) candidateIps.add(String(item.ip));
+        }
+      }
+    }
+  } catch {
+    // Web console może nie być dostępna na tym IP - kontynuujemy skanowanie
+  }
+
+  const results: Array<{
+    ip: string;
+    deviceId?: string;
+    model: string;
+    switch?: string;
+    rssi?: number;
+    power?: number;
+    voltage?: number;
+    current?: number;
+  }> = [];
+
+  const checks = Array.from(candidateIps).map(async (ip) => {
     try {
-      const res = await sendSonoffHttpRequest(ip, '/zeroconf/info', {}, undefined, undefined, 800);
+      const res = await sendSonoffHttpRequest(ip, '/zeroconf/info', {}, undefined, undefined, 750);
       if (res.error === 0 && res.data) {
+        const d = res.data;
         results.push({
           ip,
           deviceId: (res['deviceid'] as string) || undefined,
-          model: 'SONOFF Smartplug S60TFP',
-          switch: (res.data['switch'] as string) || 'off',
+          model: 'SONOFF Smartplug S60TFP Wi-Fi 16A',
+          switch: (d['switch'] as string) || 'off',
+          rssi: typeof d['rssi'] === 'number' ? d['rssi'] : undefined,
+          power: typeof d['power'] === 'number' ? d['power'] : undefined,
+          voltage: typeof d['voltage'] === 'number' ? d['voltage'] : undefined,
+          current: typeof d['current'] === 'number' ? d['current'] : undefined,
         });
       }
     } catch {
@@ -374,6 +435,6 @@ export async function scanSonoffLan(baseSubnet = '192.168.1'): Promise<{
   return {
     success: true,
     discovered: results,
-    message: `Przeskanowano podsieć ${baseSubnet}.0/24, odnaleziono ${results.length} urządzeń Sonoff w trybie LAN.`,
+    message: `Przeskanowano podsieć ${baseSubnet}.0/24 (${candidateIps.size} adresów), odnaleziono ${results.length} aktywnych urządzeń Sonoff LAN.`,
   };
 }
