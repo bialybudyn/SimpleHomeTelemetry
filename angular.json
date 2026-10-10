@@ -62,7 +62,8 @@
                 "nodemailer",
                 "ws",
                 "tuyapi",
-                "qrcode"
+                "qrcode",
+                "ewelink-api"
               ]
             }
           },

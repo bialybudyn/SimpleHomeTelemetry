@@ -862,10 +862,8 @@ export class WeatherView implements OnDestroy {
     ];
 
     if (showSensor && sensorTemp !== null && sensorTemp !== undefined) {
-      const sensorData = history.map((_, idx) => {
-        const offset = Math.sin((idx / history.length) * Math.PI * 2) * 0.4;
-        return Math.round((Number(sensorTemp) + offset) * 10) / 10;
-      });
+      const sensorVal = Math.round(Number(sensorTemp) * 10) / 10;
+      const sensorData = history.map(() => sensorVal);
 
       const sensorName = this.weather.selectedSensor()?.friendly_name || 'Czujnik domowy';
       datasets.push({

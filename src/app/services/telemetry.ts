@@ -128,6 +128,7 @@ export class Telemetry {
       this.fetchMqttStatus();
       this.fetchWifiStatus();
       this.fetchNotifications();
+      this.loadEwelinkConfig();
       this.fetchDongleMaxConfig();
       this.initRealtime();
 
@@ -1138,6 +1139,82 @@ export class Telemetry {
     current?: number;
     isAlreadyAdded: boolean;
   }>>([]);
+
+  readonly ewelinkConfig = signal<{
+    email?: string;
+    phoneNumber?: string;
+    region?: string;
+    connected?: boolean;
+    lastSync?: string;
+    devices?: Array<{
+      deviceId: string;
+      apiKey: string;
+      name: string;
+      model: string;
+      switch?: string;
+      online: boolean;
+      ip?: string;
+    }>;
+  }>({ region: 'eu', connected: false });
+
+  loadEwelinkConfig(): void {
+    this.http.get<{ success: boolean; config: unknown }>('/api/sonoff/ewelink/config').subscribe({
+      next: (res) => {
+        if (res && res.config) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          this.ewelinkConfig.set(res.config as any);
+        }
+      },
+      error: () => {},
+    });
+  }
+
+  loginEwelink(emailOrPhone: string, password: string, region = 'eu'): Promise<{ success: boolean; message: string; devicesCount: number }> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string; devices: unknown[] }>('/api/sonoff/ewelink/login', {
+        email_or_phone: emailOrPhone,
+        password,
+        region,
+      }).subscribe({
+        next: (res) => {
+          this.fetchDevices();
+          this.loadEwelinkConfig();
+          resolve({
+            success: res?.success || false,
+            message: res?.message || 'Zalogowano pomyślnie do eWeLink!',
+            devicesCount: res?.devices?.length || 0,
+          });
+        },
+        error: (err) => {
+          resolve({
+            success: false,
+            message: err?.error?.message || 'Błąd logowania do eWeLink.',
+            devicesCount: 0,
+          });
+        },
+      });
+    });
+  }
+
+  controlEwelinkDevice(deviceId: string, state: 'on' | 'off'): Promise<{ success: boolean; message: string }> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string }>('/api/sonoff/ewelink/control', {
+        device_id: deviceId,
+        state,
+      }).subscribe({
+        next: (res) => {
+          this.fetchDevices();
+          resolve(res);
+        },
+        error: (err) => {
+          resolve({
+            success: false,
+            message: err?.error?.message || 'Błąd sterowania eWeLink.',
+          });
+        },
+      });
+    });
+  }
 
   autoDiscoverDongleMaxSubnet(subnet?: string): Promise<{
     success: boolean;

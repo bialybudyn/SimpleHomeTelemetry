@@ -30,6 +30,9 @@ import {
   sendSonoffLanCommand,
   testSonoffLanConnection,
   scanSonoffLan,
+  loginAndSyncEwelink,
+  controlEwelinkDevice,
+  getStoredEwelinkConfig,
 } from './sonoff-lan-service';
 import {
   getImgwSynopStations,
@@ -584,179 +587,6 @@ function loadCache() {
     }
   }
 
-  if (devices.size === 0) {
-    const now = Date.now();
-    const seedDevices: Device[] = [
-      {
-        ieee_address: '0x00124b001a1b2c01',
-        friendly_name: 'Czujnik C Kanciapia',
-        model: 'SNZB-02D',
-        category: 'sensor',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: new Date(now - 7 * 60 * 1000).toISOString(),
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'online',
-        battery: 100,
-        linkquality: 184,
-        last_temperature: 22.8,
-        last_humidity: 61.2,
-      },
-      {
-        ieee_address: '0x00124b001a1b2c02',
-        friendly_name: 'Czujnik C Salon',
-        model: 'SNZB-02',
-        category: 'sensor',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: new Date(now - 2 * 60 * 1000).toISOString(),
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'online',
-        battery: 100,
-        linkquality: 136,
-        last_temperature: 21.5,
-        last_humidity: 69.2,
-      },
-      {
-        ieee_address: '0x00124b001a1b2c03',
-        friendly_name: 'Czujnik C Gabinet',
-        model: 'SNZB-02',
-        category: 'sensor',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: new Date(now - 30 * 1000).toISOString(),
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'online',
-        battery: 100,
-        linkquality: 52,
-        last_temperature: 20.7,
-        last_humidity: 76.4,
-      },
-      {
-        ieee_address: '0x00124b001a1b2c04',
-        friendly_name: 'Czujnik C Sypialnia',
-        model: 'SNZB-02',
-        category: 'sensor',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: null,
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'offline',
-        battery: null,
-        voltage: 230,
-        linkquality: null,
-        last_temperature: null,
-        last_humidity: null,
-      },
-      {
-        ieee_address: '0x00124b001a1b2c05',
-        friendly_name: 'Czujnik C Na Zewnątrz',
-        model: 'SNZB-02P',
-        category: 'sensor',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: new Date(now - 10 * 1000).toISOString(),
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'online',
-        battery: 100,
-        linkquality: 184,
-        last_temperature: 15.3,
-        last_humidity: 90.5,
-      },
-      {
-        ieee_address: '0x00124b001a1b2c06',
-        friendly_name: 'Termostat Kanciapia',
-        model: 'TRVZB',
-        category: 'climate',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: new Date(now - 15 * 1000).toISOString(),
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'online',
-        battery: 58,
-        linkquality: 144,
-        current_heating_setpoint: 23.0,
-        occupied_heating_setpoint: 23.0,
-        local_temperature: 22.4,
-        last_temperature: 22.4,
-        last_humidity: null,
-        running_state: 'heat',
-        system_mode: 'heat',
-        child_lock: 'LOCK',
-      },
-      {
-        ieee_address: '0x00124b001a1b2c07',
-        friendly_name: 'Czujnik ruchu korytarz',
-        model: 'SNZB-03',
-        category: 'occupancy',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: new Date(now - 5 * 1000).toISOString(),
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'online',
-        battery: 100,
-        linkquality: 188,
-        last_temperature: null,
-        last_humidity: null,
-        occupancy: true,
-      },
-      {
-        ieee_address: '0x00124b001a1b2c08',
-        friendly_name: 'Czujnik otwarcie Drzwi',
-        model: 'SNZB-04',
-        category: 'contact',
-        vendor: 'Sonoff',
-        protocol: 'zigbee',
-        last_seen: new Date(now - 8 * 1000).toISOString(),
-        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-        is_deleted: false,
-        connection_status: 'online',
-        battery: 100,
-        linkquality: 132,
-        last_temperature: null,
-        last_humidity: null,
-        contact: true,
-      },
-    ];
-
-    for (const d of seedDevices) {
-      devices.set(d.ieee_address, d);
-      const points: TelemetryPoint[] = [];
-      const baseTemp = d.last_temperature ?? 21.0;
-      const baseHum = d.last_humidity ?? 60.0;
-      for (let i = 24; i >= 0; i--) {
-        const time = new Date(now - i * 3600 * 1000).toISOString();
-        points.push({
-          id: currentId++,
-          device_ieee: d.ieee_address,
-          temperature: d.last_temperature !== null ? +(baseTemp + Math.sin(i / 3) * 1.5).toFixed(1) : null,
-          humidity: d.last_humidity !== null ? +(baseHum + Math.cos(i / 3) * 4).toFixed(1) : null,
-          battery: d.battery,
-          linkquality: d.linkquality,
-          timestamp: time,
-        });
-      }
-      telemetryStore.set(d.ieee_address, points);
-    }
-    saveDevicesCache();
-    saveTelemetryCache();
-    console.log(`[CACHE] Zainicjalizowano domyślne urządzenia i historię (${devices.size} urządzeń).`);
-  }
   console.log(`[CACHE] Łącznie załadowano ${devices.size} urządzeń z rejestru cache.`);
 }
 
@@ -3208,6 +3038,113 @@ app.post('/api/sonoff/device/add', (req: Request, res: Response) => {
     message: `Dodano gniazdko SONOFF Smartplug S60TFP Wi-Fi (${devName} - ${cleanIp})!`,
     device: dev,
   });
+});
+
+// 4. Pobranie konfiguracji i stanu połączenia z kontem eWeLink
+app.get('/api/sonoff/ewelink/config', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    config: getStoredEwelinkConfig(),
+  });
+});
+
+// 5. Logowanie do konta eWeLink i synchronizacja urządzeń wraz z pobraniem kluczy lokalnych (DeviceKey / API Key)
+app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
+  const { email_or_phone, password, region } = req.body || {};
+  if (!email_or_phone || !password) {
+    res.status(400).json({ success: false, message: 'Wymagany jest email/telefon oraz hasło do konta eWeLink' });
+    return;
+  }
+
+  try {
+    const result = await loginAndSyncEwelink(email_or_phone, password, region || 'eu');
+    if (result.success && Array.isArray(result.devices)) {
+      for (const dev of result.devices) {
+        // Znajdź czy urządzenie już istnieje
+        let existingDev = Array.from(devices.values()).find(
+          (d) => d.sonoff_device_id === dev.deviceId || (d.ip_address && d.ip_address === dev.ip)
+        );
+
+        const nowIso = new Date().toISOString();
+        if (!existingDev) {
+          const defaultIp = dev.deviceId === '1002729f67' ? '192.168.4.4' : (dev.ip || `192.168.4.${Math.floor(Math.random() * 20) + 2}`);
+          const ieee = `wifi_${defaultIp.replace(/\./g, '_')}`;
+          const newPlug: Device = {
+            ieee_address: ieee,
+            friendly_name: dev.name || `Gniazdko Sonoff (${dev.deviceId})`,
+            model: dev.model || 'SONOFF Smartplug S60TPF Wi-Fi 16A',
+            category: 'plug',
+            vendor: 'SONOFF / eWeLink',
+            protocol: 'wifi',
+            ip_address: defaultIp,
+            sonoff_device_id: dev.deviceId,
+            sonoff_api_key: dev.apiKey,
+            last_seen: nowIso,
+            added_at: nowIso,
+            first_seen: nowIso,
+            is_deleted: false,
+            connection_status: dev.online ? 'online' : 'offline',
+            battery: null,
+            linkquality: 100,
+            last_temperature: null,
+            last_humidity: null,
+            state: dev.switch === 'on' ? 'ON' : 'OFF',
+            power: dev.power ?? (dev.switch === 'on' ? 140 : 0),
+            voltage: dev.voltage ?? 230,
+            current: dev.current ?? (dev.switch === 'on' ? 0.6 : 0),
+            energy: 0.12,
+            overload_protection: true,
+            overload_power_threshold: 4000,
+            overload_current_threshold: 16,
+          };
+          devices.set(ieee, newPlug);
+          addDeviceLog('created', ieee, newPlug.friendly_name, `[eWeLink Sync] Zsynchronizowano gniazdko ${dev.name} (${dev.deviceId}) z konta eWeLink!`);
+        } else {
+          existingDev.sonoff_api_key = dev.apiKey;
+          existingDev.sonoff_device_id = dev.deviceId;
+          existingDev.state = dev.switch === 'on' ? 'ON' : 'OFF';
+          existingDev.connection_status = dev.online ? 'online' : 'offline';
+          if (dev.name) existingDev.friendly_name = dev.name;
+          if (dev.power !== undefined) existingDev.power = dev.power;
+        }
+      }
+      triggerSaveDevices();
+      broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+    }
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: `Błąd eWeLink: ${msg}` });
+  }
+});
+
+// 6. Bezpośrednie sterowanie urządzeniem przez eWeLink
+app.post('/api/sonoff/ewelink/control', async (req: Request, res: Response) => {
+  const { device_id, state } = req.body || {};
+  if (!device_id || !state) {
+    res.status(400).json({ success: false, message: 'Wymagane device_id oraz state (on/off)' });
+    return;
+  }
+
+  try {
+    const resControl = await controlEwelinkDevice(String(device_id), state === 'ON' || state === 'on' ? 'on' : 'off');
+    if (resControl.success) {
+      for (const dev of devices.values()) {
+        if (dev.sonoff_device_id === device_id) {
+          dev.state = state.toUpperCase();
+          dev.last_seen = new Date().toISOString();
+          dev.connection_status = 'online';
+          broadcastEvent({ type: 'device_updated', device: dev });
+          break;
+        }
+      }
+      triggerSaveDevices();
+    }
+    res.json(resControl);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: `Błąd sterowania eWeLink: ${msg}` });
+  }
 });
 
 // ==========================================

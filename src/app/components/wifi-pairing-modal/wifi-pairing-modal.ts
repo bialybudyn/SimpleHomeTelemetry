@@ -2,11 +2,12 @@ import {
   ChangeDetectionStrategy,
   Component,
   OnInit,
+  computed,
   inject,
   output,
   signal,
 } from '@angular/core';
-import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
+import { ReactiveFormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { Telemetry } from '../../services/telemetry';
 import { DeviceCategory } from '../../models/telemetry.models';
@@ -45,7 +46,7 @@ interface DetectedSonoffPlug {
                 </span>
               </h3>
               <p class="text-xs text-slate-400">
-                Automatyczne wykrywanie w sieci Sonoff Dongle-MAX oraz integracja z Tuya Smart Life
+                Bezpośrednie sterowanie Sonoff S60TPF, pobieranie kluczy eWeLink oraz integracja z Tuya
               </p>
             </div>
           </div>
@@ -77,8 +78,8 @@ interface DetectedSonoffPlug {
           >
             <mat-icon class="text-base !w-4 !h-4">power</mat-icon>
             <div class="text-left leading-tight">
-              <div>SONOFF / Dongle-MAX</div>
-              <div class="text-[10px] font-normal opacity-80">S60TFP, eWeLink LAN, SoftAP 192.168.4.x</div>
+              <div>SONOFF / eWeLink LAN</div>
+              <div class="text-[10px] font-normal opacity-80">S60TPF (192.168.4.4), Dongle-MAX, eWeLink Sync</div>
             </div>
           </button>
 
@@ -109,196 +110,208 @@ interface DetectedSonoffPlug {
         <div class="p-4 sm:p-6 space-y-6 overflow-y-auto custom-scrollbar flex-1">
 
           <!-- ========================================================================= -->
-          <!-- SEKCJA 1: SONOFF & DONGLE-MAX (AUTOMATYCZNE WYKRYWANIE W SIECI AP / LAN)   -->
+          <!-- SEKCJA 1: SONOFF & DONGLE-MAX                                             -->
           <!-- ========================================================================= -->
           @if (activeBrand() === 'sonoff') {
             <div class="space-y-5">
               
-              <!-- KARTA STATUSU ACCESS POINTA DONGLE-MAX -->
-              <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3 relative overflow-hidden">
-                <div class="absolute right-0 top-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none"></div>
-
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+              <!-- 1. DEDYKOWANA KARTA WYKRYTEGO GNIAZDKA S60TPF Z TWOJEJ SIECI -->
+              <div class="p-4 rounded-xl bg-gradient-to-r from-cyan-950/60 via-slate-900 to-slate-950 border border-cyan-500/40 space-y-3 relative overflow-hidden">
+                <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
-                    <mat-icon class="text-cyan-400 text-lg !w-5 !h-5">cell_tower</mat-icon>
-                    <span class="text-xs font-bold text-white tracking-wide uppercase">Sieć Access Pointa Sonoff Dongle-MAX</span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <a
-                      href="https://dongle.sonoff.tech/guide/dongle-m/web_console/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="text-[11px] font-mono text-cyan-400 hover:text-cyan-300 underline flex items-center gap-1"
-                    >
-                      <span>Web Console Dongle-M</span>
-                      <mat-icon class="text-[11px] !w-3 !h-3">open_in_new</mat-icon>
-                    </a>
-                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      AP Gotowy
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span class="text-xs font-bold text-white tracking-wide uppercase">
+                      Twoje Gniazdko SONOFF S60TPF (Wykryte w sieci Dongle-MAX)
                     </span>
+                  </div>
+                  @if (isS60InPanel()) {
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      <mat-icon class="text-xs !w-3.5 !h-3.5 text-emerald-400">check_circle</mat-icon>
+                      Zarejestrowane w Panelu
+                    </span>
+                  } @else {
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      Wykryte w sieci (Gotowe)
+                    </span>
+                  }
+                </div>
+
+                <!-- Dane techniczne ze zrzutu ekranu Bonjour / mDNS -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                  <div class="p-2 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span class="text-slate-500 text-[10px] block">Adres IP w sieci:</span>
+                    <span class="text-cyan-300 font-bold block">192.168.4.4</span>
+                  </div>
+                  <div class="p-2 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span class="text-slate-500 text-[10px] block">Device ID (eWeLink):</span>
+                    <span class="text-white font-bold block">1002729f67</span>
+                  </div>
+                  <div class="p-2 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span class="text-slate-500 text-[10px] block">Model sprzętowy:</span>
+                    <span class="text-emerald-400 font-bold block">S60TPF (ESP32-C3)</span>
+                  </div>
+                  <div class="p-2 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span class="text-slate-500 text-[10px] block">Szyfrowanie Zeroconf:</span>
+                    <span class="text-amber-300 font-bold block">encrypt = true (Port 8081)</span>
                   </div>
                 </div>
 
-                <!-- Parametry sieci Dongle-MAX -->
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
-                  <div class="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <span class="text-slate-500 text-[10px] block">SSID Access Pointa:</span>
-                    <span class="text-cyan-300 font-bold truncate block">
-                      {{ telemetry.dongleMaxAp().ssid || (telemetry.dongleMaxConfig()?.wifi_softap_ssid || 'Dongle-M_AP / Sonoff') }}
-                    </span>
-                  </div>
-                  <div class="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <span class="text-slate-500 text-[10px] block">Brama AP / Konsola:</span>
-                    <span class="text-white font-bold block">192.168.4.1</span>
-                  </div>
-                  <div class="p-2 rounded-lg bg-slate-900 border border-slate-800/80 col-span-2 sm:col-span-1">
-                    <span class="text-slate-500 text-[10px] block">Podsieć DHCP gniazdek:</span>
-                    <span class="text-emerald-400 font-bold block">192.168.4.0/24</span>
-                  </div>
-                </div>
-
-                <!-- Instrukcja szybkiego łączenia przyciskiem -->
-                <div class="p-2.5 rounded-lg bg-cyan-950/30 border border-cyan-800/40 text-xs text-slate-300 space-y-1">
-                  <div class="flex items-center gap-1.5 text-cyan-300 font-semibold text-[11px]">
-                    <mat-icon class="text-xs !w-3.5 !h-3.5">touch_app</mat-icon>
-                    <span>Jak działa automatyczne połączenie przyciskiem:</span>
-                  </div>
-                  <p class="text-[11px] text-slate-300 leading-relaxed">
-                    Gdy przytrzymasz przycisk na gniazdku Sonoff (np. S60TFP) przez <strong class="text-white">5 sekund</strong>, gniazdko wchodzi w tryb parowania i natychmiast łączy się z wystawionym przez Dongle-MAX Access Pointem lub Twoją siecią Wi-Fi. Poniższy automat samoczynnie przeczyta podsieć i zarejestruje gniazdko w panelu.
+                <div class="flex items-center justify-between pt-1">
+                  <p class="text-[11px] text-slate-300">
+                    Gniazdko jest widoczne w sieci Dongle-MAX. Zarejestruj je bezpośrednio w panelu jednym kliknięciem:
                   </p>
+                  <button
+                    type="button"
+                    (click)="addS60Directly()"
+                    class="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-md shadow-cyan-950/60 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <mat-icon class="text-xs !w-4 !h-4">power</mat-icon>
+                    <span>{{ isS60InPanel() ? 'Odśwież Gniazdko w Pulpicie' : 'Dodaj Gniazdko S60TPF do Pulpitu' }}</span>
+                  </button>
                 </div>
               </div>
 
-              <!-- GŁÓWNY PRZYCISK AUTOMATU SKANUJĄCEGO -->
-              <div class="space-y-3">
-                <button
-                  type="button"
-                  (click)="runDongleMaxAutoScan()"
-                  [disabled]="isAutoScanning()"
-                  class="w-full flex items-center justify-center gap-2.5 px-5 py-3.5 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white text-xs sm:text-sm font-bold shadow-xl shadow-cyan-950/60 transition-all cursor-pointer border border-cyan-400/30"
-                >
-                  <mat-icon class="text-base !w-5 !h-5" [class.animate-spin]="isAutoScanning()">
-                    {{ isAutoScanning() ? 'radar' : 'auto_mode' }}
-                  </mat-icon>
-                  <span>
-                    {{ isAutoScanning() ? 'Przeszukiwanie sieci Dongle-MAX & eWeLink LAN...' : 'Uruchom automat wyszukiwania gniazdek w sieci Dongle-MAX' }}
-                  </span>
-                </button>
-
-                @if (autoScanStatusMessage()) {
-                  <div class="p-3 rounded-xl bg-slate-950 border border-cyan-800/60 flex items-center justify-between text-xs font-mono">
-                    <span class="text-cyan-300 flex items-center gap-2">
-                      <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">info</mat-icon>
-                      {{ autoScanStatusMessage() }}
+              <!-- 2. SYNCHRONIZACJA Z KONTEM EWELINK (AUTOMATYCZNE POBRANIE KLUCZY ENCRYPT=TRUE) -->
+              <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3.5">
+                <div class="flex items-center justify-between flex-wrap gap-2 border-b border-slate-800/80 pb-2.5">
+                  <div class="flex items-center gap-2">
+                    <mat-icon class="text-cyan-400 text-base !w-4 !h-4">cloud_sync</mat-icon>
+                    <span class="text-xs font-bold text-white uppercase tracking-wider">
+                      Synchronizacja z kontem eWeLink (Pobieranie DeviceKey / API Key)
                     </span>
-                    <span class="text-[10px] text-slate-400">Podsieci: 192.168.4.x, LAN</span>
+                  </div>
+                  @if (telemetry.ewelinkConfig().connected) {
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      Połączono z eWeLink ({{ telemetry.ewelinkConfig().devices?.length || 0 }} urządzeń)
+                    </span>
+                  }
+                </div>
+
+                <div class="p-3 rounded-lg bg-cyan-950/30 border border-cyan-800/40 text-xs text-slate-300 space-y-1.5">
+                  <div class="font-semibold text-cyan-300 text-[11px] flex items-center gap-1.5">
+                    <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">vpn_key</mat-icon>
+                    <span>Dlaczego to jest klucz do bezpośredniego sterowania:</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed">
+                    Jak widać na Twoim zrzucie ekranu z Bonjour mDNS, gniazdko ma włączone <code class="text-amber-300 font-mono">encrypt = true</code>. Do bezpośredniego sterowania w sieci LAN (port 8081) wymaga unikalnego 32-znakowego klucza <strong class="text-white">DeviceKey</strong> przypisanego przez eWeLink. Po zalogowaniu panel pobierze ten klucz z Twojego konta i umożliwi natychmiastowe sterowanie lokalne i chmurowe!
+                  </p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="space-y-1">
+                    <label for="ewelinkEmailField" class="text-[11px] font-semibold text-slate-300 block">
+                      Email lub numer telefonu do aplikacji eWeLink
+                    </label>
+                    <input
+                      id="ewelinkEmailField"
+                      type="text"
+                      [value]="ewelinkEmail()"
+                      (input)="ewelinkEmail.set($any($event.target).value)"
+                      placeholder="np. user@example.com lub +48600100200"
+                      class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                    />
+                  </div>
+                  <div class="space-y-1">
+                    <label for="ewelinkPasswordField" class="text-[11px] font-semibold text-slate-300 block">
+                      Hasło do konta eWeLink
+                    </label>
+                    <input
+                      id="ewelinkPasswordField"
+                      type="password"
+                      [value]="ewelinkPassword()"
+                      (input)="ewelinkPassword.set($any($event.target).value)"
+                      placeholder="Wpisz hasło eWeLink..."
+                      class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between flex-wrap gap-2 pt-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] text-slate-400">Region:</span>
+                    <select
+                      [value]="ewelinkRegion()"
+                      (change)="ewelinkRegion.set($any($event.target).value)"
+                      class="px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono cursor-pointer"
+                    >
+                      <option value="eu">EU (Europa - zalecane)</option>
+                      <option value="us">US (Ameryka)</option>
+                      <option value="as">AS (Azja)</option>
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    (click)="loginEwelinkAccount()"
+                    [disabled]="isLoggingEwelink() || !ewelinkEmail().trim() || !ewelinkPassword().trim()"
+                    class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:from-slate-800 disabled:to-slate-800 text-white text-xs font-bold shadow-md shadow-cyan-950/50 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <mat-icon class="text-xs !w-4 !h-4" [class.animate-spin]="isLoggingEwelink()">sync</mat-icon>
+                    <span>{{ isLoggingEwelink() ? 'Logowanie i pobieranie kluczy...' : '🔑 Pobierz klucze urządzeń z eWeLink' }}</span>
+                  </button>
+                </div>
+
+                @if (ewelinkMessage()) {
+                  <div
+                    class="p-2.5 rounded-lg border text-xs font-mono"
+                    [class.bg-emerald-950/40]="ewelinkSuccess()"
+                    [class.border-emerald-700/60]="ewelinkSuccess()"
+                    [class.text-emerald-300]="ewelinkSuccess()"
+                    [class.bg-rose-950/40]="!ewelinkSuccess()"
+                    [class.border-rose-700/60]="!ewelinkSuccess()"
+                    [class.text-rose-300]="!ewelinkSuccess()"
+                  >
+                    {{ ewelinkMessage() }}
                   </div>
                 }
               </div>
 
-              <!-- LISTA WYKRYTYCH GNIAZDEK W PODSIECI DONGLE-MAX -->
-              @if (detectedSonoffPlugs().length > 0) {
-                <div class="p-4 rounded-xl bg-slate-950 border border-cyan-500/40 space-y-3">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2 text-xs font-bold text-white">
-                      <mat-icon class="text-emerald-400 text-sm !w-4 !h-4">check_circle</mat-icon>
-                      <span>Wykryte gniazdka w sieci ({{ detectedSonoffPlugs().length }})</span>
-                    </div>
-                    <span class="text-[10px] text-slate-400 font-mono">eWeLink Zeroconf Port 8081</span>
-                  </div>
-
-                  <div class="space-y-2 max-h-56 overflow-y-auto">
-                    @for (plug of detectedSonoffPlugs(); track plug.ip) {
-                      <div class="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
-                        <div class="space-y-0.5">
-                          <div class="flex items-center gap-2">
-                            <span class="font-bold text-white">{{ plug.ip }}</span>
-                            <span class="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/60">
-                              {{ plug.model }}
-                            </span>
-                            @if (plug.switch) {
-                              <span
-                                class="text-[10px] px-1.5 py-0.2 rounded font-bold"
-                                [class.bg-emerald-950]="plug.switch === 'on'"
-                                [class.text-emerald-300]="plug.switch === 'on'"
-                                [class.bg-slate-800]="plug.switch !== 'on'"
-                                [class.text-slate-400]="plug.switch !== 'on'"
-                              >
-                                {{ plug.switch === 'on' ? 'STAN: ON' : 'STAN: OFF' }}
-                              </span>
-                            }
-                          </div>
-                          <div class="text-[11px] text-slate-400 flex items-center gap-3">
-                            @if (plug.deviceId) {
-                              <span>Device ID: {{ plug.deviceId }}</span>
-                            }
-                            @if (plug.rssi) {
-                              <span>RSSI: {{ plug.rssi }} dBm</span>
-                            }
-                            @if (plug.power !== undefined && plug.power !== null) {
-                              <span class="text-amber-300 font-semibold">Moc: {{ plug.power }} W</span>
-                            }
-                          </div>
-                        </div>
-
-                        <div>
-                          @if (plug.isAlreadyAdded) {
-                            <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-bold">
-                              <mat-icon class="text-xs !w-3.5 !h-3.5">verified</mat-icon>
-                              <span>W Pulpicie</span>
-                            </span>
-                          } @else {
-                            <button
-                              type="button"
-                              (click)="addDiscoveredSonoff(plug)"
-                              class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-950/50 transition-all cursor-pointer"
-                            >
-                              <mat-icon class="text-xs !w-3.5 !h-3.5">add</mat-icon>
-                              <span>Dodaj automatycznie</span>
-                            </button>
-                          }
-                        </div>
-                      </div>
-                    }
-                  </div>
-                </div>
-              }
-
-              <!-- ROZWIJANA OPCJA RĘCZNEGO DODANIA PO IP DLA SONOFF -->
-              <div class="border-t border-slate-800/80 pt-3">
+              <!-- 3. RĘCZNE WPROWADZENIE AP I KLUCZA (PORT 8081) -->
+              <div class="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
                 <button
                   type="button"
-                  (click)="showManualSonoff.set(!showManualSonoff())"
-                  class="flex items-center gap-1 text-xs text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                  (click)="showManualKeySection.set(!showManualKeySection())"
+                  class="flex items-center justify-between w-full text-xs font-bold text-slate-300 hover:text-white transition-colors cursor-pointer"
                 >
-                  <mat-icon class="text-xs !w-3.5 !h-3.5">{{ showManualSonoff() ? 'expand_less' : 'expand_more' }}</mat-icon>
-                  <span>{{ showManualSonoff() ? 'Ukryj ręczne dodawanie po IP dla Sonoff' : 'Dodaj gniazdko Sonoff po wpisanym IP ręcznie (opcjonalnie)' }}</span>
+                  <div class="flex items-center gap-2">
+                    <mat-icon class="text-xs !w-4 !h-4 text-cyan-400">tune</mat-icon>
+                    <span>Ręczne wpisanie DeviceKey (dla zaawansowanych)</span>
+                  </div>
+                  <mat-icon class="text-xs !w-4 !h-4">{{ showManualKeySection() ? 'expand_less' : 'expand_more' }}</mat-icon>
                 </button>
 
-                @if (showManualSonoff()) {
-                  <div class="mt-3 p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                @if (showManualKeySection()) {
+                  <div class="space-y-3 pt-2 border-t border-slate-800/80">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       <div class="space-y-1">
-                        <label for="sonoffManualIp" class="text-[11px] font-semibold text-slate-300 block">Adres IP gniazdka Sonoff</label>
+                        <label for="manualS60Ip" class="text-[10px] font-semibold text-slate-400 block">Adres IP</label>
                         <input
-                          id="sonoffManualIp"
+                          id="manualS60Ip"
                           type="text"
-                          [value]="sonoffManualIp()"
-                          (input)="sonoffManualIp.set($any($event.target).value)"
-                          placeholder="np. 192.168.4.12 lub 192.168.1.160"
-                          class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                          [value]="manualIpField()"
+                          (input)="manualIpField.set($any($event.target).value)"
+                          class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono"
                         />
                       </div>
                       <div class="space-y-1">
-                        <label for="sonoffManualName" class="text-[11px] font-semibold text-slate-300 block">Nazwa w panelu</label>
+                        <label for="manualS60Id" class="text-[10px] font-semibold text-slate-400 block">Device ID</label>
                         <input
-                          id="sonoffManualName"
+                          id="manualS60Id"
                           type="text"
-                          [value]="sonoffManualName()"
-                          (input)="sonoffManualName.set($any($event.target).value)"
-                          placeholder="np. Gniazdko S60TFP Kuchnia"
-                          class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                          [value]="manualIdField()"
+                          (input)="manualIdField.set($any($event.target).value)"
+                          class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono"
+                        />
+                      </div>
+                      <div class="space-y-1">
+                        <label for="manualS60Key" class="text-[10px] font-semibold text-slate-400 block">Klucz API Key / DeviceKey</label>
+                        <input
+                          id="manualS60Key"
+                          type="text"
+                          [value]="manualKeyField()"
+                          (input)="manualKeyField.set($any($event.target).value)"
+                          placeholder="32 znaki..."
+                          class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono"
                         />
                       </div>
                     </div>
@@ -306,26 +319,24 @@ interface DetectedSonoffPlug {
                     <div class="flex items-center justify-between pt-1">
                       <button
                         type="button"
-                        (click)="testSonoffManual()"
-                        [disabled]="isTestingSonoff() || !sonoffManualIp().trim()"
+                        (click)="testManualSonoffKey()"
                         class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-300 border border-cyan-500/40 flex items-center gap-1 transition-all cursor-pointer"
                       >
-                        <mat-icon class="text-xs !w-3.5 !h-3.5" [class.animate-spin]="isTestingSonoff()">network_check</mat-icon>
-                        <span>{{ isTestingSonoff() ? 'Test...' : 'Testuj połączenie Sonoff (Port 8081)' }}</span>
+                        <mat-icon class="text-xs !w-3.5 !h-3.5">network_check</mat-icon>
+                        <span>Testuj połączenie szyfrowane AES (Port 8081)</span>
                       </button>
 
                       <button
                         type="button"
-                        (click)="addSonoffManual()"
-                        [disabled]="isAddingSonoff() || !sonoffManualIp().trim()"
+                        (click)="saveManualSonoffWithKey()"
                         class="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all cursor-pointer"
                       >
-                        <span>{{ isAddingSonoff() ? 'Dodawanie...' : 'Zarejestruj w Panelu' }}</span>
+                        <span>Zapisz w Panelu</span>
                       </button>
                     </div>
 
-                    @if (sonoffTestMsg()) {
-                      <span class="text-[11px] font-mono block text-cyan-400">{{ sonoffTestMsg() }}</span>
+                    @if (manualTestMsg()) {
+                      <span class="text-[11px] font-mono text-cyan-400 block">{{ manualTestMsg() }}</span>
                     }
                   </div>
                 }
@@ -335,12 +346,11 @@ interface DetectedSonoffPlug {
           }
 
           <!-- ========================================================================= -->
-          <!-- SEKCJA 2: TUYA & SMART LIFE (SKAN LAN, KOD QR ORAZ RĘCZNE DODAWANIE)       -->
+          <!-- SEKCJA 2: TUYA & SMART LIFE                                               -->
           <!-- ========================================================================= -->
           @if (activeBrand() === 'tuya') {
             <div class="space-y-5">
               
-              <!-- BANER TRYBU TUYA: AUTOMATYCZNY SKAN LUB RĘCZNIE -->
               <div class="flex items-center justify-between flex-wrap gap-2 p-3 rounded-xl bg-slate-950 border border-slate-800">
                 <div class="flex items-center gap-2">
                   <mat-icon class="text-amber-400 text-base !w-4 !h-4">radar</mat-icon>
@@ -368,7 +378,6 @@ interface DetectedSonoffPlug {
                 </div>
               </div>
 
-              <!-- WYNIKI AUTOMATYCZNEGO SKANOWANIA TUYA -->
               @if (tuyaDiscovered().length > 0) {
                 <div class="p-3.5 rounded-xl bg-amber-950/30 border border-amber-600/40 space-y-2">
                   <div class="flex items-center justify-between text-xs font-mono text-amber-300">
@@ -401,7 +410,7 @@ interface DetectedSonoffPlug {
               <!-- FORMULARZ DODAWANIA URZĄDZENIA TUYA -->
               <div class="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3.5">
                 <div class="text-xs font-semibold text-slate-300">
-                  Konfiguracja parametrów lokalnych TinyTuya:
+                  Parametry lokalne TinyTuya:
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -423,7 +432,7 @@ interface DetectedSonoffPlug {
                       type="text"
                       [value]="tuyaName()"
                       (input)="tuyaName.set($any($event.target).value)"
-                      placeholder="np. Götze & Jensen GOW 007 / Gniazdko 16A"
+                      placeholder="np. Wentylator GOW 007 / Gniazdko 16A"
                       class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-amber-400 focus:outline-none"
                     />
                   </div>
@@ -486,7 +495,6 @@ interface DetectedSonoffPlug {
                   </div>
                 </div>
 
-                <!-- Test połączenia TinyTuya -->
                 <div class="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-800">
                   <button
                     type="button"
@@ -546,16 +554,25 @@ export class WifiPairingModal implements OnInit {
   // Główny podział: 'sonoff' | 'tuya'
   readonly activeBrand = signal<'sonoff' | 'tuya'>('sonoff');
 
-  // --- SONOFF & DONGLE-MAX STATE ---
-  readonly isAutoScanning = signal<boolean>(false);
-  readonly autoScanStatusMessage = signal<string>('');
-  readonly detectedSonoffPlugs = signal<DetectedSonoffPlug[]>([]);
-  readonly showManualSonoff = signal<boolean>(false);
-  readonly sonoffManualIp = signal<string>('192.168.4.10');
-  readonly sonoffManualName = signal<string>('Gniazdko Sonoff S60TFP Wi-Fi');
-  readonly isTestingSonoff = signal<boolean>(false);
-  readonly isAddingSonoff = signal<boolean>(false);
-  readonly sonoffTestMsg = signal<string>('');
+  // Sprawdzenie czy S60TPF jest już w panelu
+  readonly isS60InPanel = computed(() => {
+    return this.telemetry.devices().some((d) => d.ip_address === '192.168.4.4' || d.sonoff_device_id === '1002729f67');
+  });
+
+  // --- EWELINK SYNC STATE ---
+  readonly ewelinkEmail = signal<string>('b.zbudniewek@gmail.com');
+  readonly ewelinkPassword = signal<string>('');
+  readonly ewelinkRegion = signal<string>('eu');
+  readonly isLoggingEwelink = signal<boolean>(false);
+  readonly ewelinkMessage = signal<string>('');
+  readonly ewelinkSuccess = signal<boolean>(false);
+
+  // --- MANUAL KEY STATE ---
+  readonly showManualKeySection = signal<boolean>(false);
+  readonly manualIpField = signal<string>('192.168.4.4');
+  readonly manualIdField = signal<string>('1002729f67');
+  readonly manualKeyField = signal<string>('');
+  readonly manualTestMsg = signal<string>('');
 
   // --- TUYA STATE ---
   readonly isScanningTuya = signal<boolean>(false);
@@ -572,84 +589,82 @@ export class WifiPairingModal implements OnInit {
   readonly tuyaTestOk = signal<boolean>(false);
 
   ngOnInit(): void {
-    // Na starcie pobierz już wykryte urządzenia z serwisu telemetrycznego jeśli istnieją
-    const cached = this.telemetry.dongleMaxDiscoveredDevices();
-    if (cached && cached.length > 0) {
-      this.detectedSonoffPlugs.set(cached);
+    const cfg = this.telemetry.ewelinkConfig();
+    if (cfg?.email) {
+      this.ewelinkEmail.set(cfg.email);
     }
   }
 
-  // --- METODY SONOFF & DONGLE-MAX ---
-
-  async runDongleMaxAutoScan(): Promise<void> {
-    this.isAutoScanning.set(true);
-    this.autoScanStatusMessage.set('Skanowanie podsieci Access Pointa Dongle-MAX (192.168.4.x) oraz sieci domowej...');
-
-    try {
-      const res = await this.telemetry.autoDiscoverDongleMaxSubnet();
-      this.isAutoScanning.set(false);
-      this.autoScanStatusMessage.set(res.message);
-
-      if (res.allDetected && res.allDetected.length > 0) {
-        this.detectedSonoffPlugs.set(res.allDetected);
-      }
-    } catch {
-      this.isAutoScanning.set(false);
-      this.autoScanStatusMessage.set('Błąd podczas wykonywania skanu sieci Dongle-MAX.');
-    }
-  }
-
-  async addDiscoveredSonoff(plug: DetectedSonoffPlug): Promise<void> {
+  // Bezpośrednie 1-klikowe dodanie S60TPF z rozpoznanych danych Bonjour
+  async addS60Directly(): Promise<void> {
     const ok = await this.telemetry.addSonoffDevice({
-      ip_address: plug.ip,
-      name: `Gniazdko Sonoff S60 (${plug.ip})`,
-      device_id: plug.deviceId,
+      ip_address: '192.168.4.4',
+      name: 'Gniazdko Sonoff S60TPF',
+      device_id: '1002729f67',
     });
-
-    if (ok) {
-      plug.isAlreadyAdded = true;
-      this.detectedSonoffPlugs.update((list) =>
-        list.map((p) => (p.ip === plug.ip ? { ...p, isAlreadyAdded: true } : p)),
-      );
-    }
-  }
-
-  testSonoffManual(): void {
-    const ip = this.sonoffManualIp().trim();
-    if (!ip) return;
-
-    this.isTestingSonoff.set(true);
-    this.sonoffTestMsg.set('');
-
-    this.telemetry.testSonoffDevice({ ip }).subscribe({
-      next: (res) => {
-        this.isTestingSonoff.set(false);
-        this.sonoffTestMsg.set(res.message);
-      },
-      error: (err) => {
-        this.isTestingSonoff.set(false);
-        this.sonoffTestMsg.set(err?.error?.message || 'Brak odpowiedzi portu 8081 eWeLink LAN.');
-      },
-    });
-  }
-
-  async addSonoffManual(): Promise<void> {
-    const ip = this.sonoffManualIp().trim();
-    if (!ip) return;
-
-    this.isAddingSonoff.set(true);
-    const ok = await this.telemetry.addSonoffDevice({
-      ip_address: ip,
-      name: this.sonoffManualName().trim(),
-    });
-    this.isAddingSonoff.set(false);
 
     if (ok) {
       this.closeModal.emit();
     }
   }
 
-  // --- METODY TUYA ---
+  // Synchronizacja z kontem eWeLink
+  async loginEwelinkAccount(): Promise<void> {
+    const login = this.ewelinkEmail().trim();
+    const pass = this.ewelinkPassword().trim();
+    if (!login || !pass) return;
+
+    this.isLoggingEwelink.set(true);
+    this.ewelinkMessage.set('');
+
+    try {
+      const res = await this.telemetry.loginEwelink(login, pass, this.ewelinkRegion());
+      this.isLoggingEwelink.set(false);
+      this.ewelinkSuccess.set(res.success);
+      this.ewelinkMessage.set(res.message);
+    } catch {
+      this.isLoggingEwelink.set(false);
+      this.ewelinkSuccess.set(false);
+      this.ewelinkMessage.set('Błąd połączenia z serwerem logowania eWeLink.');
+    }
+  }
+
+  testManualSonoffKey(): void {
+    const ip = this.manualIpField().trim();
+    const id = this.manualIdField().trim();
+    const key = this.manualKeyField().trim();
+    if (!ip) return;
+
+    this.manualTestMsg.set('Testowanie połączenia AES port 8081...');
+    this.telemetry.testSonoffDevice({ ip, device_id: id, api_key: key }).subscribe({
+      next: (res) => {
+        this.manualTestMsg.set(res.message);
+      },
+      error: (err) => {
+        this.manualTestMsg.set(err?.error?.message || 'Brak odpowiedzi portu 8081.');
+      },
+    });
+  }
+
+  async saveManualSonoffWithKey(): Promise<void> {
+    const ip = this.manualIpField().trim();
+    const id = this.manualIdField().trim();
+    const key = this.manualKeyField().trim();
+    if (!ip) return;
+
+    const ok = await this.telemetry.addSonoffDevice({
+      ip_address: ip,
+      name: 'Gniazdko Sonoff S60TPF',
+      device_id: id || undefined,
+      api_key: key || undefined,
+    });
+
+    if (ok) {
+      this.closeModal.emit();
+    }
+  }
+
+  // --- TUYA METHODS ---
 
   scanTuyaLan(): void {
     this.isScanningTuya.set(true);

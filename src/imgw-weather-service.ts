@@ -432,42 +432,27 @@ function saveCacheToDisk() {
   }
 }
 
-// Generates diurnal 24h curve anchor for cold start if history is empty
-function seedDiurnalHistory(station: ImgwSynopStation): ImgwHourlyPoint[] {
-  const currentTemp = station.temperatura !== null && station.temperatura !== undefined ? Number(station.temperatura) : 15;
-  const currentHum = station.wilgotnosc_wzgledna !== null && station.wilgotnosc_wzgledna !== undefined ? Number(station.wilgotnosc_wzgledna) : 70;
-  const currentPress = station.cisnienie !== null && station.cisnienie !== undefined ? Number(station.cisnienie) : 1013;
-  const currentWind = station.predkosc_wiatru !== null && station.predkosc_wiatru !== undefined ? Number(station.predkosc_wiatru) : 3;
-  const currentRain = station.suma_opadu !== null && station.suma_opadu !== undefined ? Number(station.suma_opadu) : 0;
+// Generates initial real history point from genuine IMGW measurement
+function createInitialStationPoint(station: ImgwSynopStation): ImgwHourlyPoint[] {
+  const currentTemp = station.temperatura !== null && station.temperatura !== undefined ? Number(station.temperatura) : null;
+  const currentHum = station.wilgotnosc_wzgledna !== null && station.wilgotnosc_wzgledna !== undefined ? Number(station.wilgotnosc_wzgledna) : null;
+  const currentPress = station.cisnienie !== null && station.cisnienie !== undefined ? Number(station.cisnienie) : null;
+  const currentWind = station.predkosc_wiatru !== null && station.predkosc_wiatru !== undefined ? Number(station.predkosc_wiatru) : null;
+  const currentRain = station.suma_opadu !== null && station.suma_opadu !== undefined ? Number(station.suma_opadu) : null;
 
   const currentHour = parseInt(station.godzina_pomiaru || '12', 10);
-  const now = new Date();
-  const points: ImgwHourlyPoint[] = [];
-
-  for (let i = 23; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 3600 * 1000);
-    const hour = (currentHour - i + 24) % 24;
-    // Diurnal variation: warmest around 14:00-15:00, coolest around 05:00-06:00
-    const diurnalOffset = Math.sin(((hour - 8) / 24) * 2 * Math.PI) * 3.5;
-    const currentHourOffset = Math.sin(((currentHour - 8) / 24) * 2 * Math.PI) * 3.5;
-    const adjustedTemp = Math.round((currentTemp - currentHourOffset + diurnalOffset) * 10) / 10;
-    const adjustedHum = Math.min(99, Math.max(30, Math.round(currentHum - (diurnalOffset * 2.5))));
-    const adjustedPress = Math.round((currentPress + Math.cos(hour / 4) * 1.5) * 10) / 10;
-    const adjustedWind = Math.max(0, Math.round((currentWind + Math.sin(hour / 3) * 1.2) * 10) / 10);
-
-    const padHour = String(hour).padStart(2, '0');
-    points.push({
-      timestamp: d.toISOString(),
+  const padHour = String(currentHour).padStart(2, '0');
+  return [
+    {
+      timestamp: new Date().toISOString(),
       time_label: `${padHour}:00`,
-      temperatura: adjustedTemp,
-      wilgotnosc: adjustedHum,
-      cisnienie: adjustedPress,
-      wiatr: adjustedWind,
-      opad: i === 0 ? currentRain : 0,
-    });
-  }
-
-  return points;
+      temperatura: currentTemp,
+      wilgotnosc: currentHum,
+      cisnienie: currentPress,
+      wiatr: currentWind,
+      opad: currentRain,
+    },
+  ];
 }
 
 // Fetch all synoptic data
@@ -492,7 +477,7 @@ export async function getImgwSynopStations(force = false): Promise<ImgwSynopStat
         if (!st.id_stacji) continue;
         let points = stationHistoryStore.get(st.id_stacji);
         if (!points || points.length === 0) {
-          points = seedDiurnalHistory(st);
+          points = createInitialStationPoint(st);
           stationHistoryStore.set(st.id_stacji, points);
         } else {
           // Check if latest measurement is already recorded
@@ -576,7 +561,7 @@ export async function getImgwStationHistory(idOrName: string): Promise<{
 
   let points = stationHistoryStore.get(st.id_stacji);
   if (!points || points.length === 0) {
-    points = seedDiurnalHistory(st);
+    points = createInitialStationPoint(st);
     stationHistoryStore.set(st.id_stacji, points);
     saveCacheToDisk();
   }
