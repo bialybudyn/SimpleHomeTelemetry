@@ -60,6 +60,19 @@
       </button>
 
       <button
+        (click)="setTab('weather')"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'weather'"
+        [class.text-white]="activeTab() === 'weather'"
+        [class.shadow-sm]="activeTab() === 'weather'"
+        [class.text-slate-400]="activeTab() !== 'weather'"
+        [class.hover:text-white]="activeTab() !== 'weather'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4 text-cyan-400">cloud</mat-icon>
+        <span class="font-bold">Pogoda IMGW</span>
+      </button>
+
+      <button
         (click)="setTab('settings')"
         class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
         [class.bg-slate-800]="activeTab() === 'settings'"
@@ -268,6 +281,120 @@
 <!-- GŁÓWNA ZAWARTOŚĆ -->
 <main class="max-w-7xl mx-auto px-4 lg:px-8 py-8">
 
+  <!-- BANER AUTOMATYCZNYCH OSTRZEŻEŃ IMGW DLA WYBRANEGO REGIONU (ALERT BANNER W WIDOKU GŁÓWNYM) -->
+  @if (weather.activeRegionWarningAlert(); as alert) {
+    <section
+      aria-label="Ostrzeżenia IMGW"
+      class="mb-6 p-4 rounded-2xl border shadow-2xl relative overflow-hidden transition-all animate-in fade-in slide-in-from-top-3"
+      [class.bg-rose-950]="alert.highestLevel >= 3"
+      [class.border-rose-600]="alert.highestLevel >= 3"
+      [class.text-rose-100]="alert.highestLevel >= 3"
+      [class.bg-amber-950]="alert.highestLevel < 3"
+      [class.border-amber-600]="alert.highestLevel < 3"
+      [class.text-amber-100]="alert.highestLevel < 3"
+    >
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        
+        <!-- Lewa strona: Ikona ostrzeżenia + Tytuł + Opis zjawiska -->
+        <div class="flex items-start gap-3.5 min-w-0">
+          <div
+            class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border shadow-inner"
+            [class.bg-rose-900]="alert.highestLevel >= 3"
+            [class.border-rose-500]="alert.highestLevel >= 3"
+            [class.text-rose-200]="alert.highestLevel >= 3"
+            [class.bg-amber-900]="alert.highestLevel < 3"
+            [class.border-amber-500]="alert.highestLevel < 3"
+            [class.text-amber-200]="alert.highestLevel < 3"
+          >
+            <mat-icon class="text-2xl animate-pulse">warning</mat-icon>
+          </div>
+
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              <span
+                class="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded border"
+                [class.bg-rose-900]="alert.highestLevel >= 3"
+                [class.border-rose-600]="alert.highestLevel >= 3"
+                [class.text-rose-200]="alert.highestLevel >= 3"
+                [class.bg-amber-900]="alert.highestLevel < 3"
+                [class.border-amber-600]="alert.highestLevel < 3"
+                [class.text-amber-200]="alert.highestLevel < 3"
+              >
+                Ostrzeżenie IMGW-PIB · Stopień {{ alert.highestLevel }}
+              </span>
+
+              <span class="text-xs font-bold text-white flex items-center gap-1">
+                <span>Region: {{ alert.location.name }} ({{ alert.location.voivodeship }})</span>
+              </span>
+
+              <span
+                class="text-[10px] font-mono px-2 py-0.5 rounded bg-black/40 border border-white/10 text-white/90"
+              >
+                Aktywne zjawiska: {{ alert.warnings.length }}
+              </span>
+            </div>
+
+            <h3 class="text-sm md:text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+              <span>{{ alert.primaryWarning.zdarzenie }}</span>
+              @if (alert.primaryWarning.prawdopodobienstwo) {
+                <span class="text-xs font-normal text-white/80">({{ alert.primaryWarning.prawdopodobienstwo }}% szans)</span>
+              }
+            </h3>
+
+            <p class="text-xs text-white/90 mt-1 max-w-4xl line-clamp-2 leading-relaxed">
+              {{ alert.summary }}
+            </p>
+
+            <div class="flex flex-wrap items-center gap-3 text-[11px] font-mono text-white/70 mt-1.5">
+              <span>Ważność: {{ alert.primaryWarning.data_od }} — {{ alert.primaryWarning.data_do }}</span>
+              @if (alert.primaryWarning.biuro) {
+                <span>· Biuro: {{ alert.primaryWarning.biuro }}</span>
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- Prawa strona: Przyciski akcji (Szczegóły, Otwórz Pogoda IMGW, Zamknij powiadomienie) -->
+        <div class="flex items-center gap-2 shrink-0 self-end md:self-center">
+          <button
+            type="button"
+            (click)="showWeatherWarningDetailsModal.set(true)"
+            class="px-3 py-1.5 text-xs font-bold rounded-xl bg-black/40 hover:bg-black/60 text-white border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            title="Wyświetl pełną treść ostrzeżeń IMGW"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5">read_more</mat-icon>
+            <span>Szczegóły</span>
+          </button>
+
+          <button
+            type="button"
+            (click)="setTab('weather')"
+            class="px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md"
+            [class.bg-rose-600]="alert.highestLevel >= 3"
+            [class.hover:bg-rose-500]="alert.highestLevel >= 3"
+            [class.bg-amber-600]="alert.highestLevel < 3"
+            [class.hover:bg-amber-500]="alert.highestLevel < 3"
+            class="text-white"
+            title="Przejdź do zakładki Pogoda IMGW"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5">cloud</mat-icon>
+            <span>Panel Pogody</span>
+          </button>
+
+          <button
+            type="button"
+            (click)="weather.dismissWarningAlert()"
+            class="p-1.5 rounded-xl bg-black/30 hover:bg-black/50 text-white/80 hover:text-white transition-colors cursor-pointer border border-white/10"
+            title="Ukryj powiadomienie o tym ostrzeżeniu"
+          >
+            <mat-icon class="text-base !w-4 !h-4">close</mat-icon>
+          </button>
+        </div>
+
+      </div>
+    </section>
+  }
+
   <!-- ZAKŁADKA 1: PULPIT NA ŻYWO (DASHBOARD) -->
   @if (activeTab() === 'dashboard') {
     <!-- PASEK STANU USŁUG W TLE (Mosquitto + Zigbee2MQTT + Dongle-M) -->
@@ -360,6 +487,11 @@
         </span>
       </div>
     }
+
+    <!-- WIDŻET POGODY IMGW DLA WYBRANEJ ULUBIONEJ LOKALIZACJI -->
+    <div class="mb-6">
+      <app-weather-widget (navigateToWeatherTab)="setTab('weather')"></app-weather-widget>
+    </div>
 
     <!-- 0. TOPOLOGIA HYBRYDOWA SIECI (POZA PULPITEM ZIGBEE) -->
     <div class="mb-10">
@@ -970,7 +1102,12 @@
     <app-analytics-view />
   }
 
-  <!-- ZAKŁADKA 3: USTAWIENIA SERWERA (ZBIORCZE) -->
+  <!-- ZAKŁADKA 4: POGODA IMGW-PIB -->
+  @if (activeTab() === 'weather') {
+    <app-weather-view />
+  }
+
+  <!-- ZAKŁADKA 5: USTAWIENIA SERWERA (ZBIORCZE) -->
   @if (activeTab() === 'settings') {
     <app-server-settings />
   }
@@ -1053,3 +1190,129 @@
     (closeModal)="closeTuyaQrModal()"
   ></app-tuya-qr-modal>
 }
+
+<!-- Modal Pełnych Szczegółów Ostrzeżeń IMGW dla Regionu -->
+@if (showWeatherWarningDetailsModal()) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+    <div class="bg-slate-900 border border-amber-600/60 rounded-3xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
+      <!-- Nagłówek modala -->
+      <div class="flex items-start justify-between gap-4 pb-4 border-b border-slate-800 shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-amber-950 border border-amber-600 flex items-center justify-center text-amber-400">
+            <mat-icon class="text-xl">warning</mat-icon>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-white tracking-tight">
+              Ostrzeżenia IMGW-PIB dla Regionu
+            </h3>
+            <p class="text-xs text-slate-400">
+              Miejscowość: <strong class="text-white">{{ weather.selectedLocation()?.name }}</strong> (woj. {{ weather.selectedLocation()?.voivodeship }})
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          (click)="showWeatherWarningDetailsModal.set(false)"
+          class="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+          title="Zamknij"
+        >
+          <mat-icon class="text-lg">close</mat-icon>
+        </button>
+      </div>
+
+      <!-- Lista szczegółowa ostrzeżeń -->
+      <div class="overflow-y-auto py-4 space-y-3.5 flex-1 pr-1">
+        @for (w of weather.regionWarnings(); track w.numer || w.zdarzenie + w.data_od) {
+          <div
+            class="p-4 rounded-2xl border space-y-2 text-xs"
+            [class.bg-rose-950/40]="w.stopien === '3' || w.stopien === 3"
+            [class.border-rose-700]="w.stopien === '3' || w.stopien === 3"
+            [class.bg-slate-950/80]="w.stopien !== '3' && w.stopien !== 3"
+            [class.border-amber-700/60]="w.stopien !== '3' && w.stopien !== 3"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-bold text-sm text-white flex items-center gap-2">
+                <mat-icon class="text-base" [class.text-rose-400]="w.type === 'hydro'" [class.text-amber-400]="w.type === 'meteo'">
+                  {{ w.type === 'hydro' ? 'waves' : 'thunderstorm' }}
+                </mat-icon>
+                <span>{{ w.zdarzenie }}</span>
+              </span>
+              <span
+                class="font-mono text-[10px] px-2.5 py-1 rounded-lg font-bold border"
+                [class.bg-rose-900]="w.stopien === '3' || w.stopien === 3"
+                [class.border-rose-600]="w.stopien === '3' || w.stopien === 3"
+                [class.text-rose-200]="w.stopien === '3' || w.stopien === 3"
+                [class.bg-amber-900/60]="w.stopien !== '3' && w.stopien !== 3"
+                [class.border-amber-700/60]="w.stopien !== '3' && w.stopien !== 3"
+                [class.text-amber-300]="w.stopien !== '3' && w.stopien !== 3"
+              >
+                Stopień {{ w.stopien }}
+              </span>
+            </div>
+
+            @if (w.przebieg) {
+              <p class="text-slate-200 leading-relaxed text-xs">
+                {{ w.przebieg }}
+              </p>
+            }
+
+            @if (w.komentarz) {
+              <p class="text-slate-400 text-[11px] italic">
+                Komentarz: {{ w.komentarz }}
+              </p>
+            }
+
+            <div class="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-400 font-mono">
+              <div>
+                <span class="text-slate-500">Okres ważności:</span>
+                <div class="text-slate-300">{{ w.data_od }} — {{ w.data_do }}</div>
+              </div>
+              @if (w.prawdopodobienstwo) {
+                <div>
+                  <span class="text-slate-500">Prawdopodobieństwo:</span>
+                  <div class="text-amber-400 font-bold">{{ w.prawdopodobienstwo }}%</div>
+                </div>
+              }
+              @if (w.biuro) {
+                <div class="sm:col-span-2">
+                  <span class="text-slate-500">Wydane przez:</span>
+                  <div class="text-slate-400">{{ w.biuro }}</div>
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Stopka modala -->
+      <div class="pt-4 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
+        <button
+          type="button"
+          (click)="weather.dismissWarningAlert(); showWeatherWarningDetailsModal.set(false)"
+          class="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+        >
+          Ukryj alert w widoku głównym
+        </button>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            (click)="setTab('weather'); showWeatherWarningDetailsModal.set(false)"
+            class="px-4 py-2 text-xs font-bold rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5">cloud</mat-icon>
+            <span>Przejdź do zakładki Pogoda</span>
+          </button>
+          <button
+            type="button"
+            (click)="showWeatherWarningDetailsModal.set(false)"
+            class="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-white transition-colors cursor-pointer"
+          >
+            Zamknij
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+

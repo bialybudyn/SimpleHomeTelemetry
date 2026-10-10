@@ -10,6 +10,7 @@ import { isPlatformBrowser } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import { CdkDragDrop, CdkDropList, CdkDrag, CdkDragHandle, moveItemInArray } from '@angular/cdk/drag-drop';
 import { Telemetry } from './services/telemetry';
+import { Weather } from './services/weather';
 import { Device, DeviceCategory } from './models/telemetry.models';
 import { DeviceCard } from './components/device-card/device-card';
 import { AnalyticsModal } from './components/analytics-modal/analytics-modal';
@@ -19,6 +20,8 @@ import { TopologyGraph } from './components/topology-graph/topology-graph';
 import { ServerSettings } from './components/server-settings/server-settings';
 import { ScenesBuilder } from './components/scenes-builder/scenes-builder';
 import { TuyaQrModal } from './components/tuya-qr-modal/tuya-qr-modal';
+import { WeatherView } from './components/weather-view/weather-view';
+import { WeatherWidget } from './components/weather-widget/weather-widget';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -36,6 +39,8 @@ import { TuyaQrModal } from './components/tuya-qr-modal/tuya-qr-modal';
     ServerSettings,
     ScenesBuilder,
     TuyaQrModal,
+    WeatherView,
+    WeatherWidget,
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -43,8 +48,12 @@ import { TuyaQrModal } from './components/tuya-qr-modal/tuya-qr-modal';
 export class App {
   private readonly platformId = inject(PLATFORM_ID);
   readonly telemetry = inject(Telemetry);
+  readonly weather = inject(Weather);
 
-  readonly activeTab = signal<'dashboard' | 'scenes' | 'analytics' | 'settings'>('dashboard');
+  // Stan modala / rozwinięcia szczegółów ostrzeżenia meteorologicznego
+  readonly showWeatherWarningDetailsModal = signal<boolean>(false);
+
+  readonly activeTab = signal<'dashboard' | 'scenes' | 'analytics' | 'settings' | 'weather'>('dashboard');
 
   // Stany zwijania pulpitów (Pulpit Zigbee oraz Pulpit Wi-Fi)
   readonly isZigbeeCollapsed = signal<boolean>(this.loadBoolean('z2m_zigbee_collapsed', false));
@@ -330,7 +339,7 @@ export class App {
     this.saveBoolean('z2m_wifi_collapsed', next);
   }
 
-  setTab(tab: 'dashboard' | 'scenes' | 'analytics' | 'settings'): void {
+  setTab(tab: 'dashboard' | 'scenes' | 'analytics' | 'settings' | 'weather'): void {
     this.activeTab.set(tab);
   }
 

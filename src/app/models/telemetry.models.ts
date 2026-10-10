@@ -13,6 +13,12 @@ export interface Device {
   tuya_product_name?: string | null;
   tuya_protocol_version?: string | null;
   dongle_gateway_ip?: string | null;
+
+  // SONOFF S60TFP / S60 Wi-Fi Smart Plug & eWeLink LAN
+  sonoff_device_id?: string | null;
+  sonoff_api_key?: string | null;
+  sonoff_firmware?: string | null;
+
   last_seen: string | null;
   added_at?: string | null;
   first_seen?: string | null;

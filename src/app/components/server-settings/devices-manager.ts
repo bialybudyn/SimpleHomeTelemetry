@@ -36,6 +36,23 @@ type SortDirection = 'asc' | 'desc';
 
         <div class="flex items-center gap-2 shrink-0">
           <button
+            (click)="triggerAutoDiscover()"
+            [disabled]="telemetry.isAutoDiscovering()"
+            class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer disabled:opacity-50"
+            title="Skanuj podsieć DongleMAX i sieć Zigbee w poszukiwaniu nowych gniazdek i urządzeń"
+          >
+            <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isAutoDiscovering()">manage_search</mat-icon>
+            <span>{{ telemetry.isAutoDiscovering() ? 'Skanowanie...' : '⚡ Auto-wyszukiwanie DongleMAX' }}</span>
+          </button>
+          <button
+            (click)="purgeAllDevices()"
+            class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 text-rose-300 text-xs font-semibold border border-rose-800/80 transition-all cursor-pointer"
+            title="Usuń przykładowe oraz zarejestrowane urządzenia i wyczyść historię"
+          >
+            <mat-icon class="text-sm !w-4 !h-4 text-rose-400">delete_sweep</mat-icon>
+            <span>Wyczyść rejestr urządzeń</span>
+          </button>
+          <button
             (click)="refreshData()"
             [disabled]="telemetry.isActionProcessing()"
             class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
@@ -896,5 +913,19 @@ export class DevicesManager {
     this.telemetry.testDeviceConnection(dev.ieee_address).then((res) => {
       alert(`Wynik testu połączenia dla ${dev.friendly_name}:\n\n${res.message}`);
     });
+  }
+
+  triggerAutoDiscover(): void {
+    this.telemetry.autoDiscoverDongleMaxSubnet().then((res) => {
+      alert(res.message);
+    });
+  }
+
+  purgeAllDevices(): void {
+    if (confirm('Czy na pewno chcesz usunąć wszystkie gniazdka/urządzenia z rejestru oraz skasować całą ich historię?')) {
+      this.telemetry.purgeAllDevices().then(() => {
+        this.clearSelection();
+      });
+    }
   }
 }

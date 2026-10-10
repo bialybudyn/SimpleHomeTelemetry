@@ -195,6 +195,25 @@ export class DeviceCatalog {
 
   readonly catalogItems: DeviceCatalogItem[] = [
     {
+      id: 'sonoff-s60tfp-wifi',
+      brand: 'Sonoff',
+      model: 'S60TFP / S60 Wi-Fi',
+      name: 'Sonoff Smartplug S60TFP Wi-Fi 16A (4000W)',
+      category: 'plug',
+      description: 'Nowoczesne inteligentne gniazdko wtyczkowe Wi-Fi 16A z dokładnym pomiarem zużycia energii (W, V, A, kWh) i systemem ochrony przeciążeniowej OPS. Komunikuje się w sieci domowej przez bezpośredni protokół eWeLink LAN (port 8081). Idealne rozwiązanie przy wyborze gniazdek Wi-Fi zamiast Zigbee!',
+      features: [
+        'Zdalne załączanie ON/OFF (Lokalny eWeLink LAN)',
+        'Obciążenie max 16A / 4000W (Schuko / Bolec Type E/F)',
+        'Pomiar energii w czasie rzeczywistym (W, V, A, kWh)',
+        'System ochrony przeciążeniowej OPS (Power/Voltage/Current)',
+        'Tryb impulsowy (Inching Mode / Auto-wyłączenie)',
+        'Stan po zaniku zasilania (Power-On Behavior)',
+        'Sterowanie diodą statusu Wi-Fi LED',
+      ],
+      batteryPowered: false,
+      pairingGuide: 'Podłącz do 230V, przytrzymaj przycisk przez 5 sekund (dioda miga w cyklu 2 krótkie + 1 długi). Połącz z siecią Wi-Fi 2.4GHz, a następnie dodaj w panelu po adresie IP.',
+    },
+    {
       id: 'sonoff-trvzb-gen2',
       brand: 'Sonoff',
       model: 'TRVZB Gen 2',

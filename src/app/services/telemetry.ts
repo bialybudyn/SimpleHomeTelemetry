@@ -1064,5 +1064,95 @@ export class Telemetry {
       { ieee_address, ...config }
     );
   }
+
+  // ==========================================
+  // METODY DLA SONOFF SMARTPLUG S60TFP WI-FI (eWeLink LAN)
+  // ==========================================
+
+  testSonoffDevice(payload: { ip: string; device_id?: string; api_key?: string }) {
+    return this.http.post<{ success: boolean; message: string; deviceInfo?: Record<string, unknown> }>(
+      '/api/sonoff/device/test',
+      payload
+    );
+  }
+
+  scanSonoffLan() {
+    return this.http.post<{
+      success: boolean;
+      discovered: Array<{ ip: string; deviceId?: string; model: string; switch?: string }>;
+      message: string;
+    }>('/api/sonoff/scan', {});
+  }
+
+  addSonoffDevice(payload: { ip_address: string; name?: string; device_id?: string; api_key?: string }): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string; device: Device }>('/api/sonoff/device/add', payload).subscribe({
+        next: (res) => {
+          if (res?.device) {
+            this.devices.update((list) => {
+              const idx = list.findIndex((d) => d.ieee_address === res.device.ieee_address);
+              if (idx >= 0) {
+                const copy = [...list];
+                copy[idx] = res.device;
+                return copy;
+              }
+              return [...list, res.device];
+            });
+            this.fetchDevices();
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        },
+        error: () => resolve(false),
+      });
+    });
+  }
+
+  purgeAllDevices(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; message: string }>('/api/devices/purge-all', {}).subscribe({
+        next: (res) => {
+          if (res?.success) {
+            this.devices.set([]);
+            this.fetchDevices();
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        },
+        error: () => resolve(false),
+      });
+    });
+  }
+
+  isAutoDiscovering = signal<boolean>(false);
+
+  autoDiscoverDongleMaxSubnet(): Promise<{ success: boolean; message: string; discoveredCount: number }> {
+    this.isAutoDiscovering.set(true);
+    return new Promise((resolve) => {
+      this.http
+        .post<{ success: boolean; message: string; discovered: Device[] }>('/api/dongle-max/auto-discover', {})
+        .subscribe({
+          next: (res) => {
+            this.isAutoDiscovering.set(false);
+            this.fetchDevices();
+            resolve({
+              success: res?.success || false,
+              message: res?.message || 'Ukończono skanowanie podsieci.',
+              discoveredCount: res?.discovered?.length || 0,
+            });
+          },
+          error: (err) => {
+            this.isAutoDiscovering.set(false);
+            resolve({
+              success: false,
+              message: `Błąd podczas auto-odkrywania: ${err.message || 'Brak odpowiedzi'}`,
+              discoveredCount: 0,
+            });
+          },
+        });
+    });
+  }
 }
 

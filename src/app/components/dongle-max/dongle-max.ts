@@ -42,6 +42,16 @@ import { DongleMaxConfig } from '../../models/telemetry.models';
         </div>
 
         <div class="flex flex-wrap items-center gap-3 shrink-0">
+          <button
+            (click)="triggerAutoDiscover()"
+            [disabled]="telemetry.isAutoDiscovering()"
+            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer disabled:opacity-50"
+            title="Skanuj podsieć DongleMAX i sieć Zigbee w poszukiwaniu nowych gniazdek i urządzeń"
+          >
+            <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isAutoDiscovering()">manage_search</mat-icon>
+            <span>{{ telemetry.isAutoDiscovering() ? 'Skanowanie podsieci...' : '⚡ Auto-wyszukiwanie w podsieci DongleMAX' }}</span>
+          </button>
+
           <a
             href="https://dongle.sonoff.tech/guide/dongle-m/"
             target="_blank"
@@ -515,6 +525,12 @@ export class DongleMaxManager {
     const host = this.currentHost();
     const port = this.currentPort();
     this.telemetry.testDongleMaxConnection(host, port);
+  }
+
+  triggerAutoDiscover(): void {
+    this.telemetry.autoDiscoverDongleMaxSubnet().then((res) => {
+      alert(res.message);
+    });
   }
 
   copySnippet(text: string): void {

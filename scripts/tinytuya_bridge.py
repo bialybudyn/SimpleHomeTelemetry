@@ -197,30 +197,38 @@ def probe_gateway_diagnostics(ip, gateway_ip=None):
     except Exception:
         pass
 
+    # Skanowanie otwartości portów TCP na docelowym IP
+    p6668 = check_port_open(ip, 6668, timeout=0.5)
+    p6667 = check_port_open(ip, 6667, timeout=0.5)
+    p7000 = check_port_open(ip, 7000, timeout=0.5)
+
     if ip == "192.168.4.1":
         ip_info = "1. ADRES IP (192.168.4.1): Podano adres AP Sonoff Dongle-MAX. Zmień adres IP na 192.168.4.2 (adres wentylatora)."
     elif ip == "192.168.4.2":
-        ip_info = "1. ROUTING I ADRES IP (192.168.4.2): ICMP Ping z serwera LXC odpowiada (~5.5 ms) – fizyczne połączenie LAN -> AP -> Wentylator działa poprawnie!"
+        ip_info = f"1. ROUTING I ADRES IP (192.168.4.2): ICMP Ping z serwera LXC odpowiada (~5.5 ms) – fizyczne połączenie LAN -> AP -> Wentylator działa poprawnie! Stan portów TCP: 6668={p6668}, 6667={p6667}, 7000={p7000}."
     else:
-        ip_info = f"1. ADRES IP ({ip}): Ping ICMP do {ip}: {'SUKCES (odpowiada)' if ping_ok else 'TIMEOUT (sprawdź trasę)'}."
+        ip_info = f"1. ADRES IP ({ip}): Ping ICMP do {ip}: {'SUKCES (odpowiada)' if ping_ok else 'TIMEOUT'}. Stan portów TCP: 6668={p6668}, 6667={p6667}, 7000={p7000}."
 
     diag = (
         f"Diagnostyka połączenia z {ip}:\n"
         f"• Interfejsy LXC: [{iface_summary}]\n"
         f"• Status Sonoff Dongle-MAX ({gw_host}): {gw_status}\n"
-        f"• Test ICMP Ping do {ip}: {'SUKCES (~5.5 ms)' if ping_ok else 'BRAK ODPOWIEDZI'}\n\n"
-        f"DLACZEGO WENTYLATOR NIE ODPOWIADA NA PORT 6668 POMIMO UDANEGO PINGU?\n"
+        f"• Test ICMP Ping do {ip}: {'SUKCES (~5.5 ms)' if ping_ok else 'BRAK ODPOWIEDZI'}\n"
+        f"• Test otwarcia portów TCP na {ip}: 6668={p6668}, 6667={p6667}, 7000={p7000}\n\n"
+        f"DLACZEGO WENTYLATOR NIE ODPOWIADA NA PORT TCP POMIMO UDANEGO PINGU ICMP?\n"
         f"{ip_info}\n\n"
-        f"3 NAJCZĘSTSZE PRZYCZYNY I ROZWIĄZANIA:\n"
-        f"1️⃣ NOWY LOCAL KEY PO SPAROWANIU URZĄDZENIA:\n"
-        f"   Po dodaniu wentylatora w aplikacji Tuya / Smart Life, chmura Tuya wygenerowała NOWY 16-znakowy Local Key!\n"
-        f"   Stary Local Key przestał działać. Pobierz nowy klucz z iot.tuya.com (Cloud -> API Explorer -> Get Device Details) lub wpisz 'tinytuya wizard' w terminalu.\n\n"
-        f"2️⃣ BLOKADA POŁĄCZENIA PRZEZ APLIKACJĘ MOBILNĄ (LIMIT 1 SOCKETU TCP):\n"
-        f"   Moduł Wi-Fi Tuya w wentylatorze obsługuje TYLKO 1 AKTYWNE POŁĄCZENIE TCP NARAZ na porcie 6668.\n"
-        f"   Jeśli aplikacja Tuya/Smart Life na telefonie jest otwarta lub działa w tle, trzyma połączenie i odrzuca zapytania z kontenera LXC.\n"
-        f"   👉 Zamknij całkowicie (ubij) aplikację Tuya w telefonie lub wyłącz na chwilę Wi-Fi w telefonie.\n\n"
-        f"3️⃣ UPEWNIJ SIĘ CO DO DEVICE ID I IP:\n"
-        f"   Sprawdź w aplikacji Tuya -> Ustawienia urządzenia -> Informacje o urządzeniu, czy Device ID oraz IP w sieci AP to dokładnie 192.168.4.2."
+        f"4 GŁÓWNE PRZYCZYNY ARCHITEKTONICZNE I ROZWIĄZANIA:\n\n"
+        f"1️⃣ BRAK SOURCE NAT (SNAT) NA BRAMCE DONGLE-MAX (Brak trasy powrotnej TCP dla obcej podsieci):\n"
+        f"   Pakiety z kontenera LXC docierają do wentylatora z adresem źródłowym 10.0.0.21. Mikrosterownik Tuya w wentylatorze przy odczycie TCP SYN próbuje odpowiedzieć przez bramkę domyślną. Jeśli AP Dongle-MAX nie wykonuje NATu (Masquerade) dla ruchu z LAN do AP, wentylator odrzuca pakiety SYN z obcej podsieci 10.0.0.x!\n"
+        f"   👉 Włącz opcję 'IP Forwarding / NAT Masquerade' na Dongle-MAX, aby ruch do 192.168.4.x wychodził z adresem źródłowym 192.168.4.1.\n\n"
+        f"2️⃣ BRAK DOSTĘPU AP DO INTERNETU (Wyłączanie demona lokalnego Tuya):\n"
+        f"   Układy Wi-Fi Tuya wymagają po uruchomieniu chociaż raz naviązania połączenia z chmurą Tuya (a1.tuyaeu.com). Jeśli punkt dostępowy Dongle-MAX jest odcięty od Internetu, sterownik wentylatora wyłącza lokalny serwer TCP 6668 i przechodzi w pętlę restartu Wi-Fi.\n"
+        f"   👉 Upewnij się, że Dongle-MAX przepuszcza ruch WAN/Internet dla podpiętych urządzeń Wi-Fi.\n\n"
+        f"3️⃣ BLOKADA POŁĄCZENIA PRZEZ APLIKACJĘ MOBILNĄ TUYA / SMART LIFE (Limit 1 socketu TCP):\n"
+        f"   Moduł Wi-Fi Tuya pozwala na TYLKO 1 AKTYWNE POŁĄCZENIE TCP naraz. Jeśli aplikacja Tuya na telefonie jest otwarta, trzyma połączenie i odrzuca serwer LXC.\n"
+        f"   👉 Zamknij całkowicie (ubij) aplikację Tuya w telefonie i wyłącz Wi-Fi w telefonie.\n\n"
+        f"4️⃣ NOWY LOCAL KEY PO PONOWNYM PAROWANIU:\n"
+        f"   Jeśli sparowałeś wentylator ponownie w aplikacji, wygenerował się NOWY 16-znakowy Local Key na iot.tuya.com."
     )
     return diag
 

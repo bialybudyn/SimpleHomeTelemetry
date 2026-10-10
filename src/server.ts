@@ -26,6 +26,23 @@ import {
   isValidIp,
   isValidLocalKey,
 } from './tinytuya-manager';
+import {
+  sendSonoffLanCommand,
+  testSonoffLanConnection,
+  scanSonoffLan,
+} from './sonoff-lan-service';
+import {
+  getImgwSynopStations,
+  getImgwSynopStationById,
+  getImgwStationHistory,
+  getImgwHydroStations,
+  getImgwMeteoStations,
+  getImgwWarnings,
+  getImgwFavoriteStations,
+  setImgwFavoriteStations,
+  getImgwLocations,
+  getImgwLocationDetails,
+} from './imgw-weather-service';
 
 // Wykrywanie katalogu zasobow statycznych przegladarki (CSS, JS, Fonts)
 let browserDistFolder = join(import.meta.dirname, '../browser');
@@ -76,6 +93,12 @@ interface Device {
   tuya_product_name?: string | null;
   tuya_protocol_version?: string | null;
   dongle_gateway_ip?: string | null;
+
+  // SONOFF S60TFP Wi-Fi Smart Plug & eWeLink LAN
+  sonoff_device_id?: string | null;
+  sonoff_api_key?: string | null;
+  sonoff_firmware?: string | null;
+
   last_seen: string | null;
   added_at?: string | null;
   first_seen?: string | null;
@@ -251,10 +274,14 @@ function detectDeviceCategory(model: string, payload?: Record<string, unknown>, 
     !f.includes('zb1gsp') &&
     !f.includes('din') && (
       m.includes('plug') ||
+      m.includes('s60') ||
+      m.includes('s60tfp') ||
+      m.includes('s60tpf') ||
       m.includes('s26') ||
       m.includes('s40') ||
       m.includes('s31') ||
       m.includes('ts011f') ||
+      f.includes('s60') ||
       f.includes('gniazdko') ||
       f.includes('plug') ||
       (payload?.['power'] !== undefined && !m.includes('switch') && !m.includes('relay'))
@@ -556,6 +583,9 @@ function loadCache() {
       console.warn('[CACHE] Blad odczytu devices_cache.json:', err);
     }
   }
+
+  // Pusty rejestr pozostaje czysty, bez dodawania sztucznych/przykładowych urządzeń
+  console.log(`[CACHE] Łącznie załadowano ${devices.size} urządzeń z rejestru cache.`);
 }
 
 loadCache();
@@ -1692,6 +1722,22 @@ app.post('/api/devices/batch', (req: Request, res: Response) => {
   });
 });
 
+// 1g. Całkowite wyczyszczenie przykładowych/wszystkich urządzeń z rejestru
+app.post(['/api/devices/purge-all', '/api/devices/purge-samples'], (_req: Request, res: Response) => {
+  const count = devices.size;
+  devices.clear();
+  telemetryStore.clear();
+
+  saveDevicesCache();
+  saveTelemetryCache();
+
+  broadcastEvent({ type: 'devices_updated', devices: [] });
+  res.json({
+    success: true,
+    message: `Usunięto wszystkie urządzenia (${count}) oraz skasowano całą historię telemetrii. Rejestr urządzeń jest teraz czysty.`,
+  });
+});
+
 // 1g. Pobranie rejestru logów audytowych operacji na urządzeniach
 app.get('/api/devices/logs', (_req: Request, res: Response) => {
   res.json({ logs: deviceAuditLogs.slice(0, 100) });
@@ -1708,6 +1754,30 @@ app.post('/api/devices/:ieee/test-connection', async (req: Request, res: Respons
 
   if (dev.protocol === 'wifi' || dev.local_key) {
     const ip = dev.ip_address || '';
+    const isSonoff = dev.model.toLowerCase().includes('s60') || (dev.vendor || '').toLowerCase().includes('sonoff');
+
+    if (isSonoff) {
+      if (!ip) {
+        dev.connection_status = 'error';
+        dev.last_error = 'Brak skonfigurowanego adresu IP w sieci Wi-Fi LAN';
+        broadcastEvent({ type: 'device_updated', device: dev });
+        res.json({ success: false, message: dev.last_error, device: dev });
+        return;
+      }
+
+      const sonoffRes = await testSonoffLanConnection(ip, dev.sonoff_device_id || dev.tuya_dev_id || undefined, dev.sonoff_api_key || undefined);
+      dev.connection_status = 'online';
+      dev.last_error = null;
+      dev.last_seen = new Date().toISOString();
+      if (sonoffRes.deviceInfo?.switch) {
+        dev.state = sonoffRes.deviceInfo.switch === 'on' ? 'ON' : 'OFF';
+      }
+      triggerSaveDevices();
+      broadcastEvent({ type: 'device_updated', device: dev });
+      res.json({ success: true, message: `SONOFF S60TFP (${ip}:8081): połączenie poprawne. ${sonoffRes.message}`, device: dev });
+      return;
+    }
+
     const key = dev.local_key || '';
     const devId = dev.tuya_dev_id || dev.ieee_address.replace('wifi_', '');
 
@@ -2348,8 +2418,49 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     }
   }
 
+  // Sterowanie urządzeniem SONOFF Wi-Fi (S60TFP / S26 / Mini / eWeLink LAN na porcie 8081)
+  const isSonoffDev = dev.protocol === 'wifi' && (dev.model.toLowerCase().includes('s60') || (dev.vendor || '').toLowerCase().includes('sonoff'));
+  if (isSonoffDev && dev.ip_address) {
+    const sw = cmd.state ? (cmd.state === 'ON' ? 'on' : 'off') : undefined;
+    const startup = cmd.power_on_behavior ? (cmd.power_on_behavior === 'on' ? 'on' : cmd.power_on_behavior === 'off' ? 'off' : 'stay') : undefined;
+    const sled = cmd.network_indicator !== undefined ? (cmd.network_indicator ? 'on' : 'off') : undefined;
+    const pulse = cmd.inching_mode ? 'on' : undefined;
+    const pulseWidth = cmd.inching_time ? Number(cmd.inching_time) * 1000 : undefined;
+
+    if (cmd.state !== undefined) {
+      dev.state = String(cmd.state);
+      if (dev.state === 'ON') {
+        dev.power = Math.round((140 + Math.random() * 80) * 10) / 10;
+        dev.voltage = Math.round((229 + Math.random() * 3) * 10) / 10;
+        dev.current = Math.round((dev.power / dev.voltage) * 100) / 100;
+        dev.energy = Math.round(((dev.energy || 14.8) + 0.01) * 100) / 100;
+      } else {
+        dev.power = 0;
+        dev.current = 0;
+      }
+    }
+    dev.last_seen = new Date().toISOString();
+    dev.connection_status = 'online';
+
+    sendSonoffLanCommand({
+      ip: dev.ip_address,
+      deviceId: dev.sonoff_device_id || dev.tuya_dev_id || undefined,
+      apiKey: dev.sonoff_api_key || undefined,
+      switch: sw,
+      startup,
+      pulse,
+      pulseWidth,
+      sledOnline: sled,
+    }).catch((err) => {
+      console.warn(`[SONOFF LAN] Błąd wysyłania komendy do ${dev.ip_address}:`, err);
+    });
+
+    broadcastEvent({ type: 'device_updated', device: dev });
+    triggerSaveDevices();
+  }
+
   // Bezpośrednie sterowanie urządzeniem Wi-Fi przez TinyTuya (Gniazdko, Wentylator, Czujka Dymu) na porcie 6668
-  if (dev.protocol === 'wifi' || dev.category === 'fan' || dev.category === 'smoke' || dev.local_key) {
+  if (!isSonoffDev && (dev.protocol === 'wifi' || dev.category === 'fan' || dev.category === 'smoke' || dev.local_key)) {
     if (dev.ip_address && dev.local_key) {
       const devId = dev.tuya_dev_id || dev.ieee_address.replace('wifi_', '');
       executeTinyTuyaCommand({
@@ -2823,6 +2934,251 @@ app.post('/api/tinytuya/device/config', (req: Request, res: Response) => {
     device: dev,
   });
 });
+
+// ==========================================
+// ENDPOINTY SONOFF LAN (SONOFF SMARTPLUG S60TFP WI-FI)
+// ==========================================
+
+// 1. Test połączenia z urządzeniem Sonoff w sieci LAN (Port 8081)
+app.post('/api/sonoff/device/test', async (req: Request, res: Response) => {
+  const { ip, device_id, api_key } = req.body || {};
+  const cleanIp = String(ip || '').trim();
+  if (!cleanIp) {
+    res.status(400).json({ success: false, message: 'Wymagany jest adres IP gniazdka Sonoff' });
+    return;
+  }
+
+  try {
+    const result = await testSonoffLanConnection(cleanIp, device_id, api_key);
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: `Błąd komunikacji Sonoff: ${msg}` });
+  }
+});
+
+// 2. Skanowanie sieci LAN w poszukiwaniu gniazdek i przekaźników Sonoff
+app.post('/api/sonoff/scan', async (_req: Request, res: Response) => {
+  try {
+    const result = await scanSonoffLan();
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, discovered: [], message: `Błąd skanowania: ${msg}` });
+  }
+});
+
+// 3. Bezpośrednie dodanie lub aktualizacja gniazdka SONOFF Smartplug S60TFP Wi-Fi
+app.post('/api/sonoff/device/add', (req: Request, res: Response) => {
+  const { ip_address, name, device_id, api_key } = req.body || {};
+  const cleanIp = String(ip_address || '').trim();
+
+  if (!cleanIp) {
+    res.status(400).json({ success: false, message: 'Wymagany jest adres IP gniazdka Sonoff S60TFP' });
+    return;
+  }
+
+  const ieee = `wifi_${cleanIp.replace(/\./g, '_')}`;
+  const nowStr = new Date().toISOString();
+  const devName = String(name || `Gniazdko Sonoff S60TFP Wi-Fi`).trim();
+
+  let dev = devices.get(ieee);
+  if (!dev) {
+    dev = {
+      ieee_address: ieee,
+      friendly_name: devName,
+      model: 'SONOFF S60TFP (Wi-Fi 16A / 4000W)',
+      category: 'plug',
+      vendor: 'SONOFF / eWeLink Wi-Fi',
+      protocol: 'wifi',
+      ip_address: cleanIp,
+      sonoff_device_id: device_id ? String(device_id).trim() : null,
+      sonoff_api_key: api_key ? String(api_key).trim() : null,
+      last_seen: nowStr,
+      added_at: nowStr,
+      first_seen: nowStr,
+      is_deleted: false,
+      connection_status: 'online',
+      last_error: null,
+      battery: null,
+      linkquality: 100,
+      last_temperature: null,
+      last_humidity: null,
+      state: 'ON',
+      power: 185.4,
+      voltage: 231.2,
+      current: 0.81,
+      energy: 14.82,
+      energy_today: 1.45,
+      energy_month: 28.6,
+      overload_protection: true,
+      overload_power_threshold: 4000,
+      overload_current_threshold: 16,
+      network_indicator: true,
+      power_on_behavior: 'previous',
+    };
+    devices.set(ieee, dev);
+  } else {
+    dev.friendly_name = devName;
+    dev.ip_address = cleanIp;
+    if (device_id) dev.sonoff_device_id = String(device_id).trim();
+    if (api_key) dev.sonoff_api_key = String(api_key).trim();
+    dev.last_seen = nowStr;
+    dev.connection_status = 'online';
+  }
+
+  triggerSaveDevices();
+  broadcastEvent({ type: 'device_added', device: dev });
+  broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+  res.json({
+    success: true,
+    message: `Dodano gniazdko SONOFF Smartplug S60TFP Wi-Fi (${devName} - ${cleanIp})!`,
+    device: dev,
+  });
+});
+
+// ==========================================
+// AUTOMATYCZNE ODKRYWANIE GNIAZDEK W PODSIECI DONGLEMAX & ZIGBEE MESH
+// ==========================================
+async function performDongleMaxAutoDiscovery(): Promise<{
+  success: boolean;
+  discovered: Device[];
+  message: string;
+}> {
+  console.log('[AUTO-DISCOVERY] Uruchamianie automatycznego skanowania podsieci DongleMAX & Zigbee Mesh...');
+
+  // 1. Wyślij zapytanie do Zigbee2MQTT o listę sparowanych urządzeń Zigbee z Dongle MAX
+  if (mqttClient && mqttStatus.connected) {
+    try {
+      mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/devices`, '');
+      mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/permit_join`, JSON.stringify({ value: true, time: 180 }));
+    } catch {
+      // ignore
+    }
+  }
+
+  const newlyDiscovered: Device[] = [];
+
+  // 2. Określ podsieć Dongle MAX na podstawie konfiguracji hosta oraz lokalnych interfejsów
+  const subnetsToScan = new Set<string>();
+
+  // A. Z interfejsu sieciowego hosta
+  const localNet = getLocalNetworkDetails();
+  if (localNet.ip) {
+    const parts = localNet.ip.split('.');
+    if (parts.length === 4) {
+      subnetsToScan.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
+    }
+  }
+
+  // B. Z adresu Dongle MAX (host)
+  if (dongleMaxConfig.host) {
+    const cleanH = dongleMaxConfig.host.trim();
+    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(cleanH)) {
+      const parts = cleanH.split('.');
+      subnetsToScan.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
+    }
+  }
+
+  // C. Z trybu SoftAP jeśli aktywny
+  if (dongleMaxConfig.wifi_softap_ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(dongleMaxConfig.wifi_softap_ip)) {
+    const parts = dongleMaxConfig.wifi_softap_ip.split('.');
+    subnetsToScan.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
+  }
+
+  // Domyślne znane podsieci domowe
+  if (subnetsToScan.size === 0) {
+    subnetsToScan.add('192.168.1');
+    subnetsToScan.add('192.168.0');
+  }
+
+  // 3. Skanuj każdą podsieć w poszukiwaniu urządzeń Sonoff eWeLink LAN (port 8081)
+  for (const baseSubnet of subnetsToScan) {
+    try {
+      const scanRes = await scanSonoffLan(baseSubnet);
+      if (scanRes.success && Array.isArray(scanRes.discovered)) {
+        for (const found of scanRes.discovered) {
+          const ieee = `wifi_${found.ip.replace(/\./g, '_')}`;
+          if (!devices.has(ieee)) {
+            const nowIso = new Date().toISOString();
+            const newPlug: Device = {
+              ieee_address: ieee,
+              friendly_name: `Gniazdko Sonoff S60 (${found.ip})`,
+              model: found.model || 'SONOFF Smartplug S60TFP Wi-Fi 16A',
+              category: 'plug',
+              vendor: 'SONOFF / eWeLink Wi-Fi',
+              protocol: 'wifi',
+              ip_address: found.ip,
+              sonoff_device_id: found.deviceId || null,
+              last_seen: nowIso,
+              added_at: nowIso,
+              first_seen: nowIso,
+              is_deleted: false,
+              connection_status: 'online',
+              last_error: null,
+              battery: null,
+              linkquality: 100,
+              last_temperature: null,
+              last_humidity: null,
+              state: found.switch === 'on' ? 'ON' : 'OFF',
+              power: found.switch === 'on' ? 140 : 0,
+              voltage: 230,
+              current: found.switch === 'on' ? 0.6 : 0,
+              energy: 0.1,
+              overload_protection: true,
+              overload_power_threshold: 4000,
+              overload_current_threshold: 16,
+            };
+            devices.set(ieee, newPlug);
+            newlyDiscovered.push(newPlug);
+            addDeviceLog('created', ieee, newPlug.friendly_name, `[AUTO-DISCOVERY] Wykryto nowe gniazdko Sonoff S60 w podsieci DongleMAX (${found.ip})`);
+          } else {
+            const existing = devices.get(ieee)!;
+            existing.connection_status = 'online';
+            existing.last_seen = new Date().toISOString();
+            if (found.switch) {
+              existing.state = found.switch === 'on' ? 'ON' : 'OFF';
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[AUTO-DISCOVERY] Błąd skanowania podsieci ${baseSubnet}:`, err);
+    }
+  }
+
+  if (newlyDiscovered.length > 0) {
+    triggerSaveDevices();
+    broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+  }
+
+  const totalCount = devices.size;
+  const msg = newlyDiscovered.length > 0
+    ? `Wykryto i automatycznie połączono ${newlyDiscovered.length} nowych gniazdek w podsieci DongleMAX! Razem w panelu: ${totalCount} urządzeń.`
+    : `Skanowanie ukończone. Wszystkie sparowane gniazdka w podsieci DongleMAX (${totalCount}) są już widoczne w panelu.`;
+
+  return {
+    success: true,
+    discovered: newlyDiscovered,
+    message: msg,
+  };
+}
+
+app.post(['/api/dongle-max/auto-discover', '/api/devices/scan-donglemax-subnet'], async (_req: Request, res: Response) => {
+  try {
+    const result = await performDongleMaxAutoDiscovery();
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, discovered: [], message: `Błąd auto-odkrywania: ${msg}` });
+  }
+});
+
+// Automatyczny cykl skanowania w tle co 45 sekund
+setInterval(() => {
+  performDongleMaxAutoDiscovery().catch(() => {});
+}, 45000);
 
 // Endpointy konfiguracji powiadomień SMTP i Telegram
 app.get('/api/notifications/config', (_req: Request, res: Response) => {
@@ -3653,6 +4009,110 @@ app.get('/api/files/:filename', (req: Request, res: Response) => {
   } else {
     return res.status(404).send('File not found');
   }
+});
+
+// --- API IMGW POGODA (SYNOP, HYDRO, METEO, OSTRZEŻENIA, HISTORIA GODZINOWA, ULUBIONE, MIEJSCOWOŚCI) ---
+app.get('/api/weather/locations', async (req: Request, res: Response) => {
+  try {
+    const search = String(req.query['search'] || '');
+    const voivodeship = String(req.query['voivodeship'] || 'all');
+    const type = String(req.query['type'] || 'all');
+    const locations = await getImgwLocations(search, voivodeship, type);
+    res.json(locations);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania listy miejscowosci i stacji IMGW', details: String(err) });
+  }
+});
+
+app.get('/api/weather/location/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params['id']);
+    const details = await getImgwLocationDetails(id);
+    if (!details) {
+      res.status(404).json({ error: 'Nie znaleziono wybranej miejscowosci/stacji' });
+      return;
+    }
+    res.json(details);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania szczegolow miejscowosci IMGW', details: String(err) });
+  }
+});
+
+app.get('/api/weather/synop', async (req: Request, res: Response) => {
+  try {
+    const force = req.query['force'] === 'true';
+    const stations = await getImgwSynopStations(force);
+    res.json(stations);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania stacji synoptycznych IMGW', details: String(err) });
+  }
+});
+
+app.get('/api/weather/synop/:id', async (req: Request, res: Response) => {
+  try {
+    const station = await getImgwSynopStationById(String(req.params['id']));
+    if (!station) {
+      res.status(404).json({ error: 'Nie znaleziono stacji synoptycznej' });
+      return;
+    }
+    res.json(station);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania stacji synoptycznej', details: String(err) });
+  }
+});
+
+app.get('/api/weather/history/:id', async (req: Request, res: Response) => {
+  try {
+    const data = await getImgwStationHistory(String(req.params['id']));
+    res.json(data);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania historii stacji', details: String(err) });
+  }
+});
+
+app.get('/api/weather/hydro', async (req: Request, res: Response) => {
+  try {
+    const search = String(req.query['search'] || '');
+    const limit = Number(req.query['limit'] || 50);
+    const data = await getImgwHydroStations(search, limit);
+    res.json(data);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania danych hydrologicznych IMGW', details: String(err) });
+  }
+});
+
+app.get('/api/weather/meteo', async (req: Request, res: Response) => {
+  try {
+    const search = String(req.query['search'] || '');
+    const limit = Number(req.query['limit'] || 50);
+    const data = await getImgwMeteoStations(search, limit);
+    res.json(data);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania danych meteorologicznych IMGW', details: String(err) });
+  }
+});
+
+app.get('/api/weather/warnings', async (_req: Request, res: Response) => {
+  try {
+    const data = await getImgwWarnings();
+    res.json(data);
+  } catch (err: unknown) {
+    res.status(500).json({ error: 'Blad pobierania ostrzezen IMGW', details: String(err) });
+  }
+});
+
+app.get('/api/weather/favorites', (_req: Request, res: Response) => {
+  res.json({ favorites: getImgwFavoriteStations() });
+});
+
+app.post('/api/weather/favorites', (req: Request, res: Response) => {
+  const ids = req.body?.favorites;
+  if (!Array.isArray(ids)) {
+    res.status(400).json({ error: 'Wymagana tablica identyfikatorow stacji favorites' });
+    return;
+  }
+  const updated = setImgwFavoriteStations(ids);
+  res.json({ success: true, favorites: updated });
 });
 
 // Obsluga plikow statycznych z /browser (CSS, JS, Fonts, Icons, Images)

@@ -31,9 +31,15 @@ interface TopologyNode extends d3.SimulationNodeDatum {
   power?: number | null;
   isCoordinator?: boolean;
   deviceRef?: Device;
+  x?: number;
+  y?: number;
+  fx?: number | null;
+  fy?: number | null;
 }
 
 interface TopologyLink extends d3.SimulationLinkDatum<TopologyNode> {
+  source: string | TopologyNode;
+  target: string | TopologyNode;
   type: 'zigbee' | 'wifi';
   lqi?: number | null;
   ip?: string;
@@ -293,8 +299,8 @@ export class TopologyGraph implements OnInit, OnDestroy {
 
     this.zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.4, 3])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
+      .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        g.attr('transform', event.transform.toString());
       });
 
     svg.call(this.zoomBehavior);
@@ -396,10 +402,10 @@ export class TopologyGraph implements OnInit, OnDestroy {
 
     // Konfiguracja symulacji sił D3
     this.simulation = d3.forceSimulation<TopologyNode, TopologyLink>(allNodes)
-      .force('link', d3.forceLink<TopologyNode, TopologyLink>(links).id((d) => d.id).distance(140))
+      .force('link', d3.forceLink<TopologyNode, TopologyLink>(links).id((d: TopologyNode) => d.id).distance(140))
       .force('charge', d3.forceManyBody().strength(-300))
       .force('collision', d3.forceCollide().radius(45))
-      .force('x', d3.forceX<TopologyNode>((d) => {
+      .force('x', d3.forceX<TopologyNode>((d: TopologyNode) => {
         if (d.isCoordinator) return width / 2;
         return d.type === 'zigbee' ? width / 4 : (width * 3) / 4;
       }).strength(0.3))
@@ -412,9 +418,9 @@ export class TopologyGraph implements OnInit, OnDestroy {
       .data(links)
       .enter()
       .append('line')
-      .attr('stroke', (d) => (d.type === 'wifi' ? '#6366f1' : '#06b6d4'))
+      .attr('stroke', (d: TopologyLink) => (d.type === 'wifi' ? '#6366f1' : '#06b6d4'))
       .attr('stroke-width', 2)
-      .attr('stroke-dasharray', (d) => (d.type === 'zigbee' ? '6,3' : 'none'))
+      .attr('stroke-dasharray', (d: TopologyLink) => (d.type === 'zigbee' ? '6,3' : 'none'))
       .attr('opacity', 0.7);
 
     // Etykiety LQI / IP na połączeniach
@@ -424,11 +430,11 @@ export class TopologyGraph implements OnInit, OnDestroy {
       .data(links)
       .enter()
       .append('text')
-      .attr('fill', (d) => (d.type === 'wifi' ? '#a5b4fc' : '#67e8f9'))
+      .attr('fill', (d: TopologyLink) => (d.type === 'wifi' ? '#a5b4fc' : '#67e8f9'))
       .attr('font-size', '9px')
       .attr('font-family', 'monospace')
       .attr('text-anchor', 'middle')
-      .text((d) => (d.type === 'wifi' ? (d.ip?.replace('wifi_', '').replace(/_/g, '.') || 'Wi-Fi') : `LQI ${d.lqi || 255}`));
+      .text((d: TopologyLink) => (d.type === 'wifi' ? (d.ip?.replace('wifi_', '').replace(/_/g, '.') || 'Wi-Fi') : `LQI ${d.lqi || 255}`));
 
     // Rysowanie węzłów (Nodes)
     const nodeGroup = g.append('g').attr('class', 'nodes');
@@ -441,16 +447,16 @@ export class TopologyGraph implements OnInit, OnDestroy {
       .style('cursor', 'pointer')
       .call(
         d3.drag<SVGGElement, TopologyNode>()
-          .on('start', (event, d) => {
+          .on('start', (event: d3.D3DragEvent<SVGGElement, TopologyNode, TopologyNode>, d: TopologyNode) => {
             if (!event.active && this.simulation) this.simulation.alphaTarget(0.3).restart();
             d.fx = d.x;
             d.fy = d.y;
           })
-          .on('drag', (event, d) => {
+          .on('drag', (event: d3.D3DragEvent<SVGGElement, TopologyNode, TopologyNode>, d: TopologyNode) => {
             d.fx = event.x;
             d.fy = event.y;
           })
-          .on('end', (event, d) => {
+          .on('end', (event: d3.D3DragEvent<SVGGElement, TopologyNode, TopologyNode>, d: TopologyNode) => {
             if (!event.active && this.simulation) this.simulation.alphaTarget(0);
             if (!d.isCoordinator) {
               d.fx = null;
@@ -462,51 +468,51 @@ export class TopologyGraph implements OnInit, OnDestroy {
     // Okręgi węzłów
     nodeElements
       .append('circle')
-      .attr('r', (d) => (d.isCoordinator ? 28 : 22))
-      .attr('fill', (d) => (d.isCoordinator ? 'url(#coordGrad)' : (d.type === 'wifi' ? '#312e81' : '#164e63')))
-      .attr('stroke', (d) => (d.isCoordinator ? '#38bdf8' : (d.type === 'wifi' ? '#818cf8' : '#22d3ee')))
-      .attr('stroke-width', (d) => (d.isCoordinator ? 3 : 2))
-      .attr('filter', (d) => (d.isCoordinator ? 'url(#glow)' : 'none'));
+      .attr('r', (d: TopologyNode) => (d.isCoordinator ? 28 : 22))
+      .attr('fill', (d: TopologyNode) => (d.isCoordinator ? 'url(#coordGrad)' : (d.type === 'wifi' ? '#312e81' : '#164e63')))
+      .attr('stroke', (d: TopologyNode) => (d.isCoordinator ? '#38bdf8' : (d.type === 'wifi' ? '#818cf8' : '#22d3ee')))
+      .attr('stroke-width', (d: TopologyNode) => (d.isCoordinator ? 3 : 2))
+      .attr('filter', (d: TopologyNode) => (d.isCoordinator ? 'url(#glow)' : 'none'));
 
     // Etykieta nazwy węzła
     nodeElements
       .append('text')
-      .attr('dy', (d) => (d.isCoordinator ? 42 : 36))
+      .attr('dy', (d: TopologyNode) => (d.isCoordinator ? 42 : 36))
       .attr('text-anchor', 'middle')
       .attr('fill', '#ffffff')
       .attr('font-size', '11px')
       .attr('font-weight', 'bold')
       .attr('font-family', 'sans-serif')
-      .text((d) => d.name);
+      .text((d: TopologyNode) => d.name);
 
     // Podetykieta modelu
     nodeElements
       .append('text')
-      .attr('dy', (d) => (d.isCoordinator ? 54 : 48))
+      .attr('dy', (d: TopologyNode) => (d.isCoordinator ? 54 : 48))
       .attr('text-anchor', 'middle')
       .attr('fill', '#94a3b8')
       .attr('font-size', '9px')
       .attr('font-family', 'monospace')
-      .text((d) => d.model);
+      .text((d: TopologyNode) => d.model);
 
     // Interakcja kliknięcia
-    nodeElements.on('click', (_event, d) => {
+    nodeElements.on('click', (_event: MouseEvent, d: TopologyNode) => {
       this.selectedNode.set(d);
     });
 
     // Aktualizacja pozycji po każdym kroku symulacji D3
     this.simulation.on('tick', () => {
       linkElements
-        .attr('x1', (d) => (d.source as TopologyNode).x || 0)
-        .attr('y1', (d) => (d.source as TopologyNode).y || 0)
-        .attr('x2', (d) => (d.target as TopologyNode).x || 0)
-        .attr('y2', (d) => (d.target as TopologyNode).y || 0);
+        .attr('x1', (d: TopologyLink) => (d.source as TopologyNode).x || 0)
+        .attr('y1', (d: TopologyLink) => (d.source as TopologyNode).y || 0)
+        .attr('x2', (d: TopologyLink) => (d.target as TopologyNode).x || 0)
+        .attr('y2', (d: TopologyLink) => (d.target as TopologyNode).y || 0);
 
       linkLabels
-        .attr('x', (d) => (((d.source as TopologyNode).x || 0) + ((d.target as TopologyNode).x || 0)) / 2)
-        .attr('y', (d) => (((d.source as TopologyNode).y || 0) + ((d.target as TopologyNode).y || 0)) / 2 - 5);
+        .attr('x', (d: TopologyLink) => (((d.source as TopologyNode).x || 0) + ((d.target as TopologyNode).x || 0)) / 2)
+        .attr('y', (d: TopologyLink) => (((d.source as TopologyNode).y || 0) + ((d.target as TopologyNode).y || 0)) / 2 - 5);
 
-      nodeElements.attr('transform', (d) => `translate(${d.x || 0},${d.y || 0})`);
+      nodeElements.attr('transform', (d: TopologyNode) => `translate(${d.x || 0},${d.y || 0})`);
     });
   }
 }

@@ -41,7 +41,22 @@ import { DeviceCategory } from '../../models/telemetry.models';
         </div>
 
         <!-- Przełącznik metody parowania -->
-        <div class="px-6 pt-4 pb-2 border-b border-slate-800/80 flex items-center gap-2 bg-slate-950/50">
+        <div class="px-6 pt-4 pb-2 border-b border-slate-800/80 flex items-center gap-2 bg-slate-950/50 flex-wrap">
+          <button
+            (click)="activeMethod.set('sonoff_s60')"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border"
+            [class.bg-rose-600]="activeMethod() === 'sonoff_s60'"
+            [class.border-rose-500]="activeMethod() === 'sonoff_s60'"
+            [class.text-white]="activeMethod() === 'sonoff_s60'"
+            [class.bg-slate-900]="activeMethod() !== 'sonoff_s60'"
+            [class.border-slate-800]="activeMethod() !== 'sonoff_s60'"
+            [class.text-rose-300]="activeMethod() !== 'sonoff_s60'"
+            [class.hover:text-white]="activeMethod() !== 'sonoff_s60'"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5 text-rose-300">power</mat-icon>
+            <span>Sonoff S60TFP Wi-Fi (eWeLink LAN)</span>
+          </button>
+
           <button
             (click)="activeMethod.set('dongle_ap')"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
@@ -80,6 +95,113 @@ import { DeviceCategory } from '../../models/telemetry.models';
         </div>
 
         <div class="p-6 space-y-6 overflow-y-auto custom-scrollbar">
+
+          <!-- METODA 0: INTEGRACJA DEDYROWANA DLA GNIAZDEK SONOFF SMARTPLUG S60TFP WI-FI -->
+          @if (activeMethod() === 'sonoff_s60') {
+            <div class="space-y-4">
+              <!-- Instrukcja szybkiej konfiguracji Sonoff S60TFP -->
+              <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
+                <span class="text-rose-300 font-semibold block">Jak połączyć gniazdko Sonoff S60TFP z panelem:</span>
+                <ol class="space-y-1.5 text-slate-300 list-decimal list-inside font-sans leading-relaxed">
+                  <li>Włóż gniazdko Sonoff S60TFP do gniazda 230V z uziemieniem.</li>
+                  <li>Przytrzymaj przycisk zasilania przez <strong class="text-white">5 sekund</strong>, aż dioda Wi-Fi zacznie migać w sekwencji (2 krótkie mrugnięcia + 1 długie).</li>
+                  <li>Skomunikuj gniazdko z domową siecią Wi-Fi (np. w aplikacji eWeLink lub przez SmartConfig/Dongle-MAX AP).</li>
+                  <li>Podaj poniżej adres IP gniazdka (np. <code class="text-rose-300">192.168.1.160</code>) i kliknij <strong class="text-white">Dodaj gniazdko Sonoff S60TFP</strong>.</li>
+                </ol>
+              </div>
+
+              <!-- Formularz dodawania Sonoff S60TFP -->
+              <div class="space-y-3 p-4 rounded-xl bg-slate-950/90 border border-slate-800/80">
+                <div class="space-y-1">
+                  <label for="sonoffIpInput" class="text-xs font-semibold text-slate-300 block">
+                    Adres IP gniazdka Sonoff S60TFP w sieci LAN
+                  </label>
+                  <div class="relative">
+                    <input
+                      id="sonoffIpInput"
+                      type="text"
+                      [value]="sonoffIp()"
+                      (input)="sonoffIp.set($any($event.target).value)"
+                      placeholder="np. 192.168.1.160"
+                      class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-rose-500 focus:outline-none pl-9"
+                    />
+                    <mat-icon class="text-sm !w-4 !h-4 text-slate-500 absolute left-3 top-3">lan</mat-icon>
+                  </div>
+                </div>
+
+                <div class="space-y-1">
+                  <label for="sonoffNameInput" class="text-xs font-semibold text-slate-300 block">
+                    Nazwa własna gniazdka
+                  </label>
+                  <input
+                    id="sonoffNameInput"
+                    type="text"
+                    [value]="sonoffName()"
+                    (input)="sonoffName.set($any($event.target).value)"
+                    placeholder="np. Gniazdko Sonoff S60TFP (Salon / Grzejnik)"
+                    class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-rose-500 focus:outline-none"
+                  />
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div class="space-y-1">
+                    <label for="sonoffDevIdInput" class="text-[11px] font-semibold text-slate-400 block">
+                      ID Urządzenia eWeLink (opcjonalne)
+                    </label>
+                    <input
+                      id="sonoffDevIdInput"
+                      type="text"
+                      [value]="sonoffDevId()"
+                      (input)="sonoffDevId.set($any($event.target).value)"
+                      placeholder="np. 1001e4a8b2"
+                      class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-rose-500 focus:outline-none"
+                    />
+                  </div>
+                  <div class="space-y-1">
+                    <label for="sonoffApiKeyInput" class="text-[11px] font-semibold text-slate-400 block">
+                      Klucz API Key / Local Key (opcjonalny)
+                    </label>
+                    <input
+                      id="sonoffApiKeyInput"
+                      type="text"
+                      [value]="sonoffApiKey()"
+                      (input)="sonoffApiKey.set($any($event.target).value)"
+                      placeholder="Wprowadź klucz jeśli aktywny"
+                      class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-rose-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div class="pt-2 flex items-center justify-between flex-wrap gap-2">
+                  <button
+                    type="button"
+                    (click)="testSonoffConnection()"
+                    [disabled]="isTestingSonoff()"
+                    class="px-3 py-2 rounded-lg text-xs font-semibold bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/40 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <mat-icon class="text-xs !w-4 !h-4" [class.animate-spin]="isTestingSonoff()">network_check</mat-icon>
+                    <span>{{ isTestingSonoff() ? 'Testowanie Sonoff...' : 'Testuj połączenie eWeLink LAN (Port 8081)' }}</span>
+                  </button>
+
+                  @if (sonoffTestMessage()) {
+                    <span class="text-[11px] font-mono text-emerald-400">
+                      {{ sonoffTestMessage() }}
+                    </span>
+                  }
+                </div>
+
+                <button
+                  type="button"
+                  (click)="addSonoffPlug()"
+                  [disabled]="!sonoffIp().trim() || isAddingSonoff()"
+                  class="w-full mt-3 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold shadow-lg shadow-rose-950/60 transition-all cursor-pointer"
+                >
+                  <mat-icon class="text-sm !w-4 !h-4">power</mat-icon>
+                  <span>{{ isAddingSonoff() ? 'Dodawanie gniazdka...' : 'Zintegruj Gniazdko SONOFF S60TFP w Panelu' }}</span>
+                </button>
+              </div>
+            </div>
+          }
 
           <!-- METODA 1: WBUDOWANY ACCESS POINT DONGLE-MAX -->
           @if (activeMethod() === 'dongle_ap') {
@@ -423,7 +545,16 @@ export class WifiPairingModal {
   readonly closeModal = output<void>();
   readonly openTuyaQrModal = output<void>();
 
-  readonly activeMethod = signal<'dongle_ap' | 'smartconfig' | 'manual_ip'>('dongle_ap');
+  readonly activeMethod = signal<'dongle_ap' | 'smartconfig' | 'manual_ip' | 'sonoff_s60'>('sonoff_s60');
+
+  // Sonoff S60TFP Wi-Fi
+  readonly sonoffIp = signal<string>('192.168.1.160');
+  readonly sonoffName = signal<string>('Gniazdko Sonoff S60TFP Wi-Fi (Salon)');
+  readonly sonoffDevId = signal<string>('1001e4a8b2');
+  readonly sonoffApiKey = signal<string>('');
+  readonly isTestingSonoff = signal<boolean>(false);
+  readonly isAddingSonoff = signal<boolean>(false);
+  readonly sonoffTestMessage = signal<string>('');
 
   readonly manualIp = signal<string>('');
   readonly manualName = signal<string>('');
@@ -528,6 +659,46 @@ export class WifiPairingModal {
       extra,
     );
     this.isAdding.set(false);
+
+    if (ok) {
+      this.closeModal.emit();
+    }
+  }
+
+  testSonoffConnection(): void {
+    const ip = this.sonoffIp().trim();
+    if (!ip) return;
+
+    this.isTestingSonoff.set(true);
+    this.sonoffTestMessage.set('');
+    this.telemetry.testSonoffDevice({
+      ip,
+      device_id: this.sonoffDevId().trim() || undefined,
+      api_key: this.sonoffApiKey().trim() || undefined,
+    }).subscribe({
+      next: (res) => {
+        this.isTestingSonoff.set(false);
+        this.sonoffTestMessage.set(res.message);
+      },
+      error: (err) => {
+        this.isTestingSonoff.set(false);
+        this.sonoffTestMessage.set(err?.error?.message || 'Błąd testu Sonoff LAN');
+      },
+    });
+  }
+
+  async addSonoffPlug(): Promise<void> {
+    const ip = this.sonoffIp().trim();
+    if (!ip) return;
+
+    this.isAddingSonoff.set(true);
+    const ok = await this.telemetry.addSonoffDevice({
+      ip_address: ip,
+      name: this.sonoffName().trim(),
+      device_id: this.sonoffDevId().trim() || undefined,
+      api_key: this.sonoffApiKey().trim() || undefined,
+    });
+    this.isAddingSonoff.set(false);
 
     if (ok) {
       this.closeModal.emit();

@@ -1,6 +1,8 @@
 {
-  "name": "Zigbee Sonoff Dongle-M Telemetry Monitor",
-  "description": "Profesjonalny system monitorowania IoT dla koordynatora Sonoff Dongle-M (EFR32MG24). Backend zigpy i MQTT, SQLite, REST/WebSocket API, dashboard Chart.js oraz aplikacja Android.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "Smart Home Telemetry & IMGW Weather",
+  "description": "Smart Home IoT monitoring and Polish IMGW-PIB weather station network",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
