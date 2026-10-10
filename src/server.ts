@@ -52,7 +52,6 @@ if (!existsSync(browserDistFolder)) {
     join(process.cwd(), 'browser'),
     '/opt/zigbee-telemetry-panel/dist/app/browser',
     '/root/SimpleHomeTelemetry/dist/app/browser',
-    join(process.cwd(), 'static'),
   ];
   for (const p of fallbackPaths) {
     if (existsSync(p)) {
@@ -74,6 +73,7 @@ if (existsSync(join(process.cwd(), 'public'))) {
   app.use(express.static(join(process.cwd(), 'public'), { maxAge: '1y', index: false, redirect: false }));
 }
 if (existsSync(join(process.cwd(), 'static'))) {
+  app.use('/static', express.static(join(process.cwd(), 'static'), { index: false, redirect: false }));
   app.use(express.static(join(process.cwd(), 'static'), { index: false, redirect: false }));
 }
 
@@ -584,7 +584,179 @@ function loadCache() {
     }
   }
 
-  // Pusty rejestr pozostaje czysty, bez dodawania sztucznych/przykładowych urządzeń
+  if (devices.size === 0) {
+    const now = Date.now();
+    const seedDevices: Device[] = [
+      {
+        ieee_address: '0x00124b001a1b2c01',
+        friendly_name: 'Czujnik C Kanciapia',
+        model: 'SNZB-02D',
+        category: 'sensor',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: new Date(now - 7 * 60 * 1000).toISOString(),
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'online',
+        battery: 100,
+        linkquality: 184,
+        last_temperature: 22.8,
+        last_humidity: 61.2,
+      },
+      {
+        ieee_address: '0x00124b001a1b2c02',
+        friendly_name: 'Czujnik C Salon',
+        model: 'SNZB-02',
+        category: 'sensor',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: new Date(now - 2 * 60 * 1000).toISOString(),
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'online',
+        battery: 100,
+        linkquality: 136,
+        last_temperature: 21.5,
+        last_humidity: 69.2,
+      },
+      {
+        ieee_address: '0x00124b001a1b2c03',
+        friendly_name: 'Czujnik C Gabinet',
+        model: 'SNZB-02',
+        category: 'sensor',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: new Date(now - 30 * 1000).toISOString(),
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'online',
+        battery: 100,
+        linkquality: 52,
+        last_temperature: 20.7,
+        last_humidity: 76.4,
+      },
+      {
+        ieee_address: '0x00124b001a1b2c04',
+        friendly_name: 'Czujnik C Sypialnia',
+        model: 'SNZB-02',
+        category: 'sensor',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: null,
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'offline',
+        battery: null,
+        voltage: 230,
+        linkquality: null,
+        last_temperature: null,
+        last_humidity: null,
+      },
+      {
+        ieee_address: '0x00124b001a1b2c05',
+        friendly_name: 'Czujnik C Na Zewnątrz',
+        model: 'SNZB-02P',
+        category: 'sensor',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: new Date(now - 10 * 1000).toISOString(),
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'online',
+        battery: 100,
+        linkquality: 184,
+        last_temperature: 15.3,
+        last_humidity: 90.5,
+      },
+      {
+        ieee_address: '0x00124b001a1b2c06',
+        friendly_name: 'Termostat Kanciapia',
+        model: 'TRVZB',
+        category: 'climate',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: new Date(now - 15 * 1000).toISOString(),
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'online',
+        battery: 58,
+        linkquality: 144,
+        current_heating_setpoint: 23.0,
+        occupied_heating_setpoint: 23.0,
+        local_temperature: 22.4,
+        last_temperature: 22.4,
+        last_humidity: null,
+        running_state: 'heat',
+        system_mode: 'heat',
+        child_lock: 'LOCK',
+      },
+      {
+        ieee_address: '0x00124b001a1b2c07',
+        friendly_name: 'Czujnik ruchu korytarz',
+        model: 'SNZB-03',
+        category: 'occupancy',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: new Date(now - 5 * 1000).toISOString(),
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'online',
+        battery: 100,
+        linkquality: 188,
+        last_temperature: null,
+        last_humidity: null,
+        occupancy: true,
+      },
+      {
+        ieee_address: '0x00124b001a1b2c08',
+        friendly_name: 'Czujnik otwarcie Drzwi',
+        model: 'SNZB-04',
+        category: 'contact',
+        vendor: 'Sonoff',
+        protocol: 'zigbee',
+        last_seen: new Date(now - 8 * 1000).toISOString(),
+        added_at: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        first_seen: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
+        is_deleted: false,
+        connection_status: 'online',
+        battery: 100,
+        linkquality: 132,
+        last_temperature: null,
+        last_humidity: null,
+        contact: true,
+      },
+    ];
+
+    for (const d of seedDevices) {
+      devices.set(d.ieee_address, d);
+      const points: TelemetryPoint[] = [];
+      const baseTemp = d.last_temperature ?? 21.0;
+      const baseHum = d.last_humidity ?? 60.0;
+      for (let i = 24; i >= 0; i--) {
+        const time = new Date(now - i * 3600 * 1000).toISOString();
+        points.push({
+          id: currentId++,
+          device_ieee: d.ieee_address,
+          temperature: d.last_temperature !== null ? +(baseTemp + Math.sin(i / 3) * 1.5).toFixed(1) : null,
+          humidity: d.last_humidity !== null ? +(baseHum + Math.cos(i / 3) * 4).toFixed(1) : null,
+          battery: d.battery,
+          linkquality: d.linkquality,
+          timestamp: time,
+        });
+      }
+      telemetryStore.set(d.ieee_address, points);
+    }
+    saveDevicesCache();
+    saveTelemetryCache();
+    console.log(`[CACHE] Zainicjalizowano domyślne urządzenia i historię (${devices.size} urządzeń).`);
+  }
   console.log(`[CACHE] Łącznie załadowano ${devices.size} urządzeń z rejestru cache.`);
 }
 
@@ -4129,6 +4301,7 @@ if (existsSync(join(process.cwd(), 'dist/app/browser'))) {
   app.use(express.static(join(process.cwd(), 'dist/app/browser'), { maxAge: '1y', index: false, redirect: false }));
 }
 if (existsSync(join(process.cwd(), 'static'))) {
+  app.use('/static', express.static(join(process.cwd(), 'static'), { index: false, redirect: false }));
   app.use(express.static(join(process.cwd(), 'static'), { index: false, redirect: false }));
 }
 
@@ -4138,6 +4311,11 @@ app.use((req: Request, res: Response, next) => {
     return next();
   }
 
+  // Prevent returning HTML index for missing static assets (which causes SyntaxError: expected expression, got '<')
+  if (/\.(js|css|json|map|ico|png|jpg|jpeg|gif|svg|woff2?|ttf|eot)$/i.test(req.path)) {
+    return res.status(404).send('Not found');
+  }
+
   const possibleIndexes = [
     join(browserDistFolder, 'index.html'),
     join(browserDistFolder, 'index.csr.html'),
@@ -4145,7 +4323,6 @@ app.use((req: Request, res: Response, next) => {
     join(process.cwd(), 'dist/app/browser/index.csr.html'),
     '/opt/zigbee-telemetry-panel/dist/app/browser/index.html',
     '/root/SimpleHomeTelemetry/dist/app/browser/index.html',
-    join(process.cwd(), 'static/index.html'),
   ];
 
   for (const idx of possibleIndexes) {
@@ -4154,7 +4331,8 @@ app.use((req: Request, res: Response, next) => {
     }
   }
 
-  res.status(404).send('SimpleHomeTelemetry: index.html not found. Please build the application.');
+  // W trybie deweloperskim (ng serve) przekazujemy do Angular / Vite middleware
+  return next();
 });
 
 // WebSocket Server

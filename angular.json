@@ -55,7 +55,15 @@
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true
+              "sourceMap": false,
+              "externalDependencies": [
+                "express",
+                "mqtt",
+                "nodemailer",
+                "ws",
+                "tuyapi",
+                "qrcode"
+              ]
             }
           },
           "defaultConfiguration": "production"
