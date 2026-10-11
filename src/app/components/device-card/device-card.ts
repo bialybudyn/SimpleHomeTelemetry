@@ -1462,9 +1462,15 @@ export class DeviceCard {
       Boolean(d.sonoff_api_key) ||
       v.includes('sonoff') ||
       v.includes('ewelink') ||
+      v.includes('coolkit') ||
       m.includes('sonoff') ||
       m.includes('s60') ||
       m.includes('s26') ||
+      m.includes('s31') ||
+      m.includes('s40') ||
+      m.includes('basic') ||
+      m.includes('minir') ||
+      m.includes('esp32') ||
       fn.includes('sonoff')
     );
   });

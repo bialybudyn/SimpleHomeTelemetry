@@ -2211,17 +2211,25 @@ app.post('/api/devices/:ieee/rename', (req: Request, res: Response) => {
 
 // 4b. Pełna konfiguracja parametrów urządzenia (ręczny adres IP, Device ID, klucze)
 app.post('/api/devices/:ieee/configure', (req: Request, res: Response) => {
-  const ieee = String(req.params['ieee'] || '');
-  let dev = devices.get(ieee);
+  const rawIeee = String(req.params['ieee'] || '').trim();
+  let dev = devices.get(rawIeee);
+  if (!dev) {
+    dev = Array.from(devices.values()).find(
+      (d) =>
+        d.ieee_address.toLowerCase() === rawIeee.toLowerCase() ||
+        (d.sonoff_device_id && d.sonoff_device_id.toLowerCase() === rawIeee.toLowerCase()) ||
+        (d.tuya_dev_id && d.tuya_dev_id.toLowerCase() === rawIeee.toLowerCase())
+    );
+  }
 
-  // Jeśli nie znaleziono po IEEE, spróbuj znaleźć po sonoff_device_id lub tuya_dev_id
+  // Jeśli nadal nie znaleziono po IEEE, spróbuj znaleźć po body.device_id
   if (!dev && req.body?.device_id) {
     const dId = String(req.body.device_id).trim();
     dev = Array.from(devices.values()).find((d) => d.sonoff_device_id === dId || d.tuya_dev_id === dId);
   }
 
   if (!dev) {
-    res.status(404).json({ success: false, message: 'Nie znaleziono urządzenia w rejestrze' });
+    res.status(404).json({ success: false, message: `Nie znaleziono urządzenia w rejestrze (${rawIeee})` });
     return;
   }
 
@@ -2286,10 +2294,18 @@ app.post('/api/devices/:ieee/configure', (req: Request, res: Response) => {
 });
 
 app.post('/api/devices/:ieee/assign-ip', (req: Request, res: Response) => {
-  const ieee = String(req.params['ieee'] || '');
-  const dev = devices.get(ieee);
+  const rawIeee = String(req.params['ieee'] || '').trim();
+  let dev = devices.get(rawIeee);
   if (!dev) {
-    res.status(404).json({ success: false, message: 'Nie znaleziono urządzenia' });
+    dev = Array.from(devices.values()).find(
+      (d) =>
+        d.ieee_address.toLowerCase() === rawIeee.toLowerCase() ||
+        (d.sonoff_device_id && d.sonoff_device_id.toLowerCase() === rawIeee.toLowerCase()) ||
+        (d.tuya_dev_id && d.tuya_dev_id.toLowerCase() === rawIeee.toLowerCase())
+    );
+  }
+  if (!dev) {
+    res.status(404).json({ success: false, message: `Nie znaleziono urządzenia (${rawIeee})` });
     return;
   }
 

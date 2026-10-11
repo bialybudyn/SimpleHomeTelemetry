@@ -16,66 +16,77 @@ import { Telemetry } from '../../services/telemetry';
   template: `
     <div class="space-y-6">
       <!-- Nagłówek główny instalatora -->
-      <div class="p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div class="space-y-1.5">
-          <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+      <div class="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border border-slate-800 space-y-5 shadow-xl">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 w-fit shrink-0">
             <mat-icon class="text-sm !w-4 !h-4">terminal</mat-icon>
-            <span>Automatyczny Instalator Systemowy & Demon w tle</span>
+            <span class="whitespace-nowrap">Automatyczny Instalator Systemowy & Demon w tle</span>
           </div>
-          <h2 class="text-2xl font-bold text-white tracking-tight">
+          <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight">
             Instalacja Zigbee2MQTT + Mosquitto Broker + Panel
           </h2>
-          <p class="text-xs text-slate-400 max-w-2xl leading-relaxed">
+          <p class="text-xs text-slate-400 max-w-3xl leading-relaxed">
             Kompletny instalator hosta konfigurujący brokera Eclipse Mosquitto oraz demona Zigbee2MQTT jako usługi <code class="text-cyan-300 font-mono">systemd</code> działające w tle z automatycznym restartem po restarcie systemu.
           </p>
         </div>
 
-        <!-- Szybkie akcje -->
-        <div class="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 shrink-0">
-          <div class="flex items-center gap-1.5 bg-slate-950/80 px-2.5 py-1 rounded-xl border border-slate-800">
-            <mat-icon class="text-xs !w-4 !h-4 text-slate-400">folder</mat-icon>
-            <input
-              type="text"
-              [value]="customRepoPath()"
-              (input)="customRepoPath.set($any($event.target).value)"
-              placeholder="/opt/zigbee-telemetry-panel"
-              class="w-48 bg-transparent text-xs text-white placeholder-slate-500 font-mono focus:outline-none"
-              title="Ścieżka do katalogu z repozytorium Git (pozostaw puste dla automatycznego wykrycia)"
-            />
+        <!-- Pasek szybkich akcji dopasowany do szerokości karty -->
+        <div class="pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+          <!-- Grupa 1: Ścieżka folderu i aktualizacja Git -->
+          <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full lg:w-auto">
+            <div class="flex items-center gap-1.5 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 flex-1 sm:flex-initial min-w-0">
+              <mat-icon class="text-xs !w-4 !h-4 text-slate-400 shrink-0">folder</mat-icon>
+              <input
+                type="text"
+                [value]="customRepoPath()"
+                (input)="customRepoPath.set($any($event.target).value)"
+                placeholder="/opt/zigbee-telemetry-panel"
+                class="w-full sm:w-44 md:w-52 bg-transparent text-xs text-white placeholder-slate-500 font-mono focus:outline-none min-w-0"
+                title="Ścieżka do katalogu z repozytorium Git (pozostaw puste dla domyślnego)"
+              />
+            </div>
+
+            <button
+              (click)="triggerGitUpdate()"
+              [disabled]="telemetry.isUpdatingGit()"
+              class="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-950/40 transition-all cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
+              title="Aktualizuj kod z repozytorium GitHub (git pull w wybranym folderze)"
+            >
+              <mat-icon class="text-sm !w-4 !h-4 shrink-0" [class.animate-spin]="telemetry.isUpdatingGit()">update</mat-icon>
+              <span>{{ telemetry.isUpdatingGit() ? 'Aktualizacja...' : 'Aktualizuj z Git' }}</span>
+            </button>
           </div>
 
-          <button
-            (click)="triggerGitUpdate()"
-            [disabled]="telemetry.isUpdatingGit()"
-            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-950/40 transition-all cursor-pointer"
-            title="Aktualizuj kod z repozytorium GitHub (git pull w wybranym folderze)"
-          >
-            <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isUpdatingGit()">update</mat-icon>
-            <span>{{ telemetry.isUpdatingGit() ? 'Sprawdzanie i pull...' : 'Aktualizuj z GitHub (Git Pull)' }}</span>
-          </button>
-          <button
-            (click)="inspectSystemServices()"
-            [disabled]="telemetry.isInspectingServices()"
-            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
-            title="Weryfikuj stan i konfigurację zainstalowanych usług"
-          >
-            <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isInspectingServices()">policy</mat-icon>
-            <span>{{ telemetry.isInspectingServices() ? 'Audyt...' : 'Weryfikuj konfigurację usług' }}</span>
-          </button>
-          <button
-            (click)="copyOneLiner()"
-            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
-          >
-            <mat-icon class="text-sm !w-4 !h-4">{{ copiedOneLiner() ? 'check' : 'content_copy' }}</mat-icon>
-            <span>{{ copiedOneLiner() ? 'Skopiowano komendę!' : 'Kopiuj 1-Click' }}</span>
-          </button>
-          <button
-            (click)="downloadFile('install.sh')"
-            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
-          >
-            <mat-icon class="text-sm !w-4 !h-4">download</mat-icon>
-            <span>Pobierz install.sh</span>
-          </button>
+          <!-- Grupa 2: Narzędzia i pobieranie instalatora -->
+          <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+            <button
+              (click)="inspectSystemServices()"
+              [disabled]="telemetry.isInspectingServices()"
+              class="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap flex-1 sm:flex-initial"
+              title="Weryfikuj stan i konfigurację zainstalowanych usług systemd"
+            >
+              <mat-icon class="text-sm !w-4 !h-4 shrink-0" [class.animate-spin]="telemetry.isInspectingServices()">policy</mat-icon>
+              <span>{{ telemetry.isInspectingServices() ? 'Audyt...' : 'Weryfikuj usługi' }}</span>
+            </button>
+
+            <button
+              (click)="copyOneLiner()"
+              class="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-md shadow-cyan-950/40 transition-all cursor-pointer shrink-0 whitespace-nowrap flex-1 sm:flex-initial"
+              title="Kopiuj gotową jednolinijkową komendę instalatora do schowka"
+            >
+              <mat-icon class="text-sm !w-4 !h-4 shrink-0">{{ copiedOneLiner() ? 'check' : 'content_copy' }}</mat-icon>
+              <span>{{ copiedOneLiner() ? 'Skopiowano!' : 'Kopiuj 1-Click' }}</span>
+            </button>
+
+            <button
+              (click)="downloadFile('install.sh')"
+              class="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer shrink-0 whitespace-nowrap flex-1 sm:flex-initial"
+              title="Pobierz plik install.sh na dysk"
+            >
+              <mat-icon class="text-sm !w-4 !h-4 shrink-0">download</mat-icon>
+              <span>Pobierz skrypt</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -323,11 +334,11 @@ import { Telemetry } from '../../services/telemetry';
 
       <!-- Wybór wariantu instalatora (Zakładki instalacji) -->
       <div class="space-y-4">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-          <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-2">
+          <div class="flex flex-wrap items-center gap-2">
             <button
               (click)="selectedInstallerTab.set('linux')"
-              class="px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+              class="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
               [class.bg-cyan-500/10]="selectedInstallerTab() === 'linux'"
               [class.text-cyan-400]="selectedInstallerTab() === 'linux'"
               [class.border]="selectedInstallerTab() === 'linux'"
@@ -335,11 +346,11 @@ import { Telemetry } from '../../services/telemetry';
               [class.text-slate-400]="selectedInstallerTab() !== 'linux'"
               [class.hover:text-slate-200]="selectedInstallerTab() !== 'linux'"
             >
-              Linux / Raspberry Pi (systemd)
+              Linux / RPi (systemd)
             </button>
             <button
               (click)="selectedInstallerTab.set('docker')"
-              class="px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+              class="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
               [class.bg-cyan-500/10]="selectedInstallerTab() === 'docker'"
               [class.text-cyan-400]="selectedInstallerTab() === 'docker'"
               [class.border]="selectedInstallerTab() === 'docker'"
@@ -347,11 +358,11 @@ import { Telemetry } from '../../services/telemetry';
               [class.text-slate-400]="selectedInstallerTab() !== 'docker'"
               [class.hover:text-slate-200]="selectedInstallerTab() !== 'docker'"
             >
-              Docker & Docker Compose
+              Docker & Compose
             </button>
             <button
               (click)="selectedInstallerTab.set('windows')"
-              class="px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+              class="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
               [class.bg-cyan-500/10]="selectedInstallerTab() === 'windows'"
               [class.text-cyan-400]="selectedInstallerTab() === 'windows'"
               [class.border]="selectedInstallerTab() === 'windows'"
@@ -365,7 +376,7 @@ import { Telemetry } from '../../services/telemetry';
 
           <button
             (click)="copyActiveScript()"
-            class="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 font-mono transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 font-mono transition-colors cursor-pointer shrink-0"
           >
             <mat-icon class="text-sm !w-4 !h-4">{{ copiedScript() ? 'check' : 'content_copy' }}</mat-icon>
             <span>{{ copiedScript() ? 'Skopiowano kod!' : 'Kopiuj zawartość skryptu' }}</span>

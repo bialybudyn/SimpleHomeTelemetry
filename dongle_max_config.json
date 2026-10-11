@@ -15,5 +15,5 @@
   "wifi_softap_ip": "",
   "wifi_softap_dhcp_start": "",
   "wifi_softap_dhcp_end": "",
-  "scan_subnets": "192.168.1.0/24, 192.168.0.0/24"
+  "scan_subnets": "192.168.1.0/24"
 }
