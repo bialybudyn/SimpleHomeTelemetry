@@ -3103,7 +3103,7 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
         );
 
         const nowIso = new Date().toISOString();
-        const effectiveIp = dev.ip || (dev.deviceId === '1002729f67' ? '192.168.4.4' : undefined);
+        const effectiveIp = dev.ip || undefined;
         const resolvedKey = dev.deviceKey || dev.apiKey;
 
         if (!existingDev) {

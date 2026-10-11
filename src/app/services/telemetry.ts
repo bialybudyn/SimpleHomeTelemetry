@@ -21,6 +21,7 @@ import {
   DeviceAuditLog,
 } from '../models/telemetry.models';
 import { format24hTime } from '../utils/date-format';
+import { directBrowserSonoffCommand } from '../utils/browser-sonoff-client';
 
 @Injectable({
   providedIn: 'root',
@@ -576,6 +577,32 @@ export class Telemetry {
       this.devices.update((list) =>
         list.map((d) => (d.ieee_address === ieee ? { ...d, ...command } : d)),
       );
+
+      const targetDev = this.devices().find((d) => d.ieee_address === ieee);
+
+      // Jeśli to urządzenie Wi-Fi z IP i komendą ON/OFF, równolegle/próbujemy bezpośredniego wywołania z przeglądarki (Direct Client Fetch)
+      if (
+        isPlatformBrowser(this.platformId) &&
+        targetDev &&
+        targetDev.protocol === 'wifi' &&
+        targetDev.ip_address &&
+        command['state'] !== undefined
+      ) {
+        const swState = command['state'] === 'ON' ? 'on' : 'off';
+        directBrowserSonoffCommand({
+          ip: targetDev.ip_address,
+          deviceId: targetDev.sonoff_device_id || undefined,
+          deviceKey: targetDev.sonoff_api_key || targetDev.local_key || undefined,
+          state: swState,
+          timeoutMs: 1800,
+        }).then((lanRes) => {
+          if (lanRes.success) {
+            console.log('[Direct Browser LAN]', lanRes.message);
+          }
+        }).catch(() => {
+          // fallback obsłużony przez serwer API
+        });
+      }
 
       this.http.post<{ status: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/set`, command).subscribe({
         next: (res) => {
