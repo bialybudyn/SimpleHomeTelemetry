@@ -370,11 +370,21 @@ export async function loginAndSyncEwelink(
       const deviceKey = String(
         item['devicekey'] ||
         item['deviceKey'] ||
+        params['devicekey'] ||
+        params['deviceKey'] ||
         extraInner['devicekey'] ||
         extra['devicekey'] ||
         item['apikey'] ||
         ''
       );
+
+      const resolvedIp = typeof item['ip'] === 'string'
+        ? item['ip']
+        : typeof params['ip'] === 'string'
+        ? params['ip']
+        : typeof params['lanIp'] === 'string'
+        ? params['lanIp']
+        : undefined;
 
       return {
         deviceId: String(item['deviceid'] || ''),
@@ -384,7 +394,7 @@ export async function loginAndSyncEwelink(
         model: String(extraInner['model'] || extra['model'] || 'SONOFF Smart Device'),
         switch: String(params['switch'] || 'off'),
         online: Boolean(item['online']),
-        ip: typeof item['ip'] === 'string' ? item['ip'] : undefined,
+        ip: resolvedIp,
         power: typeof params['power'] === 'number' ? params['power'] : (typeof params['actPow'] === 'number' ? params['actPow'] : undefined),
         voltage: typeof params['voltage'] === 'number' ? params['voltage'] : undefined,
         current: typeof params['current'] === 'number' ? params['current'] : undefined,
@@ -457,6 +467,7 @@ export async function controlEwelinkDevice(
   }
 
   const cleanState = state.toLowerCase() as 'on' | 'off';
+  let lastCloudError = 'Nieznany błąd komunikacji z eWeLink Cloud';
 
   // 1. Próba CoolKit OpenAPI v2 (Standard CUBE-OS)
   try {
@@ -464,37 +475,40 @@ export async function controlEwelinkDevice(
     const singleParam = { switch: cleanState };
     const multiParam = { switches: [{ switch: cleanState, outlet: 0 }] };
 
-    for (const paramsObj of [singleParam, multiParam]) {
-      const v2Res = await fetch(v2Url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${at}`,
-          'X-CK-Appid': appId,
-        },
-        body: JSON.stringify({
-          type: 1,
-          id: deviceId,
-          params: paramsObj,
-        }),
-      });
+    for (const httpMethod of ['POST', 'PUT']) {
+      for (const paramsObj of [singleParam, multiParam]) {
+        const v2Res = await fetch(v2Url, {
+          method: httpMethod,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${at}`,
+            'X-CK-Appid': appId,
+          },
+          body: JSON.stringify({
+            type: 1,
+            id: deviceId,
+            params: paramsObj,
+          }),
+        });
 
-      const v2Data = (await v2Res.json().catch(() => null)) as Record<string, unknown> | null;
-      if (v2Data) {
-        const errCode = Number(v2Data['error']);
-        if (errCode === 0) {
-          return {
-            success: true,
-            message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (OpenAPI v2).`,
-          };
-        }
-        if ((errCode === 401 || errCode === 10004 || errCode === 402) && retryCount === 0) {
-          return controlEwelinkDevice(deviceId, state, 1);
+        const v2Data = (await v2Res.json().catch(() => null)) as Record<string, unknown> | null;
+        if (v2Data) {
+          const errCode = Number(v2Data['error']);
+          if (errCode === 0) {
+            return {
+              success: true,
+              message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (OpenAPI v2 ${httpMethod}).`,
+            };
+          }
+          if ((errCode === 401 || errCode === 10004 || errCode === 402) && retryCount === 0) {
+            return controlEwelinkDevice(deviceId, state, 1);
+          }
+          lastCloudError = String(v2Data['msg'] || `Błąd eWeLink v2 kod ${errCode}`);
         }
       }
     }
-  } catch {
-    // fallback do v1
+  } catch (ex2: any) {
+    lastCloudError = ex2?.message || String(ex2);
   }
 
   // 2. Próba CoolKit API v1
@@ -532,20 +546,18 @@ export async function controlEwelinkDevice(
         if ((errCode === 401 || errCode === 10004) && retryCount === 0) {
           return controlEwelinkDevice(deviceId, state, 1);
         }
+        lastCloudError = String(data['msg'] || `Błąd eWeLink v1 kod ${errCode}`);
       }
     }
-
-    return {
-      success: true,
-      message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud.`,
-    };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return {
-      success: false,
-      message: `Błąd sterowania eWeLink: ${msg}`,
-    };
+    lastCloudError = msg;
   }
+
+  return {
+    success: false,
+    message: `Błąd eWeLink Cloud (${deviceId}): ${lastCloudError}`,
+  };
 }
 
 export interface SonoffLanCommandOptions {

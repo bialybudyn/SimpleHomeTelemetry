@@ -2599,7 +2599,7 @@ app.post('/api/wifi/add-device', (req: Request, res: Response) => {
 });
 
 // 5a. Sterowanie urzadzeniem (TRVZB nastawa/tryb, Smart Plug ON/OFF, Przekaznik ZBMINIR2, Alarmy)
-app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
+app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
   const ieee = String(req.params['ieee'] || '');
   let dev = devices.get(ieee);
   if (!dev) {
@@ -2825,10 +2825,10 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
 
   if (isSonoffDev) {
     // Auto-uzupełnij brakujące identyfikatory z zapamiętanej konfiguracji eWeLink
-    if (!dev.sonoff_device_id || !dev.sonoff_api_key) {
+    if (!dev.sonoff_device_id || !dev.sonoff_api_key || !dev.ip_address) {
       const storedEwe = getStoredEwelinkConfig();
-      if (Array.isArray(storedEwe.devices)) {
-        const matchedEwe = storedEwe.devices.find(
+      if (Array.isArray(storedEwe.devices) && storedEwe.devices.length > 0) {
+        let matchedEwe = storedEwe.devices.find(
           (d) =>
             (dev.ip_address && d.ip === dev.ip_address) ||
             (dev.sonoff_device_id && d.deviceId === dev.sonoff_device_id) ||
@@ -2836,9 +2836,14 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
             (d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === dev.friendly_name.toLowerCase().replace(/[^a-z0-9]/g, '')) ||
             dev.ieee_address.includes(d.deviceId)
         );
+        if (!matchedEwe && storedEwe.devices.length === 1) {
+          matchedEwe = storedEwe.devices[0];
+        }
         if (matchedEwe) {
           if (!dev.sonoff_device_id) dev.sonoff_device_id = matchedEwe.deviceId;
           if (!dev.sonoff_api_key) dev.sonoff_api_key = matchedEwe.deviceKey || matchedEwe.apiKey;
+          if (!dev.ip_address && matchedEwe.ip) dev.ip_address = matchedEwe.ip;
+          if (dev.ip_address && !matchedEwe.ip) matchedEwe.ip = dev.ip_address;
           if (!dev.vendor || dev.vendor === 'Espressif' || dev.vendor === 'Wi-Fi Device') {
             dev.vendor = 'SONOFF / eWeLink (Espressif)';
           }
@@ -2852,6 +2857,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     const pulse = cmd.inching_mode ? 'on' : undefined;
     const pulseWidth = cmd.inching_time ? Number(cmd.inching_time) * 1000 : undefined;
 
+    const previousState = dev.state;
     if (cmd.state !== undefined) {
       dev.state = String(cmd.state);
       if (dev.state === 'OFF') {
@@ -2860,38 +2866,55 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
       }
     }
     dev.last_seen = new Date().toISOString();
-    dev.connection_status = 'online';
 
-    sendSonoffLanCommand({
-      ip: dev.ip_address || '',
-      deviceId: dev.sonoff_device_id || dev.tuya_dev_id || undefined,
-      apiKey: dev.sonoff_api_key || undefined,
-      deviceName: dev.friendly_name,
-      switch: sw,
-      startup,
-      pulse,
-      pulseWidth,
-      sledOnline: sled,
-    }).then((res) => {
-      if (res.success) {
+    try {
+      const resCmd = await sendSonoffLanCommand({
+        ip: dev.ip_address || '',
+        deviceId: dev.sonoff_device_id || dev.tuya_dev_id || undefined,
+        apiKey: dev.sonoff_api_key || undefined,
+        deviceName: dev.friendly_name,
+        switch: sw,
+        startup,
+        pulse,
+        pulseWidth,
+        sledOnline: sled,
+      });
+
+      if (resCmd.success) {
         dev.connection_status = 'online';
         dev.last_error = null;
-        if (res.deviceInfo?.power !== undefined) dev.power = res.deviceInfo.power;
-        if (res.deviceInfo?.voltage !== undefined) dev.voltage = res.deviceInfo.voltage;
-        if (res.deviceInfo?.current !== undefined) dev.current = res.deviceInfo.current;
-        addDeviceLog('control', dev.ieee_address, dev.friendly_name, res.message);
+        if (resCmd.deviceInfo?.power !== undefined) dev.power = resCmd.deviceInfo.power;
+        if (resCmd.deviceInfo?.voltage !== undefined) dev.voltage = resCmd.deviceInfo.voltage;
+        if (resCmd.deviceInfo?.current !== undefined) dev.current = resCmd.deviceInfo.current;
+        addDeviceLog('control', dev.ieee_address, dev.friendly_name, resCmd.message);
+        broadcastEvent({ type: 'device_updated', device: dev });
+        triggerSaveDevices();
+        res.json({ status: 'ok', message: resCmd.message, device: dev });
+        return;
       } else {
-        dev.last_error = res.message;
-        addDeviceLog('warning', dev.ieee_address, dev.friendly_name, `[Sterowanie Sonoff] ${res.message}`);
+        dev.connection_status = 'error';
+        dev.last_error = resCmd.message;
+        if (cmd.state !== undefined && previousState) {
+          dev.state = previousState; // Revert optimistic update on failure
+        }
+        addDeviceLog('warning', dev.ieee_address, dev.friendly_name, `[Sterowanie Sonoff Błąd] ${resCmd.message}`);
+        broadcastEvent({ type: 'device_updated', device: dev });
+        triggerSaveDevices();
+        res.status(400).json({ status: 'error', detail: resCmd.message, device: dev });
+        return;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      dev.connection_status = 'error';
+      dev.last_error = msg;
+      if (cmd.state !== undefined && previousState) {
+        dev.state = previousState;
       }
       broadcastEvent({ type: 'device_updated', device: dev });
       triggerSaveDevices();
-    }).catch((err) => {
-      console.warn(`[SONOFF LAN] Błąd wysyłania komendy do ${dev.ip_address || dev.sonoff_device_id}:`, err);
-    });
-
-    broadcastEvent({ type: 'device_updated', device: dev });
-    triggerSaveDevices();
+      res.status(500).json({ status: 'error', detail: msg, device: dev });
+      return;
+    }
   }
 
   // Bezpośrednie sterowanie urządzeniem Wi-Fi przez TinyTuya (Gniazdko, Wentylator, Czujka Dymu) na porcie 6668
@@ -3530,6 +3553,18 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
     const result = await loginAndSyncEwelink(email_or_phone, password, region || 'eu', custom_app_id, custom_app_secret);
     if (result.success && Array.isArray(result.devices)) {
       for (const dev of result.devices) {
+        const unlinkedWifiDevices = Array.from(devices.values()).filter(
+          (d) =>
+            !d.is_deleted &&
+            !d.sonoff_device_id &&
+            (d.protocol === 'wifi' ||
+             (d.vendor || '').toLowerCase().includes('espressif') ||
+             (d.vendor || '').toLowerCase().includes('sonoff') ||
+             (d.vendor || '').toLowerCase().includes('wifi') ||
+             d.category === 'plug' ||
+             d.category === 'switch')
+        );
+
         // Znajdź czy urządzenie już istnieje w pamięci (po Device ID, IP, nazwie lub vendorze Espressif)
         let existingDev = Array.from(devices.values()).find(
           (d) =>
@@ -3540,8 +3575,23 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
             (d.protocol === 'wifi' && (d.vendor || '').toLowerCase().includes('espressif') && (d.ip_address === dev.ip || d.friendly_name.toLowerCase().includes('sonoff') || d.friendly_name.toLowerCase().includes('gniazdko')))
         );
 
+        if (!existingDev && unlinkedWifiDevices.length > 0) {
+          if (unlinkedWifiDevices.length === 1) {
+            existingDev = unlinkedWifiDevices[0];
+          } else {
+            existingDev = unlinkedWifiDevices.find(
+              (d) =>
+                (dev.ip && d.ip_address === dev.ip) ||
+                (dev.name && d.friendly_name.toLowerCase().includes(dev.name.toLowerCase())) ||
+                d.friendly_name.toLowerCase().includes('gniazdko') ||
+                d.friendly_name.toLowerCase().includes('espressif') ||
+                d.friendly_name.toLowerCase().includes('sonoff')
+            );
+          }
+        }
+
         const nowIso = new Date().toISOString();
-        const effectiveIp = dev.ip || undefined;
+        const effectiveIp = dev.ip || existingDev?.ip_address || undefined;
         const resolvedKey = dev.deviceKey || dev.apiKey;
 
         if (!existingDev) {
@@ -3551,7 +3601,7 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
             friendly_name: dev.name || `Gniazdko Sonoff (${dev.deviceId})`,
             model: dev.model || 'SONOFF Smartplug S60TPF Wi-Fi 16A',
             category: 'plug',
-            vendor: 'SONOFF / eWeLink',
+            vendor: 'SONOFF / eWeLink (Espressif)',
             protocol: 'wifi',
             ip_address: effectiveIp || undefined,
             sonoff_device_id: dev.deviceId,
@@ -3579,13 +3629,16 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
         } else {
           existingDev.sonoff_api_key = resolvedKey;
           existingDev.sonoff_device_id = dev.deviceId;
+          existingDev.vendor = 'SONOFF / eWeLink (Espressif)';
           existingDev.state = dev.switch === 'on' ? 'ON' : 'OFF';
           existingDev.connection_status = dev.online ? 'online' : 'offline';
           if (effectiveIp && !existingDev.ip_address) existingDev.ip_address = effectiveIp;
+          if (existingDev.ip_address && !dev.ip) dev.ip = existingDev.ip_address;
           if (dev.name) existingDev.friendly_name = dev.name;
           if (dev.power !== undefined) existingDev.power = dev.power;
           if (dev.voltage !== undefined) existingDev.voltage = dev.voltage;
           if (dev.current !== undefined) existingDev.current = dev.current;
+          addDeviceLog('reconnected', existingDev.ieee_address, existingDev.friendly_name, `[eWeLink Sync] Powiązano urządzenie z kluczem Cloud ID ${dev.deviceId}!`);
         }
       }
       triggerSaveDevices();
