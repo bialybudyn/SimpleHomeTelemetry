@@ -33,6 +33,7 @@ import {
   loginAndSyncEwelink,
   controlEwelinkDevice,
   getStoredEwelinkConfig,
+  updateStoredEwelinkConfig,
 } from './sonoff-lan-service';
 import {
   getImgwSynopStations,
@@ -500,7 +501,7 @@ function triggerSaveTelemetry() {
 interface DeviceAuditLog {
   id: number;
   timestamp: string;
-  action: 'soft_delete' | 'restore' | 'permanent_delete' | 'rename' | 'created' | 'reconnected' | 'batch_action';
+  action: 'soft_delete' | 'restore' | 'permanent_delete' | 'rename' | 'created' | 'reconnected' | 'batch_action' | 'control' | 'warning';
   device_ieee: string;
   device_name?: string;
   message: string;
@@ -510,7 +511,7 @@ const deviceAuditLogs: DeviceAuditLog[] = [];
 let nextLogId = 1;
 
 function addDeviceLog(
-  action: 'soft_delete' | 'restore' | 'permanent_delete' | 'rename' | 'created' | 'reconnected' | 'batch_action',
+  action: 'soft_delete' | 'restore' | 'permanent_delete' | 'rename' | 'created' | 'reconnected' | 'batch_action' | 'control' | 'warning',
   device_ieee: string,
   device_name: string | undefined,
   message: string,
@@ -2420,9 +2421,14 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     }
   }
 
-  // Sterowanie urządzeniem SONOFF Wi-Fi (S60TFP / S26 / Mini / eWeLink LAN na porcie 8081)
-  const isSonoffDev = dev.protocol === 'wifi' && (dev.model.toLowerCase().includes('s60') || (dev.vendor || '').toLowerCase().includes('sonoff'));
-  if (isSonoffDev && dev.ip_address) {
+  // Sterowanie urządzeniem SONOFF Wi-Fi (S60TFP / S26 / Mini / eWeLink LAN na porcie 8081 / eWeLink Cloud CUBE-OS)
+  const isSonoffDev = dev.protocol === 'wifi' && (
+    (dev.model || '').toLowerCase().includes('s60') ||
+    (dev.model || '').toLowerCase().includes('sonoff') ||
+    (dev.vendor || '').toLowerCase().includes('sonoff') ||
+    Boolean(dev.sonoff_device_id)
+  );
+  if (isSonoffDev && (dev.ip_address || dev.sonoff_device_id)) {
     const sw = cmd.state ? (cmd.state === 'ON' ? 'on' : 'off') : undefined;
     const startup = cmd.power_on_behavior ? (cmd.power_on_behavior === 'on' ? 'on' : cmd.power_on_behavior === 'off' ? 'off' : 'stay') : undefined;
     const sled = cmd.network_indicator !== undefined ? (cmd.network_indicator ? 'on' : 'off') : undefined;
@@ -2431,12 +2437,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
 
     if (cmd.state !== undefined) {
       dev.state = String(cmd.state);
-      if (dev.state === 'ON') {
-        dev.power = Math.round((140 + Math.random() * 80) * 10) / 10;
-        dev.voltage = Math.round((229 + Math.random() * 3) * 10) / 10;
-        dev.current = Math.round((dev.power / dev.voltage) * 100) / 100;
-        dev.energy = Math.round(((dev.energy || 14.8) + 0.01) * 100) / 100;
-      } else {
+      if (dev.state === 'OFF') {
         dev.power = 0;
         dev.current = 0;
       }
@@ -2445,7 +2446,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
     dev.connection_status = 'online';
 
     sendSonoffLanCommand({
-      ip: dev.ip_address,
+      ip: dev.ip_address || '',
       deviceId: dev.sonoff_device_id || dev.tuya_dev_id || undefined,
       apiKey: dev.sonoff_api_key || undefined,
       switch: sw,
@@ -2453,8 +2454,22 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
       pulse,
       pulseWidth,
       sledOnline: sled,
+    }).then((res) => {
+      if (res.success) {
+        dev.connection_status = 'online';
+        dev.last_error = null;
+        if (res.deviceInfo?.power !== undefined) dev.power = res.deviceInfo.power;
+        if (res.deviceInfo?.voltage !== undefined) dev.voltage = res.deviceInfo.voltage;
+        if (res.deviceInfo?.current !== undefined) dev.current = res.deviceInfo.current;
+        addDeviceLog('control', dev.ieee_address, dev.friendly_name, res.message);
+      } else {
+        dev.last_error = res.message;
+        addDeviceLog('warning', dev.ieee_address, dev.friendly_name, `[Sterowanie Sonoff] ${res.message}`);
+      }
+      broadcastEvent({ type: 'device_updated', device: dev });
+      triggerSaveDevices();
     }).catch((err) => {
-      console.warn(`[SONOFF LAN] Błąd wysyłania komendy do ${dev.ip_address}:`, err);
+      console.warn(`[SONOFF LAN] Błąd wysyłania komendy do ${dev.ip_address || dev.sonoff_device_id}:`, err);
     });
 
     broadcastEvent({ type: 'device_updated', device: dev });
@@ -3006,13 +3021,13 @@ app.post('/api/sonoff/device/add', (req: Request, res: Response) => {
       linkquality: 100,
       last_temperature: null,
       last_humidity: null,
-      state: 'ON',
-      power: 185.4,
-      voltage: 231.2,
-      current: 0.81,
-      energy: 14.82,
-      energy_today: 1.45,
-      energy_month: 28.6,
+      state: 'OFF',
+      power: null,
+      voltage: null,
+      current: null,
+      energy: null,
+      energy_today: null,
+      energy_month: null,
       overload_protection: true,
       overload_power_threshold: 4000,
       overload_current_threshold: 16,
@@ -3040,7 +3055,7 @@ app.post('/api/sonoff/device/add', (req: Request, res: Response) => {
   });
 });
 
-// 4. Pobranie konfiguracji i stanu połączenia z kontem eWeLink
+// 4. Pobranie i zapis konfiguracji konta eWeLink (AppId, AppSecret, Region, DeviceKey)
 app.get('/api/sonoff/ewelink/config', (_req: Request, res: Response) => {
   res.json({
     success: true,
@@ -3048,16 +3063,38 @@ app.get('/api/sonoff/ewelink/config', (_req: Request, res: Response) => {
   });
 });
 
+app.post('/api/sonoff/ewelink/config', (req: Request, res: Response) => {
+  const { app_id, app_secret, region, email_or_phone } = req.body || {};
+  const patch: Record<string, unknown> = {};
+  if (app_id !== undefined) patch['appId'] = String(app_id).trim();
+  if (app_secret !== undefined) patch['appSecret'] = String(app_secret).trim();
+  if (region !== undefined) patch['region'] = String(region).trim();
+  if (email_or_phone !== undefined) {
+    if (String(email_or_phone).includes('@')) {
+      patch['email'] = String(email_or_phone).trim();
+    } else {
+      patch['phoneNumber'] = String(email_or_phone).trim();
+    }
+  }
+
+  updateStoredEwelinkConfig(patch);
+  res.json({
+    success: true,
+    message: 'Zaktualizowano konfigurację eWeLink CUBE-OS.',
+    config: getStoredEwelinkConfig(),
+  });
+});
+
 // 5. Logowanie do konta eWeLink i synchronizacja urządzeń wraz z pobraniem kluczy lokalnych (DeviceKey / API Key)
 app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
-  const { email_or_phone, password, region } = req.body || {};
+  const { email_or_phone, password, region, custom_app_id, custom_app_secret } = req.body || {};
   if (!email_or_phone || !password) {
     res.status(400).json({ success: false, message: 'Wymagany jest email/telefon oraz hasło do konta eWeLink' });
     return;
   }
 
   try {
-    const result = await loginAndSyncEwelink(email_or_phone, password, region || 'eu');
+    const result = await loginAndSyncEwelink(email_or_phone, password, region || 'eu', custom_app_id, custom_app_secret);
     if (result.success && Array.isArray(result.devices)) {
       for (const dev of result.devices) {
         // Znajdź czy urządzenie już istnieje
@@ -3066,9 +3103,11 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
         );
 
         const nowIso = new Date().toISOString();
+        const effectiveIp = dev.ip || (dev.deviceId === '1002729f67' ? '192.168.4.4' : undefined);
+        const resolvedKey = dev.deviceKey || dev.apiKey;
+
         if (!existingDev) {
-          const defaultIp = dev.deviceId === '1002729f67' ? '192.168.4.4' : (dev.ip || `192.168.4.${Math.floor(Math.random() * 20) + 2}`);
-          const ieee = `wifi_${defaultIp.replace(/\./g, '_')}`;
+          const ieee = effectiveIp ? `wifi_${effectiveIp.replace(/\./g, '_')}` : `sonoff_${dev.deviceId}`;
           const newPlug: Device = {
             ieee_address: ieee,
             friendly_name: dev.name || `Gniazdko Sonoff (${dev.deviceId})`,
@@ -3076,9 +3115,9 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
             category: 'plug',
             vendor: 'SONOFF / eWeLink',
             protocol: 'wifi',
-            ip_address: defaultIp,
+            ip_address: effectiveIp || undefined,
             sonoff_device_id: dev.deviceId,
-            sonoff_api_key: dev.apiKey,
+            sonoff_api_key: resolvedKey,
             last_seen: nowIso,
             added_at: nowIso,
             first_seen: nowIso,
@@ -3089,23 +3128,26 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
             last_temperature: null,
             last_humidity: null,
             state: dev.switch === 'on' ? 'ON' : 'OFF',
-            power: dev.power ?? (dev.switch === 'on' ? 140 : 0),
-            voltage: dev.voltage ?? 230,
-            current: dev.current ?? (dev.switch === 'on' ? 0.6 : 0),
-            energy: 0.12,
+            power: dev.power ?? null,
+            voltage: dev.voltage ?? null,
+            current: dev.current ?? null,
+            energy: null,
             overload_protection: true,
             overload_power_threshold: 4000,
             overload_current_threshold: 16,
           };
           devices.set(ieee, newPlug);
-          addDeviceLog('created', ieee, newPlug.friendly_name, `[eWeLink Sync] Zsynchronizowano gniazdko ${dev.name} (${dev.deviceId}) z konta eWeLink!`);
+          addDeviceLog('created', ieee, newPlug.friendly_name, `[eWeLink CUBE-OS Sync] Zsynchronizowano gniazdko ${dev.name} (${dev.deviceId}) z konta eWeLink!`);
         } else {
-          existingDev.sonoff_api_key = dev.apiKey;
+          existingDev.sonoff_api_key = resolvedKey;
           existingDev.sonoff_device_id = dev.deviceId;
           existingDev.state = dev.switch === 'on' ? 'ON' : 'OFF';
           existingDev.connection_status = dev.online ? 'online' : 'offline';
+          if (effectiveIp && !existingDev.ip_address) existingDev.ip_address = effectiveIp;
           if (dev.name) existingDev.friendly_name = dev.name;
           if (dev.power !== undefined) existingDev.power = dev.power;
+          if (dev.voltage !== undefined) existingDev.voltage = dev.voltage;
+          if (dev.current !== undefined) existingDev.current = dev.current;
         }
       }
       triggerSaveDevices();
@@ -3230,7 +3272,7 @@ async function performDongleMaxAutoDiscovery(customSubnet?: string, customIps?: 
   subnetsToScan.add('192.168.1');
   subnetsToScan.add('192.168.0');
 
-  // Zbieranie adresów IP z tablicy ARP
+  // Zbieranie adresów IP z tablicy ARP oraz narzędzi systemowych (Debian arping / ip neigh / /proc/net/arp)
   const arpIps: string[] = [];
   try {
     if (existsSync('/proc/net/arp')) {
@@ -3242,6 +3284,30 @@ async function performDongleMaxAutoDiscovery(customSubnet?: string, customIps?: 
           arpIps.push(parts[0]);
         }
       }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Odczyt z systemowego polecenia ip neigh (Linux / Debian)
+  try {
+    const neighOutput = execSync('ip neigh show 2>/dev/null', { timeout: 1500, encoding: 'utf-8' });
+    for (const line of neighOutput.split('\n')) {
+      const parts = line.trim().split(/\s+/);
+      if (parts[0] && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(parts[0])) {
+        arpIps.push(parts[0]);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Odczyt z klasycznego arp -an (Linux / Debian)
+  try {
+    const arpOutput = execSync('arp -an 2>/dev/null', { timeout: 1500, encoding: 'utf-8' });
+    const matchIps = arpOutput.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g);
+    if (matchIps) {
+      arpIps.push(...matchIps);
     }
   } catch {
     // ignore

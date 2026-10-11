@@ -1169,12 +1169,20 @@ export class Telemetry {
     });
   }
 
-  loginEwelink(emailOrPhone: string, password: string, region = 'eu'): Promise<{ success: boolean; message: string; devicesCount: number }> {
+  loginEwelink(
+    emailOrPhone: string,
+    password: string,
+    region = 'eu',
+    customAppId?: string,
+    customAppSecret?: string,
+  ): Promise<{ success: boolean; message: string; devicesCount: number }> {
     return new Promise((resolve) => {
       this.http.post<{ success: boolean; message: string; devices: unknown[] }>('/api/sonoff/ewelink/login', {
         email_or_phone: emailOrPhone,
         password,
         region,
+        custom_app_id: customAppId || undefined,
+        custom_app_secret: customAppSecret || undefined,
       }).subscribe({
         next: (res) => {
           this.fetchDevices();
@@ -1192,6 +1200,18 @@ export class Telemetry {
             devicesCount: 0,
           });
         },
+      });
+    });
+  }
+
+  saveEwelinkConfig(patch: { app_id?: string; app_secret?: string; region?: string; email_or_phone?: string }): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http.post<{ success: boolean; config: unknown }>('/api/sonoff/ewelink/config', patch).subscribe({
+        next: (res) => {
+          this.loadEwelinkConfig();
+          resolve(res?.success || false);
+        },
+        error: () => resolve(false),
       });
     });
   }

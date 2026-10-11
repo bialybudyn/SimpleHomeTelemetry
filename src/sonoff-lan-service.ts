@@ -12,11 +12,12 @@
  *    - POST http://<IP>:8081/zeroconf/signal_strength
  */
 
-import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createHash, createCipheriv, createDecipheriv, randomBytes, createHmac } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-// @ts-ignore
-import ewelink from 'ewelink-api';
+
+const DEFAULT_COOLKIT_APP_ID = 'YzfeftUVcZ6twZw1OoVKPRFYTrGEg01Q';
+const DEFAULT_COOLKIT_APP_SECRET = '4G91qSoboqYO4Y0XJ0LPPKIsq8reHdfa';
 
 const EWELINK_CONFIG_FILE = join(process.cwd(), 'ewelink_config.json');
 
@@ -27,16 +28,22 @@ export interface EwelinkAccountConfig {
   region: string;
   at?: string;
   apiKey?: string;
+  appId?: string;
+  appSecret?: string;
   connected: boolean;
   lastSync?: string;
   devices?: Array<{
     deviceId: string;
     apiKey: string;
+    deviceKey?: string;
     name: string;
     model: string;
     switch?: string;
     online: boolean;
     ip?: string;
+    power?: number;
+    voltage?: number;
+    current?: number;
   }>;
 }
 
@@ -56,7 +63,7 @@ function loadEwelinkConfig(): void {
   }
 }
 
-function saveEwelinkConfig(): void {
+export function saveEwelinkConfig(): void {
   try {
     writeFileSync(EWELINK_CONFIG_FILE, JSON.stringify(activeEwelinkConfig, null, 2), 'utf-8');
   } catch {
@@ -70,6 +77,141 @@ export function getStoredEwelinkConfig(): EwelinkAccountConfig {
   return activeEwelinkConfig;
 }
 
+export function updateStoredEwelinkConfig(patch: Partial<EwelinkAccountConfig>): void {
+  activeEwelinkConfig = { ...activeEwelinkConfig, ...patch };
+  saveEwelinkConfig();
+}
+
+/**
+ * Pomocnicze funkcje do bezpośredniej komunikacji z CoolKit / eWeLink Cloud API (wg specyfikacji CUBE-OS)
+ */
+async function ewelinkCloudLogin(
+  emailOrPhone: string,
+  password: string,
+  region = 'eu',
+  customAppId?: string,
+  customAppSecret?: string,
+): Promise<{ at: string; apiKey: string; region: string } | { error: string }> {
+  const isEmail = emailOrPhone.includes('@');
+  const nonce = Math.random().toString(36).slice(5);
+  const ts = Math.floor(Date.now() / 1000);
+
+  const appId = customAppId?.trim() || activeEwelinkConfig.appId?.trim() || DEFAULT_COOLKIT_APP_ID;
+  const appSecret = customAppSecret?.trim() || activeEwelinkConfig.appSecret?.trim() || DEFAULT_COOLKIT_APP_SECRET;
+
+  const body: Record<string, unknown> = {
+    appid: appId,
+    password,
+    ts,
+    version: 8,
+    nonce,
+  };
+  if (isEmail) {
+    body['email'] = emailOrPhone.trim();
+  } else {
+    body['phoneNumber'] = emailOrPhone.trim();
+  }
+
+  const sign = createHmac('sha256', appSecret).update(JSON.stringify(body)).digest('base64');
+  let currentRegion = region;
+  let apiUrl = `https://${currentRegion}-api.coolkit.cc:8080/api`;
+
+  let res = await fetch(`${apiUrl}/user/login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Sign ${sign}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  let data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+
+  // Obsługa przekierowania regionu (HTTP 301 z CoolKit)
+  if (data && typeof data === 'object' && Number(data['error']) === 301 && typeof data['region'] === 'string') {
+    currentRegion = data['region'];
+    apiUrl = `https://${currentRegion}-api.coolkit.cc:8080/api`;
+    res = await fetch(`${apiUrl}/user/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Sign ${sign}`,
+      },
+      body: JSON.stringify(body),
+    });
+    data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  }
+
+  if (!data || (typeof data['error'] === 'number' && data['error'] !== 0)) {
+    const errCode = data?.['error'];
+    let msg = data && typeof data['msg'] === 'string' ? data['msg'] : `Kod błędu eWeLink: ${errCode || 'brak odpowiedzi'}`;
+    if (errCode === 408) {
+      msg = 'Identyfikator aplikacji eWeLink wygasł (błąd 408). Możesz podać własny darmowy AppId i AppSecret z dev.ewelink.cc lub skorzystać z bezpośredniego DeviceKey.';
+    } else if (errCode === 406 || errCode === 400) {
+      msg = `Niepoprawny login lub hasło eWeLink (${data?.['msg'] || errCode}).`;
+    }
+    return { error: msg };
+  }
+
+  const user = data['user'] as Record<string, unknown> | undefined;
+  const at = typeof data['at'] === 'string' ? data['at'] : '';
+  const apiKey = typeof user?.['apikey'] === 'string' ? user['apikey'] : '';
+
+  return { at, apiKey, region: currentRegion };
+}
+
+async function ewelinkCloudGetDeviceList(
+  at: string,
+  region = 'eu',
+  appId = DEFAULT_COOLKIT_APP_ID,
+): Promise<{ success: boolean; devices?: Array<Record<string, unknown>>; error?: string }> {
+  const ts = Math.floor(Date.now() / 1000);
+
+  // 1. Próba CoolKit OpenAPI v2 (standard CUBE-OS i ewelink-api-next)
+  try {
+    const v2Url = `https://${region}-apia.coolkit.cc/v2/device/thing?lang=en&getTags=1`;
+    const v2Res = await fetch(v2Url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${at}`,
+        'X-CK-Appid': appId,
+      },
+    });
+    const v2Data = (await v2Res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (v2Data && Number(v2Data['error']) === 0 && (v2Data['data'] || v2Data['thingList'])) {
+      const thingList = (v2Data['data'] as any)?.thingList || v2Data['thingList'] || [];
+      const extracted = thingList.map((t: any) => t.itemData || t);
+      if (Array.isArray(extracted) && extracted.length > 0) {
+        return { success: true, devices: extracted };
+      }
+    }
+  } catch {
+    // fallback do v1
+  }
+
+  // 2. Próba CoolKit API v1
+  const apiUrl = `https://${region}-api.coolkit.cc:8080/api`;
+  const url = `${apiUrl}/user/device?lang=en&appid=${appId}&ts=${ts}&version=8&getTags=1`;
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${at}`,
+    },
+  });
+
+  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!data) {
+    return { success: false, error: 'Brak odpowiedzi z serwera eWeLink' };
+  }
+  if (typeof data['error'] === 'number' && data['error'] !== 0) {
+    return { success: false, error: String(data['msg'] || `Błąd eWeLink ${data['error']}`) };
+  }
+
+  const list = Array.isArray(data['devicelist']) ? (data['devicelist'] as Array<Record<string, unknown>>) : [];
+  return { success: true, devices: list };
+}
+
 /**
  * Logowanie i synchronizacja urządzeń z kontem eWeLink
  */
@@ -77,12 +219,15 @@ export async function loginAndSyncEwelink(
   emailOrPhone: string,
   password: string,
   region = 'eu',
+  customAppId?: string,
+  customAppSecret?: string,
 ): Promise<{
   success: boolean;
   message: string;
   devices: Array<{
     deviceId: string;
     apiKey: string;
+    deviceKey?: string;
     name: string;
     model: string;
     switch: string;
@@ -95,42 +240,46 @@ export async function loginAndSyncEwelink(
 }> {
   try {
     const isEmail = emailOrPhone.includes('@');
-    const connConfig: Record<string, string> = {
-      password,
-      region,
-    };
-    if (isEmail) {
-      connConfig['email'] = emailOrPhone.trim();
-    } else {
-      connConfig['phoneNumber'] = emailOrPhone.trim();
-    }
+    const loginResult = await ewelinkCloudLogin(emailOrPhone, password, region, customAppId, customAppSecret);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const conn = new (ewelink as any)(connConfig);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: any = await conn.getDevices();
-
-    if (!Array.isArray(result)) {
-      const errMsg = (result && typeof result === 'object' && 'msg' in result)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? String((result as any).msg)
-        : 'Nieprawidłowe dane logowania eWeLink';
+    if ('error' in loginResult) {
       return {
         success: false,
-        message: `Błąd logowania do eWeLink: ${errMsg}`,
+        message: `Błąd logowania do eWeLink: ${loginResult.error}`,
         devices: [],
       };
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsedDevices = result.map((item: any) => {
+    const { at, region: resolvedRegion } = loginResult;
+    const appId = customAppId?.trim() || activeEwelinkConfig.appId?.trim() || DEFAULT_COOLKIT_APP_ID;
+    const devListRes = await ewelinkCloudGetDeviceList(at, resolvedRegion, appId);
+
+    if (!devListRes.success || !Array.isArray(devListRes.devices)) {
+      return {
+        success: false,
+        message: devListRes.error || 'Nie udało się pobrać listy urządzeń z eWeLink.',
+        devices: [],
+      };
+    }
+
+    const parsedDevices = devListRes.devices.map((item) => {
       const params = (item['params'] as Record<string, unknown>) || {};
       const extra = (item['extra'] as Record<string, unknown>) || {};
       const extraInner = (extra['extra'] as Record<string, unknown>) || {};
 
+      const deviceKey = String(
+        item['devicekey'] ||
+        item['deviceKey'] ||
+        extraInner['devicekey'] ||
+        extra['devicekey'] ||
+        item['apikey'] ||
+        ''
+      );
+
       return {
         deviceId: String(item['deviceid'] || ''),
         apiKey: String(item['apikey'] || ''),
+        deviceKey,
         name: String(item['name'] || `Sonoff ${item['deviceid']}`),
         model: String(extraInner['model'] || extra['model'] || 'SONOFF Smart Device'),
         switch: String(params['switch'] || 'off'),
@@ -146,7 +295,11 @@ export async function loginAndSyncEwelink(
       email: isEmail ? emailOrPhone.trim() : undefined,
       phoneNumber: !isEmail ? emailOrPhone.trim() : undefined,
       password,
-      region,
+      region: resolvedRegion,
+      appId: customAppId || activeEwelinkConfig.appId,
+      appSecret: customAppSecret || activeEwelinkConfig.appSecret,
+      at,
+      apiKey: loginResult.apiKey,
       connected: true,
       lastSync: new Date().toISOString(),
       devices: parsedDevices,
@@ -155,7 +308,7 @@ export async function loginAndSyncEwelink(
 
     return {
       success: true,
-      message: `Pomyślnie zalogowano do eWeLink! Pobrano ${parsedDevices.length} urządzeń wraz z kluczami LAN (devicekey).`,
+      message: `Pomyślnie zalogowano do eWeLink! Pobrano ${parsedDevices.length} urządzeń wraz z kluczami LAN (DeviceKey).`,
       devices: parsedDevices,
     };
   } catch (err: unknown) {
@@ -169,45 +322,112 @@ export async function loginAndSyncEwelink(
 }
 
 /**
- * Sterowanie urządzeniem przez oficjalne API eWeLink (Cloud fallback)
+ * Sterowanie urządzeniem przez oficjalne API eWeLink (Cloud fallback - CUBE-OS dual engine)
  */
 export async function controlEwelinkDevice(
   deviceId: string,
   state: 'on' | 'off',
 ): Promise<{ success: boolean; message: string }> {
-  if (!activeEwelinkConfig.password || (!activeEwelinkConfig.email && !activeEwelinkConfig.phoneNumber)) {
-    return {
-      success: false,
-      message: 'Konto eWeLink nie jest skonfigurowane w panelu.',
-    };
-  }
+  let at = activeEwelinkConfig.at;
+  const region = activeEwelinkConfig.region || 'eu';
+  const appId = activeEwelinkConfig.appId?.trim() || DEFAULT_COOLKIT_APP_ID;
 
-  try {
-    const connConfig: Record<string, string> = {
-      password: activeEwelinkConfig.password,
-      region: activeEwelinkConfig.region || 'eu',
-    };
-    if (activeEwelinkConfig.email) {
-      connConfig['email'] = activeEwelinkConfig.email;
-    } else if (activeEwelinkConfig.phoneNumber) {
-      connConfig['phoneNumber'] = activeEwelinkConfig.phoneNumber;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const conn = new (ewelink as any)(connConfig);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res: any = await conn.setDevicePowerState(deviceId, state.toLowerCase());
-
-    if (res && res.error) {
+  if (!at) {
+    if (!activeEwelinkConfig.password || (!activeEwelinkConfig.email && !activeEwelinkConfig.phoneNumber)) {
       return {
         success: false,
-        message: `Błąd eWeLink API: ${res.msg || res.error}`,
+        message: 'Konto eWeLink nie jest skonfigurowane w panelu (brak tokenu i hasła).',
+      };
+    }
+
+    const loginRes = await ewelinkCloudLogin(
+      activeEwelinkConfig.email || activeEwelinkConfig.phoneNumber || '',
+      activeEwelinkConfig.password,
+      region,
+      activeEwelinkConfig.appId,
+      activeEwelinkConfig.appSecret,
+    );
+    if ('error' in loginRes) {
+      return { success: false, message: `Błąd logowania eWeLink: ${loginRes.error}` };
+    }
+    at = loginRes.at;
+    activeEwelinkConfig.at = at;
+    saveEwelinkConfig();
+  }
+
+  const cleanState = state.toLowerCase() as 'on' | 'off';
+
+  // 1. Próba CoolKit OpenAPI v2 (Standard CUBE-OS)
+  try {
+    const v2Url = `https://${region}-apia.coolkit.cc/v2/device/thing/status`;
+    const v2Body = {
+      type: 1,
+      id: deviceId,
+      params: {
+        switch: cleanState,
+        switches: [{ switch: cleanState, outlet: 0 }],
+      },
+    };
+
+    const v2Res = await fetch(v2Url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${at}`,
+        'X-CK-Appid': appId,
+      },
+      body: JSON.stringify(v2Body),
+    });
+
+    const v2Data = (await v2Res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (v2Data && Number(v2Data['error']) === 0) {
+      return {
+        success: true,
+        message: `Pomyślnie przestawiono ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (OpenAPI v2 / CUBE-OS).`,
+      };
+    }
+  } catch {
+    // fallback do v1
+  }
+
+  // 2. Próba CoolKit API v1
+  try {
+    const ts = Math.floor(Date.now() / 1000);
+    const nonce = Math.random().toString(36).slice(5);
+    const apiUrl = `https://${region}-api.coolkit.cc:8080/api`;
+
+    const body = {
+      deviceid: deviceId,
+      params: {
+        switch: cleanState,
+        switches: [{ switch: cleanState, outlet: 0 }],
+      },
+      appid: appId,
+      nonce,
+      ts,
+      version: 8,
+    };
+
+    const res = await fetch(`${apiUrl}/user/device/status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${at}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (data && typeof data['error'] === 'number' && data['error'] !== 0) {
+      return {
+        success: false,
+        message: `Błąd eWeLink API: ${data['msg'] || data['error']}`,
       };
     }
 
     return {
       success: true,
-      message: `Pomyślnie przełączono ${deviceId} na stan ${state.toUpperCase()} przez eWeLink.`,
+      message: `Pomyślnie przestawiono ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (v1).`,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -431,9 +651,17 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
   const cleanIp = String(ip || '').trim();
 
   if (!cleanIp) {
+    if (deviceId) {
+      const cloudRes = await controlEwelinkDevice(deviceId, options.switch || 'on');
+      return {
+        success: cloudRes.success,
+        message: cloudRes.message,
+        deviceInfo: { switch: options.switch },
+      };
+    }
     return {
       success: false,
-      message: 'Brak podanego adresu IP Sonoff.',
+      message: 'Brak podanego adresu IP Sonoff oraz brak Device ID.',
       error: 'Brak adresu IP',
     };
   }
@@ -444,7 +672,7 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
       const res = await sendSonoffHttpRequest(
         cleanIp,
         '/zeroconf/switch',
-        { switch: options.switch },
+        { switch: options.switch, switches: [{ switch: options.switch, outlet: 0 }] },
         deviceId,
         apiKey,
         2200,
@@ -453,7 +681,7 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
       if (res.error === 0) {
         return {
           success: true,
-          message: `Pomyślnie przestawiono Sonoff na stan: ${options.switch.toUpperCase()}`,
+          message: `[Lokalny LAN 8081] Pomyślnie przestawiono Sonoff (${cleanIp}) na stan: ${options.switch.toUpperCase()}`,
           deviceInfo: { switch: options.switch },
           rawResponse: res,
         };
@@ -467,23 +695,36 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
         : String(err);
       console.warn(`[SONOFF LAN] Nie można połączyć się z ${cleanIp}:8081 (${msg})`);
 
-      // Automatyczny fallback do oficjalnej chmury eWeLink jeśli urządzenie posiada deviceId
+      // Automatyczny fallback do oficjalnej chmury eWeLink jeśli urządzenie posiada deviceId (CUBE-OS dual engine)
       if (deviceId) {
         try {
           const cloudRes = await controlEwelinkDevice(deviceId, options.switch || 'on');
           if (cloudRes.success) {
             return {
               success: true,
-              message: `Pomyślnie przestawiono stan Sonoff (${deviceId}) przez chmurę eWeLink: ${options.switch?.toUpperCase()}`,
+              message: `[eWeLink Cloud Bridge] Pomyślnie przestawiono stan Sonoff (${deviceId}) na ${options.switch?.toUpperCase()} (LAN ${cleanIp} niedostępny: ${msg})`,
+              deviceInfo: { switch: options.switch },
+            };
+          } else {
+            return {
+              success: false,
+              message: `LAN 8081 (${cleanIp}): ${msg}. Chmura eWeLink: ${cloudRes.message}`,
+              error: msg,
               deviceInfo: { switch: options.switch },
             };
           }
-        } catch {
-          // ignore cloud error and return lan error
+        } catch (cloudErr: unknown) {
+          const cMsg = cloudErr instanceof Error ? cloudErr.message : String(cloudErr);
+          return {
+            success: false,
+            message: `LAN 8081 (${cleanIp}): ${msg}. Chmura eWeLink: ${cMsg}`,
+            error: msg,
+            deviceInfo: { switch: options.switch },
+          };
         }
       }
 
-      // Urządzenie nie odpowiedziało - zwracamy czytelny rezultat bez dalszego próbkowania kolejnych endpointów
+      // Urządzenie nie odpowiedziało - zwracamy czytelny rezultat
       return {
         success: false,
         message: `Urządzenie Sonoff (${cleanIp}) jest niedostępne w sieci LAN: ${msg}`,

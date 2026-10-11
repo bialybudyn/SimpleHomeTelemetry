@@ -151,14 +151,36 @@ interface DetectedSonoffPlug {
                     <span class="text-emerald-400 font-bold block">S60TPF (ESP32-C3)</span>
                   </div>
                   <div class="p-2 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <span class="text-slate-500 text-[10px] block">Szyfrowanie Zeroconf:</span>
-                    <span class="text-amber-300 font-bold block">encrypt = true (Port 8081)</span>
+                    <span class="text-slate-500 text-[10px] block">Tryb CUBE-OS:</span>
+                    <span class="text-amber-300 font-bold block">LAN AES + Cloud Bridge</span>
                   </div>
+                </div>
+
+                <!-- Pole wpisania DeviceKey dla bezpośredniego AES LAN -->
+                <div class="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <label for="s60KeyDirect" class="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                      <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">key</mat-icon>
+                      <span>Klucz szyfrowania DeviceKey (AES-128-CBC dla Portu 8081):</span>
+                    </label>
+                    <span class="text-[10px] font-mono text-slate-400">Opcjonalnie (pobierany też z eWeLink)</span>
+                  </div>
+                  <input
+                    id="s60KeyDirect"
+                    type="text"
+                    [value]="s60DeviceKey()"
+                    (input)="s60DeviceKey.set($any($event.target).value)"
+                    placeholder="Wpisz 32-znakowy DeviceKey lub pobierz poniżej przez eWeLink..."
+                    class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                  />
+                  <p class="text-[10px] text-slate-400 leading-tight">
+                    💡 W oficjalnym systemie eWeLink CUBE-OS gniazdko z <code class="text-amber-300 font-mono">encrypt=true</code> wymaga tego klucza do bezpośrednich komend HTTP na porcie 8081. Możesz go wpisać ręcznie lub kliknąć poniżej synchronizację konta eWeLink.
+                  </p>
                 </div>
 
                 <div class="flex items-center justify-between pt-1">
                   <p class="text-[11px] text-slate-300">
-                    Gniazdko jest widoczne w sieci Dongle-MAX. Zarejestruj je bezpośrednio w panelu jednym kliknięciem:
+                    Zarejestruj gniazdko w panelu do natychmiastowego sterowania:
                   </p>
                   <button
                     type="button"
@@ -249,6 +271,45 @@ interface DetectedSonoffPlug {
                     <mat-icon class="text-xs !w-4 !h-4" [class.animate-spin]="isLoggingEwelink()">sync</mat-icon>
                     <span>{{ isLoggingEwelink() ? 'Logowanie i pobieranie kluczy...' : '🔑 Pobierz klucze urządzeń z eWeLink' }}</span>
                   </button>
+                </div>
+
+                <!-- Opcjonalne zaawansowane poświadczenia AppId / AppSecret -->
+                <div>
+                  <button
+                    type="button"
+                    (click)="showDevCredentials.set(!showDevCredentials())"
+                    class="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1 cursor-pointer"
+                  >
+                    <mat-icon class="text-xs !w-3 !h-3">settings</mat-icon>
+                    <span>{{ showDevCredentials() ? 'Ukryj własny AppId / AppSecret' : 'Opcjonalnie: własny AppId i AppSecret z dev.ewelink.cc' }}</span>
+                  </button>
+
+                  @if (showDevCredentials()) {
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                      <div class="space-y-1">
+                        <label for="customAppIdInput" class="text-[10px] text-slate-400 block font-mono">Custom AppId (dev.ewelink.cc)</label>
+                        <input
+                          id="customAppIdInput"
+                          type="text"
+                          [value]="customAppId()"
+                          (input)="customAppId.set($any($event.target).value)"
+                          placeholder="Domyślny CUBE-OS..."
+                          class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono"
+                        />
+                      </div>
+                      <div class="space-y-1">
+                        <label for="customAppSecretInput" class="text-[10px] text-slate-400 block font-mono">Custom AppSecret</label>
+                        <input
+                          id="customAppSecretInput"
+                          type="password"
+                          [value]="customAppSecret()"
+                          (input)="customAppSecret.set($any($event.target).value)"
+                          placeholder="Domyślny CUBE-OS..."
+                          class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+                  }
                 </div>
 
                 @if (ewelinkMessage()) {
@@ -563,12 +624,16 @@ export class WifiPairingModal implements OnInit {
   readonly ewelinkEmail = signal<string>('b.zbudniewek@gmail.com');
   readonly ewelinkPassword = signal<string>('');
   readonly ewelinkRegion = signal<string>('eu');
+  readonly customAppId = signal<string>('');
+  readonly customAppSecret = signal<string>('');
+  readonly showDevCredentials = signal<boolean>(false);
   readonly isLoggingEwelink = signal<boolean>(false);
   readonly ewelinkMessage = signal<string>('');
   readonly ewelinkSuccess = signal<boolean>(false);
 
   // --- MANUAL KEY STATE ---
   readonly showManualKeySection = signal<boolean>(false);
+  readonly s60DeviceKey = signal<string>('');
   readonly manualIpField = signal<string>('192.168.4.4');
   readonly manualIdField = signal<string>('1002729f67');
   readonly manualKeyField = signal<string>('');
@@ -595,12 +660,14 @@ export class WifiPairingModal implements OnInit {
     }
   }
 
-  // Bezpośrednie 1-klikowe dodanie S60TPF z rozpoznanych danych Bonjour
+  // Bezpośrednie dodanie S60TPF z ewentualnym kluczem DeviceKey
   async addS60Directly(): Promise<void> {
+    const key = this.s60DeviceKey().trim() || this.manualKeyField().trim() || undefined;
     const ok = await this.telemetry.addSonoffDevice({
       ip_address: '192.168.4.4',
       name: 'Gniazdko Sonoff S60TPF',
       device_id: '1002729f67',
+      api_key: key,
     });
 
     if (ok) {
@@ -608,7 +675,7 @@ export class WifiPairingModal implements OnInit {
     }
   }
 
-  // Synchronizacja z kontem eWeLink
+  // Synchronizacja z kontem eWeLink (CUBE-OS workflow)
   async loginEwelinkAccount(): Promise<void> {
     const login = this.ewelinkEmail().trim();
     const pass = this.ewelinkPassword().trim();
@@ -618,7 +685,13 @@ export class WifiPairingModal implements OnInit {
     this.ewelinkMessage.set('');
 
     try {
-      const res = await this.telemetry.loginEwelink(login, pass, this.ewelinkRegion());
+      const res = await this.telemetry.loginEwelink(
+        login,
+        pass,
+        this.ewelinkRegion(),
+        this.customAppId().trim() || undefined,
+        this.customAppSecret().trim() || undefined,
+      );
       this.isLoggingEwelink.set(false);
       this.ewelinkSuccess.set(res.success);
       this.ewelinkMessage.set(res.message);
