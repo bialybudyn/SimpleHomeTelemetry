@@ -16,8 +16,15 @@ import { createHash, createCipheriv, createDecipheriv, randomBytes, createHmac }
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DEFAULT_COOLKIT_APP_ID = 'YzfeftUVcZ6twZw1OoVKPRFYTrGEg01Q';
-const DEFAULT_COOLKIT_APP_SECRET = '4G91qSoboqYO4Y0XJ0LPPKIsq8reHdfa';
+const KNOWN_COOLKIT_CREDENTIALS = [
+  {
+    appId: '4s1FXKC9FaGfoqXhmXSJneb3qcm1gOak',
+    appSecret: 'oKvCM06gvwkRbfetd6qWRrbC3rFrbIpV',
+  },
+];
+
+const DEFAULT_COOLKIT_APP_ID = KNOWN_COOLKIT_CREDENTIALS[0].appId;
+const DEFAULT_COOLKIT_APP_SECRET = KNOWN_COOLKIT_CREDENTIALS[0].appSecret;
 
 const EWELINK_CONFIG_FILE = join(process.cwd(), 'ewelink_config.json');
 
@@ -91,73 +98,166 @@ async function ewelinkCloudLogin(
   region = 'eu',
   customAppId?: string,
   customAppSecret?: string,
-): Promise<{ at: string; apiKey: string; region: string } | { error: string }> {
+): Promise<{ at: string; apiKey: string; region: string; appId: string; appSecret: string } | { error: string }> {
   const isEmail = emailOrPhone.includes('@');
-  const nonce = Math.random().toString(36).slice(5);
+  const nonce = Math.random().toString(36).substring(2, 10);
   const ts = Math.floor(Date.now() / 1000);
 
-  const appId = customAppId?.trim() || activeEwelinkConfig.appId?.trim() || DEFAULT_COOLKIT_APP_ID;
-  const appSecret = customAppSecret?.trim() || activeEwelinkConfig.appSecret?.trim() || DEFAULT_COOLKIT_APP_SECRET;
-
-  const body: Record<string, unknown> = {
-    appid: appId,
-    password,
-    ts,
-    version: 8,
-    nonce,
-  };
-  if (isEmail) {
-    body['email'] = emailOrPhone.trim();
-  } else {
-    body['phoneNumber'] = emailOrPhone.trim();
-  }
-
-  const sign = createHmac('sha256', appSecret).update(JSON.stringify(body)).digest('base64');
-  let currentRegion = region;
-  let apiUrl = `https://${currentRegion}-api.coolkit.cc:8080/api`;
-
-  let res = await fetch(`${apiUrl}/user/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Sign ${sign}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  let data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-
-  // Obsługa przekierowania regionu (HTTP 301 z CoolKit)
-  if (data && typeof data === 'object' && Number(data['error']) === 301 && typeof data['region'] === 'string') {
-    currentRegion = data['region'];
-    apiUrl = `https://${currentRegion}-api.coolkit.cc:8080/api`;
-    res = await fetch(`${apiUrl}/user/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Sign ${sign}`,
-      },
-      body: JSON.stringify(body),
-    });
-    data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  }
-
-  if (!data || (typeof data['error'] === 'number' && data['error'] !== 0)) {
-    const errCode = data?.['error'];
-    let msg = data && typeof data['msg'] === 'string' ? data['msg'] : `Kod błędu eWeLink: ${errCode || 'brak odpowiedzi'}`;
-    if (errCode === 408) {
-      msg = 'Identyfikator aplikacji eWeLink wygasł (błąd 408). Możesz podać własny darmowy AppId i AppSecret z dev.ewelink.cc lub skorzystać z bezpośredniego DeviceKey.';
-    } else if (errCode === 406 || errCode === 400) {
-      msg = `Niepoprawny login lub hasło eWeLink (${data?.['msg'] || errCode}).`;
+  // Wyznaczenie kraju i numeru telefonu
+  let countryCode = '+48';
+  let formattedPhone = emailOrPhone.trim();
+  if (!isEmail) {
+    if (formattedPhone.startsWith('+')) {
+      const match = formattedPhone.match(/^(\+\d{1,3})(\d+)$/);
+      if (match) {
+        countryCode = match[1];
+        formattedPhone = match[0];
+      }
+    } else {
+      formattedPhone = `+48${formattedPhone.replace(/^0+/, '')}`;
     }
-    return { error: msg };
   }
 
-  const user = data['user'] as Record<string, unknown> | undefined;
-  const at = typeof data['at'] === 'string' ? data['at'] : '';
-  const apiKey = typeof user?.['apikey'] === 'string' ? user['apikey'] : '';
+  // Zbuduj listę par do sprawdzenia
+  const candidateCredentials: Array<{ appId: string; appSecret: string }> = [];
+  if (customAppId?.trim() && customAppSecret?.trim()) {
+    candidateCredentials.push({ appId: customAppId.trim(), appSecret: customAppSecret.trim() });
+  } else if (activeEwelinkConfig.appId?.trim() && activeEwelinkConfig.appSecret?.trim()) {
+    candidateCredentials.push({ appId: activeEwelinkConfig.appId.trim(), appSecret: activeEwelinkConfig.appSecret.trim() });
+  }
 
-  return { at, apiKey, region: currentRegion };
+  for (const cred of KNOWN_COOLKIT_CREDENTIALS) {
+    if (!candidateCredentials.some((c) => c.appId === cred.appId)) {
+      candidateCredentials.push(cred);
+    }
+  }
+
+  let lastErrorMsg = 'Błąd logowania do eWeLink';
+
+  for (const cred of candidateCredentials) {
+    const { appId, appSecret } = cred;
+
+    // === METODA 1: CoolKit OpenAPI v2 (https://{region}-apia.coolkit.cc/v2/user/login) ===
+    try {
+      const v2Body: Record<string, unknown> = {
+        countryCode,
+        password,
+      };
+      if (isEmail) {
+        v2Body['email'] = emailOrPhone.trim();
+      } else {
+        v2Body['phoneNumber'] = formattedPhone;
+      }
+
+      const v2Sign = createHmac('sha256', appSecret).update(JSON.stringify(v2Body)).digest('base64');
+      const v2Res = await fetch(`https://${region}-apia.coolkit.cc/v2/user/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CK-Appid': appId,
+          'X-CK-Nonce': nonce,
+          Authorization: `Sign ${v2Sign}`,
+        },
+        body: JSON.stringify(v2Body),
+      });
+
+      const v2Data = (await v2Res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (v2Data) {
+        const v2Err = Number(v2Data['error']);
+        if (v2Err === 0 && v2Data['data']) {
+          const d = v2Data['data'] as Record<string, unknown>;
+          const user = (d['user'] as Record<string, unknown>) || {};
+          const at = typeof d['at'] === 'string' ? d['at'] : '';
+          const apiKey = typeof user['apikey'] === 'string' ? user['apikey'] : '';
+          const resolvedReg = typeof d['region'] === 'string' ? (d['region'] as string) : region;
+          return { at, apiKey, region: resolvedReg, appId, appSecret };
+        }
+
+        const v2Msg = typeof v2Data['msg'] === 'string' ? v2Data['msg'] : '';
+        if (v2Err === 10001 || v2Msg.includes('password error')) {
+          return { error: 'Niepoprawne hasło do konta eWeLink! Sprawdź hasło do aplikacji.' };
+        }
+        if (v2Err === 10003 || v2Msg.includes('does not exist')) {
+          return { error: `Konto eWeLink (${emailOrPhone}) nie istnieje w regionie ${region.toUpperCase()}. Sprawdź poprawność adresu email lub numeru telefonu.` };
+        }
+        if (v2Msg.toLowerCase().includes('unauthorized') || v2Err === 407 || v2Err === 408) {
+          lastErrorMsg = `Identyfikator aplikacji eWeLink (${appId}) został odrzucony (unauthorized). Podaj własny bezpłatny AppId i AppSecret z dev.ewelink.cc lub użyj bezpośredniego klucza DeviceKey.`;
+        } else {
+          lastErrorMsg = v2Msg || `Błąd eWeLink v2: ${v2Err}`;
+        }
+      }
+    } catch (v2Ex: any) {
+      console.warn(`[eWeLink v2 login fail]:`, v2Ex?.message || v2Ex);
+    }
+
+    // === METODA 2: CoolKit API v1 (Fallback na port 8080) ===
+    try {
+      const v1Body: Record<string, unknown> = {
+        appid: appId,
+        password,
+        ts,
+        version: 8,
+        nonce,
+      };
+      if (isEmail) {
+        v1Body['email'] = emailOrPhone.trim();
+      } else {
+        v1Body['phoneNumber'] = emailOrPhone.trim();
+      }
+
+      const v1Sign = createHmac('sha256', appSecret).update(JSON.stringify(v1Body)).digest('base64');
+      let currentRegion = region;
+      let apiUrl = `https://${currentRegion}-api.coolkit.cc:8080/api`;
+
+      let res = await fetch(`${apiUrl}/user/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Sign ${v1Sign}`,
+        },
+        body: JSON.stringify(v1Body),
+      });
+
+      let data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+
+      // Obsługa przekierowania regionu (HTTP 301 z CoolKit)
+      if (data && typeof data === 'object' && Number(data['error']) === 301 && typeof data['region'] === 'string') {
+        currentRegion = data['region'];
+        apiUrl = `https://${currentRegion}-api.coolkit.cc:8080/api`;
+        res = await fetch(`${apiUrl}/user/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Sign ${v1Sign}`,
+          },
+          body: JSON.stringify(v1Body),
+        });
+        data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      }
+
+      if (data && typeof data['error'] === 'number' && data['error'] === 0) {
+        const user = data['user'] as Record<string, unknown> | undefined;
+        const at = typeof data['at'] === 'string' ? data['at'] : '';
+        const apiKey = typeof user?.['apikey'] === 'string' ? user['apikey'] : '';
+        return { at, apiKey, region: currentRegion, appId, appSecret };
+      }
+
+      const rawMsg = data && typeof data['msg'] === 'string' ? data['msg'] : '';
+      const errCode = data?.['error'];
+
+      if (errCode === 406 || errCode === 400) {
+        return { error: `Niepoprawny login lub hasło do konta eWeLink (${rawMsg || errCode}). Upewnij się, że wpisujesz dane do oficjalnej aplikacji eWeLink.` };
+      }
+
+      if (rawMsg && !rawMsg.toLowerCase().includes('unauthorized')) {
+        lastErrorMsg = rawMsg;
+      }
+    } catch (fetchErr: any) {
+      lastErrorMsg = `Błąd sieciowy podczas łączenia z serwerem eWeLink: ${fetchErr?.message || fetchErr}`;
+    }
+  }
+
+  return { error: lastErrorMsg };
 }
 
 async function ewelinkCloudGetDeviceList(
@@ -250,8 +350,8 @@ export async function loginAndSyncEwelink(
       };
     }
 
-    const { at, region: resolvedRegion } = loginResult;
-    const appId = customAppId?.trim() || activeEwelinkConfig.appId?.trim() || DEFAULT_COOLKIT_APP_ID;
+    const { at, region: resolvedRegion, appId: resolvedAppId, appSecret: resolvedAppSecret } = loginResult;
+    const appId = resolvedAppId || customAppId?.trim() || activeEwelinkConfig.appId?.trim() || DEFAULT_COOLKIT_APP_ID;
     const devListRes = await ewelinkCloudGetDeviceList(at, resolvedRegion, appId);
 
     if (!devListRes.success || !Array.isArray(devListRes.devices)) {
@@ -296,8 +396,8 @@ export async function loginAndSyncEwelink(
       phoneNumber: !isEmail ? emailOrPhone.trim() : undefined,
       password,
       region: resolvedRegion,
-      appId: customAppId || activeEwelinkConfig.appId,
-      appSecret: customAppSecret || activeEwelinkConfig.appSecret,
+      appId: resolvedAppId || customAppId || activeEwelinkConfig.appId,
+      appSecret: resolvedAppSecret || customAppSecret || activeEwelinkConfig.appSecret,
       at,
       apiKey: loginResult.apiKey,
       connected: true,

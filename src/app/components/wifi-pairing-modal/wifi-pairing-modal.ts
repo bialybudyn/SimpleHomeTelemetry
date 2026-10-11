@@ -177,30 +177,30 @@ import { DeviceCategory } from '../../models/telemetry.models';
                     class="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1 cursor-pointer"
                   >
                     <mat-icon class="text-xs !w-3 !h-3">settings</mat-icon>
-                    <span>{{ showDevCredentials() ? 'Ukryj własny AppId / AppSecret' : 'Opcjonalnie: własny AppId i AppSecret z dev.ewelink.cc' }}</span>
+                    <span>{{ showDevCredentials() ? 'Ukryj własny AppId / AppSecret' : 'Klucze API eWeLink (domyślny SonoffLAN lub własny z dev.ewelink.cc)' }}</span>
                   </button>
 
                   @if (showDevCredentials()) {
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
                       <div class="space-y-1">
-                        <label for="customAppIdInput" class="text-[10px] text-slate-400 block font-mono">Custom AppId (dev.ewelink.cc)</label>
+                        <label for="customAppIdInput" class="text-[10px] text-slate-400 block font-mono">AppId (CoolKit / dev.ewelink.cc)</label>
                         <input
                           id="customAppIdInput"
                           type="text"
                           [value]="customAppId()"
                           (input)="customAppId.set($any($event.target).value)"
-                          placeholder="Domyślny CUBE-OS..."
+                          placeholder="Domyślny SonoffLAN (4s1FXKC9Fa...)"
                           class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono"
                         />
                       </div>
                       <div class="space-y-1">
-                        <label for="customAppSecretInput" class="text-[10px] text-slate-400 block font-mono">Custom AppSecret</label>
+                        <label for="customAppSecretInput" class="text-[10px] text-slate-400 block font-mono">AppSecret</label>
                         <input
                           id="customAppSecretInput"
                           type="password"
                           [value]="customAppSecret()"
                           (input)="customAppSecret.set($any($event.target).value)"
-                          placeholder="Domyślny CUBE-OS..."
+                          placeholder="Domyślny SonoffLAN (oKvCM06g...)"
                           class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-white text-xs font-mono"
                         />
                       </div>
@@ -492,7 +492,7 @@ export class WifiPairingModal implements OnInit {
   readonly ewelinkSuccess = signal<boolean>(false);
 
   // --- MANUAL KEY STATE ---
-  readonly showManualKeySection = signal<boolean>(false);
+  readonly showManualKeySection = signal<boolean>(true);
   readonly manualIpField = signal<string>('');
   readonly manualIdField = signal<string>('');
   readonly manualKeyField = signal<string>('');

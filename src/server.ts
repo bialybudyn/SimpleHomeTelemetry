@@ -3982,38 +3982,60 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
 });
 
 // 18. Aktualizacja oprogramowania SimpleHomeTelemetry z Git / GitHub
-app.post('/api/system/git-update', (_req: Request, res: Response) => {
+app.post('/api/system/git-update', (req: Request, res: Response) => {
   const logSteps: string[] = [];
+  const requestedDir = typeof req.body?.repo_path === 'string' && req.body.repo_path.trim() ? req.body.repo_path.trim() : null;
 
   // Detekcja obecności repozytorium Git w środowisku uruchomieniowym
   let gitRepoDir: string | null = null;
   const candidates = [
+    requestedDir,
     process.cwd(),
-    join(process.cwd(), '..'),
     '/opt/zigbee-telemetry-panel',
+    '/root/SimpleHomeTelemetry',
+    join(process.cwd(), '..'),
     '/var/www/iot-telemetry',
     '/home/pi/simplehome',
-  ];
+    '/app/applet',
+  ].filter((p): p is string => Boolean(p));
+
+  const checkedPaths: Array<{ path: string; exists: boolean; hasGit: boolean }> = [];
   for (const c of candidates) {
-    if (existsSync(join(c, '.git'))) {
+    const exists = existsSync(c);
+    const hasGit = exists && existsSync(join(c, '.git'));
+    checkedPaths.push({ path: c, exists, hasGit });
+    if (!gitRepoDir && hasGit) {
       gitRepoDir = c;
-      break;
     }
   }
 
+  // Jeśli brak repozytorium .git w żadnym z katalogów
   if (!gitRepoDir) {
+    const workingDir = process.cwd();
+    const isBareMetalCandidate = existsSync('/opt/zigbee-telemetry-panel') || existsSync('/root/SimpleHomeTelemetry');
+    
+    logSteps.push(`[Diagnostyka Ścieżek]: Sprawdzono katalogi:`);
+    for (const cp of checkedPaths) {
+      logSteps.push(` - ${cp.path}: ${cp.exists ? (cp.hasGit ? 'znaleziono .git' : 'katalog istnieje, brak podkatalogu .git') : 'katalog nie istnieje'}`);
+    }
+    logSteps.push(`[Aktywny Katalog Procesu]: ${workingDir}`);
+
     res.json({
-      success: true,
+      success: false,
       updated: false,
-      current_commit: 'cloud-production',
-      remote_commit: 'cloud-production',
-      message: 'System pracuje w dedykowanym środowisku produkcyjnym (brak lokalnego katalogu repozytorium .git). Aplikacja korzysta z najnowszego skompilowanego obrazu produkcyjnego. Aktualizacja Git dostępna jest w instalacji bare-metal z klonem repozytorium.',
-      output: '[System Notice]: Środowisko uruchomieniowe bezrepozytoryjne. Wszystkie pliki panelu i serwera są w najnowszej wersji.',
+      current_dir: workingDir,
+      checked_paths: checkedPaths,
+      current_commit: 'brak-repo-git',
+      remote_commit: 'nieznany',
+      message: `Nie znaleziono repozytorium Git w sprawdzanych katalogach (${workingDir}). Wskazany folder nie zawiera katalogu .git, więc nie można wykonać polecenia git pull.`,
+      output: logSteps.join('\n') + '\n\n[Instrukcja]: Jeśli panel został zainstalowany z GitHub, wskaż właściwą ścieżkę (np. /opt/zigbee-telemetry-panel lub /root/SimpleHomeTelemetry) albo sklonuj repozytorium komendą: git clone <url_repozytorium> w katalogu roboczym.',
     });
     return;
   }
 
   try {
+    logSteps.push(`[Wykryty Folder Repozytorium]: ${gitRepoDir}`);
+
     // 1. Zabezpieczenie przed błędem dubious ownership w Git
     try {
       execSync('git config --global --add safe.directory "*" || true', { cwd: gitRepoDir, encoding: 'utf-8' });
@@ -4022,13 +4044,51 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
     }
 
     let beforeCommit = 'unknown';
+    let currentBranch = 'main';
     try {
       beforeCommit = execSync('git rev-parse --short HEAD', { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
+      currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: gitRepoDir, encoding: 'utf-8' }).trim() || 'main';
+      logSteps.push(`[Stan Lokalny]: Gałąź ${currentBranch}, aktualny commit: ${beforeCommit}`);
     } catch {
       // ignore
     }
 
-    // 2. Przechowanie lokalnych zmian (np. baza sqlite, pliki dist), aby git pull sie nie wykrzaczyl
+    // 2. Pobranie informacji o zdalnym repozytorium (git fetch)
+    let remoteUrl = '';
+    try {
+      remoteUrl = execSync('git remote get-url origin 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
+      logSteps.push(`[Zdalne Repozytorium]: ${remoteUrl}`);
+    } catch {
+      logSteps.push(`[Zdalne Repozytorium]: brak skonfigurowanego remote origin`);
+    }
+
+    try {
+      const fetchOut = execSync('git fetch --all 2>&1', { cwd: gitRepoDir, encoding: 'utf-8', timeout: 30000 });
+      logSteps.push(`[Git Fetch]: ${fetchOut.trim() || 'Pobrano metadane ze zdalnego repozytorium'}`);
+    } catch (fetchErr: unknown) {
+      const errStr = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      logSteps.push(`[Git Fetch Ostrzeżenie]: ${errStr}`);
+    }
+
+    let remoteCommit = beforeCommit;
+    try {
+      remoteCommit = execSync(`git rev-parse --short origin/${currentBranch} 2>&1 || git rev-parse --short origin/main 2>&1 || git rev-parse --short origin/master 2>&1`, { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
+      logSteps.push(`[Najnowszy Commit Remote]: ${remoteCommit}`);
+    } catch {
+      // ignore
+    }
+
+    // 3. Sprawdzenie czy rzeczywiście występują różnice między HEAD a zdalnym repozytorium
+    let behindCount = 0;
+    try {
+      const countStr = execSync(`git rev-list --count HEAD..origin/${currentBranch} 2>&1 || git rev-list --count HEAD..origin/main 2>&1 || echo 0`, { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
+      behindCount = parseInt(countStr, 10) || 0;
+      logSteps.push(`[Commity do pobrania]: ${behindCount}`);
+    } catch {
+      // ignore
+    }
+
+    // 4. Przechowanie lokalnych zmian (stash) aby uniknąć konfliktów
     try {
       const stashOut = execSync('git stash --include-untracked 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
       logSteps.push(`[Git Stash]: ${stashOut.trim()}`);
@@ -4036,10 +4096,10 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
       // ignore
     }
 
-    // 3. Pobranie zmian z repozytorium zdalnego
+    // 5. Pobranie zmian (git pull)
     let pullOutput = '';
     try {
-      pullOutput = execSync('git fetch --all 2>&1 && (git pull origin main 2>&1 || git pull origin master 2>&1 || git pull 2>&1)', {
+      pullOutput = execSync(`git pull origin ${currentBranch} 2>&1 || git pull origin main 2>&1 || git pull origin master 2>&1 || git pull 2>&1`, {
         cwd: gitRepoDir,
         encoding: 'utf-8',
         timeout: 45000,
@@ -4049,16 +4109,16 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
       const errStr = pullErr instanceof Error && 'stdout' in pullErr ? String((pullErr as { stdout?: unknown }).stdout || pullErr.message) : String(pullErr);
       logSteps.push(`[Git Pull Notice]: ${errStr}`);
 
-      // Fallback: Hard reset do stanu zdalnego w razie konfliktow lub niezgodnosci galezi
+      // Fallback: Hard reset do stanu zdalnego
       try {
-        const resetOut = execSync('git reset --hard origin/main 2>&1 || git reset --hard origin/master 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
+        const resetOut = execSync(`git reset --hard origin/${currentBranch} 2>&1 || git reset --hard origin/main 2>&1`, { cwd: gitRepoDir, encoding: 'utf-8' });
         logSteps.push(`[Git Reset Fallback]: ${resetOut.trim()}`);
       } catch (resetErr: unknown) {
         logSteps.push(`[Git Reset Error]: ${String(resetErr)}`);
       }
     }
 
-    // 4. Przywrocenie lokalnych zmienionych plikow jesli to mozliwe
+    // 6. Przywrócenie lokalnego stash
     try {
       const popOut = execSync('git stash pop 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
       logSteps.push(`[Git Stash Pop]: ${popOut.trim()}`);
@@ -4074,16 +4134,22 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
     }
 
     const fullLogs = logSteps.join('\n');
-    const updated = beforeCommit !== afterCommit || fullLogs.includes('Updating') || fullLogs.includes('Fast-forward') || fullLogs.includes('HEAD is now at');
+    const wasUpdated = beforeCommit !== afterCommit || fullLogs.includes('Updating') || fullLogs.includes('Fast-forward') || fullLogs.includes('HEAD is now at');
+    const isUpToDate = !wasUpdated && (beforeCommit === remoteCommit || fullLogs.includes('Already up to date'));
+
+    const message = wasUpdated
+      ? `Pomyślnie zaktualizowano oprogramowanie w katalogu ${gitRepoDir} (z commita ${beforeCommit} do ${afterCommit})!`
+      : (isUpToDate
+        ? `Folder ${gitRepoDir} jest zsynchronizowany z GitHub (commit ${afterCommit}). Brak nowych zmian.`
+        : `Zakończono sprawdzanie repozytorium ${gitRepoDir} (commit lokalny: ${afterCommit}, zdalny: ${remoteCommit}).`);
 
     res.json({
       success: true,
-      updated,
+      updated: wasUpdated,
+      current_dir: gitRepoDir,
       current_commit: afterCommit,
-      remote_commit: afterCommit,
-      message: updated
-        ? `Pomyslnie zaktualizowano oprogramowanie z commita ${beforeCommit} do ${afterCommit}!`
-        : 'Repozytorium jest juz w najnowszej wersji (Already up to date).',
+      remote_commit: remoteCommit,
+      message,
       output: fullLogs,
     });
   } catch (err: unknown) {
@@ -4091,7 +4157,8 @@ app.post('/api/system/git-update', (_req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       updated: false,
-      message: `Blad podczas aktualizacji Git: ${msg}`,
+      current_dir: gitRepoDir,
+      message: `Błąd podczas aktualizacji Git w folderze ${gitRepoDir}: ${msg}`,
       output: logSteps.join('\n') + '\n' + msg,
     });
   }

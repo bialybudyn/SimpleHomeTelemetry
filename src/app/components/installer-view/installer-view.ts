@@ -31,20 +31,32 @@ import { Telemetry } from '../../services/telemetry';
         </div>
 
         <!-- Szybkie akcje -->
-        <div class="flex flex-wrap items-center gap-2.5 shrink-0">
+        <div class="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 shrink-0">
+          <div class="flex items-center gap-1.5 bg-slate-950/80 px-2.5 py-1 rounded-xl border border-slate-800">
+            <mat-icon class="text-xs !w-4 !h-4 text-slate-400">folder</mat-icon>
+            <input
+              type="text"
+              [value]="customRepoPath()"
+              (input)="customRepoPath.set($any($event.target).value)"
+              placeholder="/opt/zigbee-telemetry-panel"
+              class="w-48 bg-transparent text-xs text-white placeholder-slate-500 font-mono focus:outline-none"
+              title="Ścieżka do katalogu z repozytorium Git (pozostaw puste dla automatycznego wykrycia)"
+            />
+          </div>
+
           <button
             (click)="triggerGitUpdate()"
             [disabled]="telemetry.isUpdatingGit()"
-            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-950/40 transition-all cursor-pointer"
-            title="Aktualizuj kod z repozytorium GitHub (git pull)"
+            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-950/40 transition-all cursor-pointer"
+            title="Aktualizuj kod z repozytorium GitHub (git pull w wybranym folderze)"
           >
             <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isUpdatingGit()">update</mat-icon>
-            <span>{{ telemetry.isUpdatingGit() ? 'Pobieranie aktualizacji...' : 'Aktualizuj z GitHub (Git Pull)' }}</span>
+            <span>{{ telemetry.isUpdatingGit() ? 'Sprawdzanie i pull...' : 'Aktualizuj z GitHub (Git Pull)' }}</span>
           </button>
           <button
             (click)="inspectSystemServices()"
             [disabled]="telemetry.isInspectingServices()"
-            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
             title="Weryfikuj stan i konfigurację zainstalowanych usług"
           >
             <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="telemetry.isInspectingServices()">policy</mat-icon>
@@ -52,14 +64,14 @@ import { Telemetry } from '../../services/telemetry';
           </button>
           <button
             (click)="copyOneLiner()"
-            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
+            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
           >
             <mat-icon class="text-sm !w-4 !h-4">{{ copiedOneLiner() ? 'check' : 'content_copy' }}</mat-icon>
             <span>{{ copiedOneLiner() ? 'Skopiowano komendę!' : 'Kopiuj 1-Click' }}</span>
           </button>
           <button
             (click)="downloadFile('install.sh')"
-            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+            class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
           >
             <mat-icon class="text-sm !w-4 !h-4">download</mat-icon>
             <span>Pobierz install.sh</span>
@@ -70,21 +82,38 @@ import { Telemetry } from '../../services/telemetry';
       <!-- Wynik aktualizacji Git (jeśli wykonano) -->
       @if (telemetry.gitUpdateResult(); as gitRes) {
         <div
-          class="p-4 rounded-xl border flex items-start gap-3 transition-all"
-          [class.bg-emerald-950/40]="gitRes.success"
-          [class.border-emerald-800]="gitRes.success"
+          class="p-4 rounded-xl border flex flex-col gap-2.5 transition-all"
+          [class.bg-emerald-950/40]="gitRes.success && gitRes.updated"
+          [class.border-emerald-800]="gitRes.success && gitRes.updated"
+          [class.bg-slate-900/90]="gitRes.success && !gitRes.updated"
+          [class.border-cyan-800/60]="gitRes.success && !gitRes.updated"
           [class.bg-rose-950/40]="!gitRes.success"
           [class.border-rose-800]="!gitRes.success"
         >
-          <mat-icon [class.text-emerald-400]="gitRes.success" [class.text-rose-400]="!gitRes.success">
-            {{ gitRes.success ? 'cloud_done' : 'error' }}
-          </mat-icon>
-          <div class="space-y-1 text-xs flex-1">
-            <div class="font-bold" [class.text-emerald-300]="gitRes.success" [class.text-rose-300]="!gitRes.success">
-              {{ gitRes.message }}
+          <div class="flex items-start gap-3">
+            <mat-icon [class.text-emerald-400]="gitRes.success && gitRes.updated" [class.text-cyan-400]="gitRes.success && !gitRes.updated" [class.text-rose-400]="!gitRes.success">
+              {{ gitRes.success ? (gitRes.updated ? 'cloud_done' : 'info') : 'error' }}
+            </mat-icon>
+            <div class="space-y-1 text-xs flex-1">
+              <div class="font-bold flex flex-wrap items-center justify-between gap-2" [class.text-emerald-300]="gitRes.success && gitRes.updated" [class.text-cyan-300]="gitRes.success && !gitRes.updated" [class.text-rose-300]="!gitRes.success">
+                <span>{{ gitRes.message }}</span>
+                @if (gitRes.current_dir) {
+                  <span class="text-[10px] font-mono font-normal text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                    Folder: {{ gitRes.current_dir }}
+                  </span>
+                }
+              </div>
+              @if (gitRes.current_commit) {
+                <div class="text-[11px] font-mono text-slate-300 flex items-center gap-3">
+                  <span>Commit lokalny: <strong class="text-white">{{ gitRes.current_commit }}</strong></span>
+                  @if (gitRes.remote_commit && gitRes.remote_commit !== 'nieznany') {
+                    <span>Commit GitHub: <strong class="text-cyan-300">{{ gitRes.remote_commit }}</strong></span>
+                  }
+                </div>
+              }
             </div>
-            <pre class="text-[11px] font-mono text-slate-400 bg-slate-950/80 p-2.5 rounded-lg overflow-x-auto border border-slate-800/80">{{ gitRes.output }}</pre>
           </div>
+          <pre class="text-[11px] font-mono text-slate-400 bg-slate-950/80 p-2.5 rounded-lg overflow-x-auto border border-slate-800/80 max-h-48 whitespace-pre-wrap">{{ gitRes.output }}</pre>
         </div>
       }
 
@@ -534,6 +563,7 @@ export class InstallerView {
   private http = inject(HttpClient);
 
   readonly selectedInstallerTab = signal<'linux' | 'docker' | 'windows'>('linux');
+  readonly customRepoPath = signal<string>('');
   readonly copiedOneLiner = signal<boolean>(false);
   readonly copiedScript = signal<boolean>(false);
 
@@ -567,7 +597,8 @@ export class InstallerView {
   }
 
   triggerGitUpdate(): void {
-    this.telemetry.runGitUpdate();
+    const path = this.customRepoPath().trim() || undefined;
+    this.telemetry.runGitUpdate(path);
   }
 
   inspectSystemServices(): void {

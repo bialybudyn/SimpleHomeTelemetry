@@ -287,6 +287,8 @@ export interface GitUpdateResult {
   message: string;
   current_commit?: string;
   remote_commit?: string;
+  current_dir?: string;
+  checked_paths?: Array<{ path: string; exists: boolean; hasGit: boolean }>;
   updated: boolean;
   output: string;
 }

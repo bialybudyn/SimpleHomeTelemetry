@@ -636,10 +636,10 @@ export class Telemetry {
     });
   }
 
-  runGitUpdate(): Promise<GitUpdateResult | null> {
+  runGitUpdate(repoPath?: string): Promise<GitUpdateResult | null> {
     this.isUpdatingGit.set(true);
     return new Promise((resolve) => {
-      this.http.post<GitUpdateResult>('/api/system/git-update', {}).subscribe({
+      this.http.post<GitUpdateResult>('/api/system/git-update', { repo_path: repoPath }).subscribe({
         next: (res) => {
           this.gitUpdateResult.set(res);
           this.isUpdatingGit.set(false);
