@@ -19,6 +19,7 @@ import {
   TinyTuyaTestResponse,
   TinyTuyaScanResponse,
   DeviceAuditLog,
+  DiscoveredNetworkHost,
 } from '../models/telemetry.models';
 import { format24hTime } from '../utils/date-format';
 import { directBrowserSonoffCommand } from '../utils/browser-sonoff-client';
@@ -1151,6 +1152,133 @@ export class Telemetry {
         },
         error: () => resolve(false),
       });
+    });
+  }
+
+  // Ręczna konfiguracja parametrów urządzenia (adres IP, Device ID, klucze)
+  configureDevice(
+    ieee: string,
+    payload: {
+      ip_address?: string;
+      friendly_name?: string;
+      sonoff_device_id?: string;
+      sonoff_api_key?: string;
+      local_key?: string;
+      tuya_dev_id?: string;
+      vendor?: string;
+      model?: string;
+      device_id?: string;
+    }
+  ): Promise<{ success: boolean; message: string; device?: Device }> {
+    return new Promise((resolve) => {
+      this.http
+        .post<{ success: boolean; message: string; device?: Device }>(`/api/devices/${encodeURIComponent(ieee)}/configure`, payload)
+        .subscribe({
+          next: (res) => {
+            if (res.device) {
+              this.devices.update((list) => {
+                const idx = list.findIndex((d) => d.ieee_address === res.device!.ieee_address);
+                if (idx >= 0) {
+                  const copy = [...list];
+                  copy[idx] = res.device!;
+                  return copy;
+                }
+                return [...list, res.device!];
+              });
+              this.fetchDevices();
+            }
+            resolve(res);
+          },
+          error: (err) => {
+            resolve({
+              success: false,
+              message: err?.error?.message || 'Błąd zapisu parametrów urządzenia',
+            });
+          },
+        });
+    });
+  }
+
+  // Szybkie przypisanie adresu IP do wybranego urządzenia
+  assignDeviceIp(ieee: string, ip: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http
+        .post<{ success: boolean; message: string; device?: Device }>(`/api/devices/${encodeURIComponent(ieee)}/assign-ip`, {
+          ip_address: ip,
+        })
+        .subscribe({
+          next: (res) => {
+            if (res.device) {
+              this.devices.update((list) => {
+                const idx = list.findIndex((d) => d.ieee_address === res.device!.ieee_address);
+                if (idx >= 0) {
+                  const copy = [...list];
+                  copy[idx] = res.device!;
+                  return copy;
+                }
+                return list;
+              });
+              this.fetchDevices();
+              resolve(true);
+            } else {
+              resolve(false);
+            }
+          },
+          error: () => resolve(false),
+        });
+    });
+  }
+
+  // Pobranie konfiguracji podsieci skanowania
+  getNetworkScanConfig(): Promise<{ scan_subnets: string }> {
+    return new Promise((resolve) => {
+      this.http.get<{ scan_subnets: string }>('/api/network/scan-config').subscribe({
+        next: (res) => resolve(res || { scan_subnets: '192.168.1.0/24, 192.168.0.0/24' }),
+        error: () => resolve({ scan_subnets: '192.168.1.0/24, 192.168.0.0/24' }),
+      });
+    });
+  }
+
+  // Zapis konfiguracji podsieci skanowania
+  saveNetworkScanConfig(subnets: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.http
+        .post<{ success: boolean; scan_subnets: string }>('/api/network/scan-config', { scan_subnets: subnets })
+        .subscribe({
+          next: (res) => resolve(res.success),
+          error: () => resolve(false),
+        });
+    });
+  }
+
+  readonly isScanningOuiNetwork = signal<boolean>(false);
+  readonly ouiScanResults = signal<DiscoveredNetworkHost[]>([]);
+  readonly ouiScanMessage = signal<string>('');
+
+  // Zaawansowane skanowanie podsieci z bazą OUI i detekcją Sonoff LAN
+  scanNetworkWithOui(subnets?: string): Promise<{ success: boolean; hosts: DiscoveredNetworkHost[]; message: string }> {
+    this.isScanningOuiNetwork.set(true);
+    this.ouiScanMessage.set('Skanowanie podsieci, pobieranie danych z bazy OUI oraz sprawdzanie portu Sonoff 8081...');
+    return new Promise((resolve) => {
+      this.http
+        .post<{ success: boolean; hosts: DiscoveredNetworkHost[]; message: string }>('/api/network/scan-oui', {
+          subnets,
+        })
+        .subscribe({
+          next: (res) => {
+            this.isScanningOuiNetwork.set(false);
+            this.ouiScanResults.set(res.hosts || []);
+            this.ouiScanMessage.set(res.message);
+            this.fetchDevices();
+            resolve(res);
+          },
+          error: (err) => {
+            this.isScanningOuiNetwork.set(false);
+            const msg = err?.error?.message || 'Błąd skanowania podsieci OUI.';
+            this.ouiScanMessage.set(msg);
+            resolve({ success: false, hosts: [], message: msg });
+          },
+        });
     });
   }
 

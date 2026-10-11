@@ -15,13 +15,12 @@ import { Device, DeviceCategory } from './models/telemetry.models';
 import { DeviceCard } from './components/device-card/device-card';
 import { AnalyticsModal } from './components/analytics-modal/analytics-modal';
 import { AnalyticsView } from './components/analytics-view/analytics-view';
-import { WifiPairingModal } from './components/wifi-pairing-modal/wifi-pairing-modal';
 import { TopologyGraph } from './components/topology-graph/topology-graph';
 import { ServerSettings } from './components/server-settings/server-settings';
 import { ScenesBuilder } from './components/scenes-builder/scenes-builder';
-import { TuyaQrModal } from './components/tuya-qr-modal/tuya-qr-modal';
 import { WeatherView } from './components/weather-view/weather-view';
 import { WeatherWidget } from './components/weather-widget/weather-widget';
+import { DeviceConfigModal } from './components/device-config-modal/device-config-modal';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -34,13 +33,12 @@ import { WeatherWidget } from './components/weather-widget/weather-widget';
     DeviceCard,
     AnalyticsModal,
     AnalyticsView,
-    WifiPairingModal,
     TopologyGraph,
     ServerSettings,
     ScenesBuilder,
-    TuyaQrModal,
     WeatherView,
     WeatherWidget,
+    DeviceConfigModal,
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -78,14 +76,42 @@ export class App {
   readonly showTuyaQrModal = signal<boolean>(false);
   readonly selectedTuyaDevice = signal<Device | null>(null);
 
+  // Panel Konfiguracja urządzenia (Sonoff LAN & Baza OUI / Tuya Local Key)
+  readonly showDeviceConfigModal = signal<boolean>(false);
+  readonly selectedDeviceForConfig = signal<Device | null>(null);
+  readonly initialConfigBrand = signal<'sonoff' | 'tuya'>('sonoff');
+
+  openDeviceConfigModal(dev?: Device, brand: 'sonoff' | 'tuya' = 'sonoff'): void {
+    if (dev) {
+      const v = (dev.vendor || '').toLowerCase();
+      const m = (dev.model || '').toLowerCase();
+      const isSonoff =
+        Boolean(dev.sonoff_device_id) ||
+        Boolean(dev.sonoff_api_key) ||
+        v.includes('sonoff') ||
+        v.includes('ewelink') ||
+        m.includes('sonoff') ||
+        m.includes('s60');
+      this.initialConfigBrand.set(isSonoff ? 'sonoff' : brand);
+    } else {
+      this.initialConfigBrand.set(brand);
+    }
+    this.selectedDeviceForConfig.set(dev || null);
+    this.showDeviceConfigModal.set(true);
+  }
+
+  closeDeviceConfigModal(): void {
+    this.showDeviceConfigModal.set(false);
+    this.selectedDeviceForConfig.set(null);
+  }
+
   openTuyaQrModal(dev?: Device): void {
-    this.selectedTuyaDevice.set(dev || null);
-    this.showTuyaQrModal.set(true);
+    // Przekieruj do ujednoliconego Panelu Konfiguracja Urządzenia z wybraną zakładką Tuya!
+    this.openDeviceConfigModal(dev, 'tuya');
   }
 
   closeTuyaQrModal(): void {
-    this.showTuyaQrModal.set(false);
-    this.selectedTuyaDevice.set(null);
+    this.closeDeviceConfigModal();
   }
 
   // Identyfikacja czujników z najwyższą (czerwony) i najniższą (niebieski) temperaturą

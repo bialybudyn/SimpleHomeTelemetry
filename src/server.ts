@@ -34,6 +34,7 @@ import {
   controlEwelinkDevice,
   getStoredEwelinkConfig,
   updateStoredEwelinkConfig,
+  sendSonoffHttpRequest,
 } from './sonoff-lan-service';
 import {
   getImgwSynopStations,
@@ -415,6 +416,7 @@ export interface DongleMaxConfig {
   wifi_softap_ip?: string;
   wifi_softap_dhcp_start?: string;
   wifi_softap_dhcp_end?: string;
+  scan_subnets?: string;
 }
 
 export interface MqttStatus {
@@ -449,7 +451,236 @@ let dongleMaxConfig: DongleMaxConfig = {
   wifi_softap_ip: '',
   wifi_softap_dhcp_start: '',
   wifi_softap_dhcp_end: '',
+  scan_subnets: '192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24',
 };
+
+const dongleMaxConfigPath = join(process.cwd(), 'dongle_max_config.json');
+
+function loadDongleMaxConfig() {
+  if (existsSync(dongleMaxConfigPath)) {
+    try {
+      const data = JSON.parse(readFileSync(dongleMaxConfigPath, 'utf-8'));
+      dongleMaxConfig = { ...dongleMaxConfig, ...data };
+    } catch (e) {
+      console.warn('[DONGLE-CONFIG] Błąd odczytu dongle_max_config.json:', e);
+    }
+  }
+}
+
+function saveDongleMaxConfig() {
+  try {
+    writeFileSync(dongleMaxConfigPath, JSON.stringify(dongleMaxConfig, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[DONGLE-CONFIG] Błąd zapisu dongle_max_config.json:', err);
+  }
+}
+
+loadDongleMaxConfig();
+
+// --- BAZA IDENTYFIKATORÓW OUI DLA URZĄDZEŃ IOT (SONOFF / ESPRESSIF, TUYA, SHELLY, RASPBERRY PI) ---
+const KNOWN_OUI_DATABASE: Record<string, { vendor: string; isSonoff: boolean; isTuya: boolean }> = {
+  // Espressif Systems (Sonoff S60, S26, Mini, POW, Basic, etc. - ESP8266 & ESP32)
+  '18:fe:34': { vendor: 'Espressif Inc (Sonoff S60/Wi-Fi IoT)', isSonoff: true, isTuya: false },
+  '24:0a:c4': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '24:6f:28': { vendor: 'Espressif Inc (Sonoff S60/ESP32-C3)', isSonoff: true, isTuya: false },
+  '24:b2:de': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '24:dc:c3': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '2c:3a:e8': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '2c:f4:32': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '30:ae:a4': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '34:85:18': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '34:94:54': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '34:ab:95': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '3c:61:05': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '3c:71:bf': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '40:22:d8': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '40:91:51': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '48:27:e2': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '48:55:19': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '4c:11:ae': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '4c:75:25': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '54:43:b2': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '54:5a:a6': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '58:bf:25': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '58:cf:79': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '5c:cf:7f': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '60:01:94': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '60:55:f9': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '68:c6:3a': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '70:03:9f': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '78:21:84': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '78:e3:6d': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '7c:87:ce': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '7c:df:a1': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '80:7d:3a': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '84:0d:8e': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '84:f3:eb': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '84:f7:03': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '8c:4b:14': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '8c:aa:b5': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  '90:38:0a': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '94:b5:55': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '94:b9:7e': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  '98:cd:ac': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'a0:20:a6': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'a4:cf:12': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'a4:e5:7c': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'ac:67:b2': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'ac:d0:74': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'b4:e6:2d': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'bc:dd:c2': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'c8:2b:96': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'cc:50:e3': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'cc:ba:e5': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'd8:a0:1d': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'd8:bf:c0': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'dc:4f:22': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'e0:98:06': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'e8:68:e7': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'ec:62:60': { vendor: 'Espressif Inc (Sonoff/ESP8266)', isSonoff: true, isTuya: false },
+  'f0:08:d1': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+  'f4:cf:a2': { vendor: 'Espressif Inc (Sonoff/ESP32)', isSonoff: true, isTuya: false },
+
+  // CoolKit / ITEAD (Oficjalny producent urządzeń Sonoff)
+  '50:02:91': { vendor: 'CoolKit / ITEAD Sonoff Technology', isSonoff: true, isTuya: false },
+  'd8:f1:5b': { vendor: 'CoolKit / ITEAD Sonoff Technology', isSonoff: true, isTuya: false },
+  'ec:fa:bc': { vendor: 'CoolKit / ITEAD Sonoff Technology', isSonoff: true, isTuya: false },
+  'e0:e8:e6': { vendor: 'CoolKit / ITEAD Sonoff Technology', isSonoff: true, isTuya: false },
+
+  // Tuya Smart / Hangzhou Tuya
+  'd8:1f:12': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '70:89:76': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '10:5a:f7': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '80:65:99': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  'dc:23:4d': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '40:8e:63': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '1c:90:ff': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '20:f4:1b': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '7c:f6:66': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+  '0c:8b:95': { vendor: 'Tuya Smart / Smart Life IoT', isSonoff: false, isTuya: true },
+
+  // Shelly / Allterco
+  '48:3f:da': { vendor: 'Shelly / Allterco Robotics', isSonoff: false, isTuya: false },
+  'c4:4f:33': { vendor: 'Shelly / Allterco Robotics', isSonoff: false, isTuya: false },
+  '34:98:7a': { vendor: 'Shelly / Allterco Robotics', isSonoff: false, isTuya: false },
+  'e8:db:84': { vendor: 'Shelly / Allterco Robotics', isSonoff: false, isTuya: false },
+  '84:cc:a8': { vendor: 'Shelly / Allterco Robotics', isSonoff: false, isTuya: false },
+  'a8:48:fa': { vendor: 'Shelly / Allterco Robotics', isSonoff: false, isTuya: false },
+
+  // Raspberry Pi
+  'b8:27:eb': { vendor: 'Raspberry Pi Foundation', isSonoff: false, isTuya: false },
+  'dc:a6:32': { vendor: 'Raspberry Pi Foundation', isSonoff: false, isTuya: false },
+  'e4:5f:01': { vendor: 'Raspberry Pi Foundation', isSonoff: false, isTuya: false },
+  '28:cd:c1': { vendor: 'Raspberry Pi Foundation', isSonoff: false, isTuya: false },
+  'd8:3a:dd': { vendor: 'Raspberry Pi Foundation', isSonoff: false, isTuya: false },
+
+  // Silicon Labs (Dongle-M EFR32)
+  '00:0b:57': { vendor: 'Silicon Laboratories (Dongle-M)', isSonoff: false, isTuya: false },
+  'fc:0f:4b': { vendor: 'Silicon Laboratories (Dongle-M)', isSonoff: false, isTuya: false },
+};
+
+const ouiMemoryCache = new Map<string, { vendor: string; isSonoff: boolean; isTuya: boolean }>();
+
+async function resolveMacVendor(macRaw: string): Promise<{ vendor: string; isSonoff: boolean; isTuya: boolean }> {
+  const cleanMac = macRaw.toLowerCase().replace(/[^a-f0-9]/g, '');
+  if (cleanMac.length < 6) {
+    return { vendor: 'Nieznane urządzenie (brak adresu MAC)', isSonoff: false, isTuya: false };
+  }
+  const prefix = `${cleanMac.slice(0, 2)}:${cleanMac.slice(2, 4)}:${cleanMac.slice(4, 6)}`;
+  
+  if (KNOWN_OUI_DATABASE[prefix]) {
+    return KNOWN_OUI_DATABASE[prefix];
+  }
+  if (ouiMemoryCache.has(prefix)) {
+    return ouiMemoryCache.get(prefix)!;
+  }
+
+  // Opcjonalne pobranie z bazy OUI online maclookup / macvendors z timeoutem 1.2s
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    const resp = await fetch(`https://api.maclookup.app/v2/macs/${prefix}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeout);
+    if (resp && resp.ok) {
+      const data = await resp.json().catch(() => null);
+      if (data && data.company) {
+        const companyStr = String(data.company);
+        const isSonoff = /espressif|itead|coolkit|sonoff/i.test(companyStr);
+        const isTuya = /tuya/i.test(companyStr);
+        const entry = { vendor: companyStr, isSonoff, isTuya };
+        ouiMemoryCache.set(prefix, entry);
+        return entry;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const fallback = { vendor: `Urządzenie sieciowe (${prefix.toUpperCase()})`, isSonoff: false, isTuya: false };
+  ouiMemoryCache.set(prefix, fallback);
+  return fallback;
+}
+
+function getLocalArpEntries(): Array<{ ip: string; mac: string }> {
+  const entries: Array<{ ip: string; mac: string }> = [];
+  const seenIps = new Set<string>();
+
+  // 1. /proc/net/arp
+  try {
+    if (existsSync('/proc/net/arp')) {
+      const content = readFileSync('/proc/net/arp', 'utf-8');
+      const lines = content.split('\n').slice(1);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        const ip = parts[0];
+        const mac = parts[3];
+        if (ip && mac && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip) && /^([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2})$/.test(mac) && mac !== '00:00:00:00:00:00') {
+          if (!seenIps.has(ip)) {
+            seenIps.add(ip);
+            entries.push({ ip, mac: mac.toLowerCase() });
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 2. ip neigh show
+  try {
+    const neigh = execSync('ip neigh show 2>/dev/null', { timeout: 1500, encoding: 'utf-8' });
+    for (const line of neigh.split('\n')) {
+      const parts = line.trim().split(/\s+/);
+      const ip = parts[0];
+      const lladdrIdx = parts.indexOf('lladdr');
+      if (ip && lladdrIdx >= 0 && parts[lladdrIdx + 1]) {
+        const mac = parts[lladdrIdx + 1];
+        if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip) && /^([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2})$/.test(mac) && mac !== '00:00:00:00:00:00') {
+          if (!seenIps.has(ip)) {
+            seenIps.add(ip);
+            entries.push({ ip, mac: mac.toLowerCase() });
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 3. arp -an
+  try {
+    const arpOut = execSync('arp -an 2>/dev/null', { timeout: 1500, encoding: 'utf-8' });
+    for (const line of arpOut.split('\n')) {
+      const match = line.match(/\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)\s+at\s+([0-9a-fA-F:]+)/);
+      if (match && match[1] && match[2] && match[2] !== '<incomplete>') {
+        const ip = match[1];
+        const mac = match[2].toLowerCase();
+        if (!seenIps.has(ip)) {
+          seenIps.add(ip);
+          entries.push({ ip, mac });
+        }
+      }
+    }
+  } catch {}
+
+  return entries;
+}
 
 // Czysty rejestr urzadzen i historii (BEZ SYNTETYZOWANYCH DANYCH)
 const devices = new Map<string, Device>();
@@ -1978,6 +2209,113 @@ app.post('/api/devices/:ieee/rename', (req: Request, res: Response) => {
   res.json({ status: 'ok', device_ieee: ieee, friendly_name });
 });
 
+// 4b. Pełna konfiguracja parametrów urządzenia (ręczny adres IP, Device ID, klucze)
+app.post('/api/devices/:ieee/configure', (req: Request, res: Response) => {
+  const ieee = String(req.params['ieee'] || '');
+  let dev = devices.get(ieee);
+
+  // Jeśli nie znaleziono po IEEE, spróbuj znaleźć po sonoff_device_id lub tuya_dev_id
+  if (!dev && req.body?.device_id) {
+    const dId = String(req.body.device_id).trim();
+    dev = Array.from(devices.values()).find((d) => d.sonoff_device_id === dId || d.tuya_dev_id === dId);
+  }
+
+  if (!dev) {
+    res.status(404).json({ success: false, message: 'Nie znaleziono urządzenia w rejestrze' });
+    return;
+  }
+
+  const {
+    ip_address,
+    friendly_name,
+    sonoff_device_id,
+    sonoff_api_key,
+    local_key,
+    tuya_dev_id,
+    vendor,
+    model,
+  } = req.body || {};
+
+  const cleanIp = typeof ip_address === 'string' ? ip_address.trim() : undefined;
+  if (cleanIp !== undefined) {
+    dev.ip_address = cleanIp || undefined;
+    dev.protocol = 'wifi';
+  }
+
+  if (typeof friendly_name === 'string' && friendly_name.trim()) {
+    dev.friendly_name = friendly_name.trim();
+  }
+
+  if (typeof sonoff_device_id === 'string') {
+    dev.sonoff_device_id = sonoff_device_id.trim() || null;
+  }
+
+  if (typeof sonoff_api_key === 'string') {
+    dev.sonoff_api_key = sonoff_api_key.trim() || null;
+  }
+
+  if (typeof local_key === 'string') {
+    dev.local_key = local_key.trim() || null;
+  }
+
+  if (typeof tuya_dev_id === 'string') {
+    dev.tuya_dev_id = tuya_dev_id.trim() || null;
+  }
+
+  if (typeof vendor === 'string' && vendor.trim()) {
+    dev.vendor = vendor.trim();
+  }
+
+  if (typeof model === 'string' && model.trim()) {
+    dev.model = model.trim();
+  }
+
+  dev.last_seen = new Date().toISOString();
+  triggerSaveDevices();
+  addDeviceLog('rename', dev.ieee_address, dev.friendly_name, `[Ręczna konfiguracja] Zaktualizowano parametry urządzenia. Adres IP: ${dev.ip_address || 'brak'}`);
+  broadcastEvent({
+    type: 'devices_updated',
+    devices: Array.from(devices.values()),
+  });
+
+  res.json({
+    success: true,
+    message: `Zapisano konfigurację urządzenia ${dev.friendly_name}. Adres IP: ${dev.ip_address || 'brak'}`,
+    device: dev,
+  });
+});
+
+app.post('/api/devices/:ieee/assign-ip', (req: Request, res: Response) => {
+  const ieee = String(req.params['ieee'] || '');
+  const dev = devices.get(ieee);
+  if (!dev) {
+    res.status(404).json({ success: false, message: 'Nie znaleziono urządzenia' });
+    return;
+  }
+
+  const cleanIp = String(req.body?.ip_address || '').trim();
+  if (!cleanIp) {
+    res.status(400).json({ success: false, message: 'Wymagany jest poprawny adres IP' });
+    return;
+  }
+
+  dev.ip_address = cleanIp;
+  dev.protocol = 'wifi';
+  dev.last_seen = new Date().toISOString();
+  triggerSaveDevices();
+  addDeviceLog('rename', dev.ieee_address, dev.friendly_name, `[Skaner sieci OUI] Przypisano adres IP ${cleanIp}`);
+  broadcastEvent({
+    type: 'devices_updated',
+    devices: Array.from(devices.values()),
+  });
+
+  res.json({
+    success: true,
+    message: `Przypisano adres IP ${cleanIp} do urządzenia ${dev.friendly_name}!`,
+    device: dev,
+  });
+});
+
 // 5. Tryb parowania (Permit-Join 160s)
 app.post('/api/permit-join', (req: Request, res: Response) => {
   const duration = req.body?.duration ? parseInt(req.body.duration, 10) : 160;
@@ -3000,6 +3338,9 @@ app.post('/api/sonoff/device/add', (req: Request, res: Response) => {
   const devName = String(name || `Gniazdko Sonoff S60TFP Wi-Fi`).trim();
 
   let dev = devices.get(ieee);
+  if (!dev && device_id) {
+    dev = Array.from(devices.values()).find((d) => d.sonoff_device_id === String(device_id).trim());
+  }
   if (!dev) {
     dev = {
       ieee_address: ieee,
@@ -3715,11 +4056,236 @@ app.post('/api/dongle-max/config', (req: Request, res: Response) => {
     ...dongleMaxConfig,
     ...body,
   };
+  saveDongleMaxConfig();
   broadcastEvent({
     type: 'dongle_max_config_updated',
     config: dongleMaxConfig,
   });
   res.json({ status: 'ok', config: dongleMaxConfig });
+});
+
+// 11b. Konfiguracja podsieci skanowania
+app.get('/api/network/scan-config', (_req: Request, res: Response) => {
+  res.json({
+    scan_subnets: dongleMaxConfig.scan_subnets || '192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24',
+  });
+});
+
+app.post('/api/network/scan-config', (req: Request, res: Response) => {
+  const rawSubnets = String(req.body?.scan_subnets || '').trim();
+  if (rawSubnets) {
+    dongleMaxConfig.scan_subnets = rawSubnets;
+    saveDongleMaxConfig();
+  }
+  res.json({
+    success: true,
+    scan_subnets: dongleMaxConfig.scan_subnets,
+    message: 'Zapisano podsieci skanowania!',
+  });
+});
+
+// 11c. Zaawansowane skanowanie podsieci z bazą OUI oraz detekcją Sonoff LAN port 8081
+app.post('/api/network/scan-oui', async (req: Request, res: Response) => {
+  try {
+    const rawSubnets = String(req.body?.subnets || dongleMaxConfig.scan_subnets || '192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24');
+    
+    // Zapisz jeśli podano nowe w żądaniu
+    if (req.body?.subnets && req.body.subnets.trim() && req.body.subnets !== dongleMaxConfig.scan_subnets) {
+      dongleMaxConfig.scan_subnets = req.body.subnets.trim();
+      saveDongleMaxConfig();
+    }
+
+    // Parsowanie podsieci: np. "192.168.1.0/24, 192.168.0.0/24" -> ["192.168.1", "192.168.0"]
+    const subnetTokens = rawSubnets.split(/[,;\n\s]+/).filter(Boolean);
+    const targetSubnets = new Set<string>();
+
+    for (const token of subnetTokens) {
+      const clean = token.replace(/\/.*$/, '').trim();
+      const parts = clean.split('.');
+      if (parts.length >= 3) {
+        targetSubnets.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
+      }
+    }
+
+    // Dodaj także podsieć hosta lokalnego jeśli dostępna
+    const localNet = getLocalNetworkDetails();
+    if (localNet.ip) {
+      const p = localNet.ip.split('.');
+      if (p.length === 4) targetSubnets.add(`${p[0]}.${p[1]}.${p[2]}`);
+    }
+    if (targetSubnets.size === 0) {
+      targetSubnets.add('192.168.1');
+      targetSubnets.add('192.168.0');
+    }
+
+    // 1. Zbieranie wpisów ARP ze środowiska systemowego
+    const arpEntries = getLocalArpEntries();
+    const arpMap = new Map<string, string>(); // IP -> MAC
+    for (const entry of arpEntries) {
+      arpMap.set(entry.ip, entry.mac);
+    }
+
+    // 2. Budowa listy kandydatów IP dla wybranych podsieci
+    const candidateIps = new Set<string>();
+    for (const ip of arpMap.keys()) {
+      candidateIps.add(ip);
+    }
+    // Dodaj także IP znane z obecnych urządzeń w panelu
+    for (const d of devices.values()) {
+      if (d.ip_address) candidateIps.add(d.ip_address.trim());
+    }
+
+    // Dodaj popularne adresy w podsieciach (.1 bramka, .2-.30 urządzenia, .100-.140 DHCP)
+    for (const sub of targetSubnets) {
+      for (let i = 1; i <= 30; i++) candidateIps.add(`${sub}.${i}`);
+      for (let i = 100; i <= 135; i++) candidateIps.add(`${sub}.${i}`);
+    }
+
+    // 3. Sprawdzanie portu 8081 (Sonoff eWeLink LAN) oraz identyfikacja OUI
+    interface HostResult {
+      ip: string;
+      mac?: string;
+      vendor?: string;
+      isSonoffCandidate: boolean;
+      isTuyaCandidate: boolean;
+      sonoffDeviceId?: string;
+      port8081Open?: boolean;
+      matchedDeviceIeee?: string;
+      matchedDeviceName?: string;
+      statusText?: string;
+    }
+
+    const hostResults: HostResult[] = [];
+    const ipsToProbe = Array.from(candidateIps);
+
+    // Dzielimy na mniejsze równoległe paczki po 20 adresów aby nie blokować pętli zdarzeń
+    const BATCH_SIZE = 25;
+    for (let b = 0; b < ipsToProbe.length; b += BATCH_SIZE) {
+      const batch = ipsToProbe.slice(b, b + BATCH_SIZE);
+      const batchPromises = batch.map(async (ip): Promise<HostResult | null> => {
+        let mac = arpMap.get(ip);
+        let port8081Active = false;
+        let sonoffDevId: string | undefined = undefined;
+        let sonoffSwitch: string | undefined = undefined;
+
+        // A. Szybkie zapytanie Sonoff LAN /zeroconf/info na porcie 8081
+        try {
+          const sRes = await sendSonoffHttpRequest(ip, '/zeroconf/info', {}, undefined, undefined, 650);
+          if (sRes && (sRes.error === 0 || sRes['deviceid'])) {
+            port8081Active = true;
+            sonoffDevId = (sRes['deviceid'] as string) || undefined;
+            if (sRes.data && sRes.data['switch']) sonoffSwitch = String(sRes.data['switch']);
+          }
+        } catch {
+          // brak odpowiedzi portu 8081
+        }
+
+        // B. Jeśli port 8081 nie odpowiedział, a nie ma MAC w ARP, sprawdź szybki socket TCP
+        if (!mac && !port8081Active) {
+          try {
+            await new Promise<void>((resolve) => {
+              const s = new Socket();
+              s.setTimeout(250);
+              s.on('connect', () => { s.destroy(); resolve(); });
+              s.on('timeout', () => { s.destroy(); resolve(); });
+              s.on('error', () => { s.destroy(); resolve(); });
+              s.connect(8081, ip);
+            });
+          } catch {}
+        }
+
+        // Odśwież MAC z tablicy ARP po próbie połączenia
+        if (!mac) {
+          const freshArp = getLocalArpEntries();
+          const matchFresh = freshArp.find((e) => e.ip === ip);
+          if (matchFresh) {
+            mac = matchFresh.mac;
+            arpMap.set(ip, mac);
+          }
+        }
+
+        // Rozstrzygnij czy host jest aktywny
+        if (!mac && !port8081Active) {
+          return null;
+        }
+
+        const resolvedVendor = mac ? await resolveMacVendor(mac) : {
+          vendor: port8081Active ? 'Urządzenie Sonoff eWeLink LAN (Port 8081)' : 'Urządzenie sieciowe',
+          isSonoff: port8081Active,
+          isTuya: false,
+        };
+
+        const isSonoff = port8081Active || resolvedVendor.isSonoff;
+        const isTuya = resolvedVendor.isTuya;
+
+        // C. Dopasowanie do istniejącego urządzenia w panelu
+        let matchedIeee: string | undefined = undefined;
+        let matchedName: string | undefined = undefined;
+
+        if (sonoffDevId) {
+          const devBySonoffId = Array.from(devices.values()).find((d) => d.sonoff_device_id === sonoffDevId);
+          if (devBySonoffId) {
+            matchedIeee = devBySonoffId.ieee_address;
+            matchedName = devBySonoffId.friendly_name;
+            // AUTOMATYCZNIE PRZYPISZ IP DO TEGO GNIAZDKA!
+            if (devBySonoffId.ip_address !== ip) {
+              devBySonoffId.ip_address = ip;
+              devBySonoffId.connection_status = 'online';
+              devBySonoffId.last_seen = new Date().toISOString();
+              if (sonoffSwitch) devBySonoffId.state = sonoffSwitch === 'on' ? 'ON' : 'OFF';
+              triggerSaveDevices();
+              addDeviceLog('rename', devBySonoffId.ieee_address, devBySonoffId.friendly_name, `[Auto-dopasowanie OUI/LAN] Wykryto IP ${ip} dla gniazdka ${devBySonoffId.friendly_name}`);
+            }
+          }
+        } else {
+          // Dopasowanie po istniejącym IP
+          const devByIp = Array.from(devices.values()).find((d) => d.ip_address === ip);
+          if (devByIp) {
+            matchedIeee = devByIp.ieee_address;
+            matchedName = devByIp.friendly_name;
+          }
+        }
+
+        return {
+          ip,
+          mac: mac ? mac.toUpperCase() : undefined,
+          vendor: resolvedVendor.vendor,
+          isSonoffCandidate: isSonoff,
+          isTuyaCandidate: isTuya,
+          sonoffDeviceId: sonoffDevId,
+          port8081Open: port8081Active,
+          matchedDeviceIeee: matchedIeee,
+          matchedDeviceName: matchedName,
+          statusText: port8081Active ? 'Aktywny Sonoff LAN (Port 8081)' : 'Aktywny w sieci LAN',
+        };
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      for (const r of batchResults) {
+        if (r) hostResults.push(r);
+      }
+    }
+
+    // Sortowanie: najpierw kandydaci Sonoff/Tuya, potem po IP
+    hostResults.sort((a, b) => {
+      if (a.isSonoffCandidate && !b.isSonoffCandidate) return -1;
+      if (!a.isSonoffCandidate && b.isSonoffCandidate) return 1;
+      return a.ip.localeCompare(b.ip, undefined, { numeric: true });
+    });
+
+    broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+
+    res.json({
+      success: true,
+      subnets_scanned: Array.from(targetSubnets),
+      total_hosts: hostResults.length,
+      hosts: hostResults,
+      message: `Przeskanowano podsieci (${Array.from(targetSubnets).join(', ')}). Wykryto ${hostResults.length} aktywnych hostów, w tym ${hostResults.filter(h => h.isSonoffCandidate).length} urządzeń Sonoff/ESP!`,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, hosts: [], message: `Błąd skanowania podsieci OUI: ${msg}` });
+  }
 });
 
 // 12. Test aktywnego polaczenia TCP z Sonoff Dongle Max na porcie 6638

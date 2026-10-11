@@ -217,6 +217,20 @@ export interface DongleMaxConfig {
   wifi_softap_ip?: string;
   wifi_softap_dhcp_start?: string;
   wifi_softap_dhcp_end?: string;
+  scan_subnets?: string;
+}
+
+export interface DiscoveredNetworkHost {
+  ip: string;
+  mac?: string;
+  vendor?: string;
+  isSonoffCandidate: boolean;
+  isTuyaCandidate: boolean;
+  sonoffDeviceId?: string;
+  port8081Open?: boolean;
+  matchedDeviceIeee?: string;
+  matchedDeviceName?: string;
+  statusText?: string;
 }
 
 export interface DongleMaxTestResult {

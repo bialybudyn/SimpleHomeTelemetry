@@ -292,6 +292,54 @@ import { DongleMaxConfig } from '../../models/telemetry.models';
               </div>
             </div>
 
+            <!-- SEKCJA PODSIECI SKANOWANIA ORAZ BAZY OUI -->
+            <div class="p-4 rounded-xl bg-cyan-950/30 border border-cyan-800/60 space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2 text-cyan-300 font-bold text-xs">
+                  <mat-icon class="text-cyan-400 text-sm !w-4 !h-4">radar</mat-icon>
+                  <span>Podsieci do skanowania sieci i wyszukiwania gniazdek (Baza OUI)</span>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold">
+                  IEEE OUI Database
+                </span>
+              </div>
+
+              <p class="text-[11px] text-slate-300 leading-relaxed">
+                Wpisz podsieci Twojej sieci domowej (oddzielone przecinkami, np. <code>192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24</code>). Skaner odpytuje urządzenia, odczytuje tablicę ARP i sprawdza producenta w bazie IEEE OUI (Espressif, CoolKit, Tuya) oraz port 8081 Sonoff LAN.
+              </p>
+
+              <div class="space-y-1.5 pt-1">
+                <label for="subnetsInput" class="block text-[11px] font-semibold text-slate-400">
+                  Podsieci (CIDR lub prefiksy IP)
+                </label>
+                <div class="flex flex-col sm:flex-row gap-2">
+                  <input
+                    id="subnetsInput"
+                    type="text"
+                    formControlName="scan_subnets"
+                    placeholder="192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24"
+                    class="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    (click)="scanOuiFromSettings()"
+                    [disabled]="telemetry.isScanningOuiNetwork()"
+                    class="px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <mat-icon class="text-xs !w-3.5 !h-3.5" [class.animate-spin]="telemetry.isScanningOuiNetwork()">radar</mat-icon>
+                    <span>{{ telemetry.isScanningOuiNetwork() ? 'Skanowanie...' : 'Skanuj z bazą OUI' }}</span>
+                  </button>
+                </div>
+              </div>
+
+              @if (telemetry.ouiScanMessage()) {
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-cyan-300 flex items-center gap-2">
+                  <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">info</mat-icon>
+                  <span>{{ telemetry.ouiScanMessage() }}</span>
+                </div>
+              }
+            </div>
+
             <!-- Przyciski akcji -->
             <div class="pt-3 flex items-center justify-between border-t border-slate-800/80">
               <span class="text-[11px] text-slate-500 font-mono">
@@ -468,6 +516,7 @@ export class DongleMaxManager {
     wifi_softap_password: new FormControl<string>('', { nonNullable: true }),
     wifi_softap_channel: new FormControl<number>(6, { nonNullable: true }),
     wifi_softap_ip: new FormControl<string>('', { nonNullable: true }),
+    scan_subnets: new FormControl<string>('192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24', { nonNullable: true }),
   });
 
   constructor() {
@@ -490,7 +539,13 @@ export class DongleMaxManager {
       wifi_softap_password: cur.wifi_softap_password || '',
       wifi_softap_channel: cur.wifi_softap_channel || 6,
       wifi_softap_ip: cur.wifi_softap_ip || '',
+      scan_subnets: cur.scan_subnets || '192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24',
     });
+  }
+
+  scanOuiFromSettings(): void {
+    const subs = this.configForm.get('scan_subnets')?.value?.trim();
+    this.telemetry.scanNetworkWithOui(subs || undefined);
   }
 
   currentHost(): string {

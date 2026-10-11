@@ -89,23 +89,44 @@ import { Telemetry } from '../../services/telemetry';
                 <span>Router Mesh</span>
               </span>
             }
-            @if (category() === 'fan' || category() === 'smoke' || category() === 'plug' || isWifiDevice()) {
+            @if (isSonoffDevice()) {
+              @if (device().ip_address) {
+                <button
+                  (click)="openDeviceConfig($event, 'sonoff')"
+                  class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/25 transition-colors cursor-pointer"
+                  title="Sonoff LAN aktywny. Kliknij aby edytować parametry, IP lub klucze"
+                >
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-cyan-400">wifi</mat-icon>
+                  <span>Sonoff LAN: {{ device().ip_address }}</span>
+                </button>
+              } @else {
+                <button
+                  (click)="openDeviceConfig($event, 'sonoff')"
+                  class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 transition-colors cursor-pointer animate-pulse"
+                  title="Brak adresu IP! Kliknij aby wpisać ręcznie lub przeskanować podsieć z bazą OUI"
+                >
+                  <mat-icon class="text-[11px] !w-3 !h-3 text-amber-400">warning</mat-icon>
+                  <span>Sonoff: Brak IP (Konfiguruj)</span>
+                </button>
+              }
+            } @else if (isTuyaDevice() || category() === 'fan' || category() === 'smoke') {
               @if (device().local_key) {
-                <span
-                  class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                <button
+                  (click)="openDeviceConfig($event, 'tuya')"
+                  class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer"
                   title="Sterowanie lokalne TinyTuya aktywne w sieci LAN (Local Key skonfigurowany)"
                 >
                   <mat-icon class="text-[11px] !w-3 !h-3 text-emerald-400">vpn_key</mat-icon>
                   <span>TinyTuya: ••••{{ localKeyLast4() }}</span>
-                </span>
+                </button>
               } @else {
                 <button
-                  (click)="openTuyaQr($event)"
+                  (click)="openDeviceConfig($event, 'tuya')"
                   class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
                   title="Kliknij aby pobrać klucz Tuya Local Key przez kod QR lub skonfigurować TinyTuya"
                 >
                   <mat-icon class="text-[11px] !w-3 !h-3 text-amber-400">qr_code_scanner</mat-icon>
-                  <span>Pobierz Local Key (QR)</span>
+                  <span>Pobierz Local Key (Tuya)</span>
                 </button>
               }
             }
@@ -719,7 +740,7 @@ import { Telemetry } from '../../services/telemetry';
             </div>
 
             <button
-              (click)="openTuyaQr($event)"
+              (click)="openDeviceConfig($event, 'tuya')"
               class="px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-all cursor-pointer shrink-0 shadow-sm"
               [class.bg-emerald-500/15]="device().local_key"
               [class.border-emerald-500/30]="device().local_key"
@@ -1426,9 +1447,48 @@ export class DeviceCard {
   readonly deleteRequested = output<Device>();
   readonly commandRequested = output<{ device: Device; command: Record<string, unknown> }>();
   readonly tuyaQrRequested = output<Device>();
+  readonly configRequested = output<{ device: Device; brand: 'sonoff' | 'tuya' }>();
 
   readonly showAdvanced = signal<boolean>(false);
   readonly showSchedule = signal<boolean>(false);
+
+  readonly isSonoffDevice = computed<boolean>(() => {
+    const d = this.device();
+    const v = (d.vendor || '').toLowerCase();
+    const m = (d.model || '').toLowerCase();
+    const fn = (d.friendly_name || '').toLowerCase();
+    return (
+      Boolean(d.sonoff_device_id) ||
+      Boolean(d.sonoff_api_key) ||
+      v.includes('sonoff') ||
+      v.includes('ewelink') ||
+      m.includes('sonoff') ||
+      m.includes('s60') ||
+      m.includes('s26') ||
+      fn.includes('sonoff')
+    );
+  });
+
+  readonly isTuyaDevice = computed<boolean>(() => {
+    const d = this.device();
+    const v = (d.vendor || '').toLowerCase();
+    const m = (d.model || '').toLowerCase();
+    return (
+      Boolean(d.local_key) ||
+      Boolean(d.tuya_dev_id) ||
+      v.includes('tuya') ||
+      m.includes('tuya') ||
+      m.includes('ts011f') ||
+      m.includes('ts0601')
+    );
+  });
+
+  openDeviceConfig(event: MouseEvent, brand?: 'sonoff' | 'tuya'): void {
+    event.stopPropagation();
+    const b = brand || (this.isSonoffDevice() ? 'sonoff' : 'tuya');
+    this.configRequested.emit({ device: this.device(), brand: b });
+    this.tuyaQrRequested.emit(this.device());
+  }
 
   readonly isDeviceOffline = computed(() => {
     const d = this.device();

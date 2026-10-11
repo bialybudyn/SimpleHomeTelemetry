@@ -138,14 +138,14 @@
         <span class="hidden lg:inline font-bold">Test budzika</span>
       </button>
 
-      <!-- Przycisk Narzędzia Tuya Local Key QR Code -->
+      <!-- Przycisk Panelu Konfiguracja Urządzenia (Sonoff / Tuya) -->
       <button
-        (click)="openTuyaQrModal()"
+        (click)="openDeviceConfigModal()"
         class="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm transition-all cursor-pointer"
-        title="Pobierz klucze Tuya Local Key przez kod QR (bez konta dewelopera)"
+        title="Panel Konfiguracja urządzenia: Zarządzanie Sonoff LAN, adresy IP, baza OUI i klucze Tuya"
       >
-        <mat-icon class="text-sm !w-4 !h-4 text-cyan-400">qr_code_scanner</mat-icon>
-        <span class="hidden md:inline font-bold">Klucze Tuya (QR)</span>
+        <mat-icon class="text-sm !w-4 !h-4 text-cyan-400">tune</mat-icon>
+        <span class="hidden md:inline font-bold">Konfiguracja (Sonoff/Tuya)</span>
       </button>
 
       <!-- Przycisk Synchronizacji z Zigbee2MQTT -->
@@ -679,6 +679,7 @@
                   (renameRequested)="openRenameDialog($event)"
                   (commandRequested)="handleDeviceCommand($event)"
                   (tuyaQrRequested)="openTuyaQrModal($event)"
+                  (configRequested)="openDeviceConfigModal($event.device, $event.brand)"
                 />
               </div>
             }
@@ -823,12 +824,12 @@
             <span class="text-white font-bold ml-1">{{ allWifiDevices().length }}</span>
           </div>
           <button
-            (click)="openTuyaQrModal()"
+            (click)="openDeviceConfigModal(undefined, 'sonoff')"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/40 text-cyan-200 border border-cyan-500/40 font-semibold shadow-sm transition-all cursor-pointer"
-            title="Pobierz klucze Tuya Local Key przez kod QR dla wentylatora i urządzeń Wi-Fi"
+            title="Panel Konfiguracja urządzenia: Zarządzanie Sonoff LAN, adresy IP, baza OUI i klucze Tuya"
           >
-            <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">qr_code_scanner</mat-icon>
-            <span>Klucz Tuya QR</span>
+            <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">tune</mat-icon>
+            <span>Konfiguracja Wi-Fi (Sonoff/Tuya)</span>
           </button>
           <button
             (click)="openWifiModal()"
@@ -992,6 +993,7 @@
                   (renameRequested)="openRenameDialog($event)"
                   (commandRequested)="handleDeviceCommand($event)"
                   (tuyaQrRequested)="openTuyaQrModal($event)"
+                  (configRequested)="openDeviceConfigModal($event.device, $event.brand)"
                 />
               </div>
             }
@@ -1174,20 +1176,31 @@
   </div>
 }
 
+<!-- Nowy Panel Konfiguracja Urządzenia (Sonoff LAN / Tuya Local Key) -->
+@if (showDeviceConfigModal()) {
+  <app-device-config-modal
+    [targetDevice]="selectedDeviceForConfig()"
+    [initialBrand]="initialConfigBrand()"
+    (closeModal)="closeDeviceConfigModal()"
+  ></app-device-config-modal>
+}
+
 <!-- Modal Parowania Urządzeń Wi-Fi -->
 @if (showWifiModal()) {
-  <app-wifi-pairing-modal
+  <app-device-config-modal
+    [targetDevice]="selectedDeviceForConfig()"
+    [initialBrand]="initialConfigBrand()"
     (closeModal)="closeWifiModal()"
-    (openTuyaQrModal)="closeWifiModal(); openTuyaQrModal()"
-  ></app-wifi-pairing-modal>
+  ></app-device-config-modal>
 }
 
 <!-- Modal Skanowania Kodu QR Tuya Local Key -->
 @if (showTuyaQrModal()) {
-  <app-tuya-qr-modal
+  <app-device-config-modal
     [targetDevice]="selectedTuyaDevice()"
+    [initialBrand]="'tuya'"
     (closeModal)="closeTuyaQrModal()"
-  ></app-tuya-qr-modal>
+  ></app-device-config-modal>
 }
 
 <!-- Modal Pełnych Szczegółów Ostrzeżeń IMGW dla Regionu -->

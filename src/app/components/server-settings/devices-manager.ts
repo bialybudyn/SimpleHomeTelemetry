@@ -422,16 +422,55 @@ type SortDirection = 'asc' | 'desc';
                       }
                     </td>
 
-                    <!-- Protokół / Klucz Local Key -->
+                    <!-- Protokół / Klucz Local Key / Adres IP -->
                     <td class="py-3 px-3 whitespace-nowrap font-mono text-[11px]">
-                      @if (dev.protocol === 'wifi' || dev.ip_address) {
-                        <div class="flex items-center gap-1 text-indigo-400">
-                          <mat-icon class="text-xs !w-3.5 !h-3.5">wifi</mat-icon>
-                          <span>Wi-Fi ({{ dev.ip_address || 'brak IP' }})</span>
-                        </div>
+                      @if (dev.protocol === 'wifi' || dev.ip_address || dev.sonoff_device_id || dev.local_key) {
+                        @if (editingIpIeee() === dev.ieee_address) {
+                          <div class="flex items-center gap-1">
+                            <input
+                              type="text"
+                              [value]="editingIpValue()"
+                              (input)="editingIpValue.set($any($event.target).value)"
+                              placeholder="np. 192.168.1.150"
+                              class="w-32 bg-slate-950 border border-cyan-500 rounded px-1.5 py-0.5 text-xs text-white font-mono focus:outline-none"
+                            />
+                            <button
+                              (click)="saveEditIp(dev)"
+                              class="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                              title="Zapisz adres IP"
+                            >
+                              <mat-icon class="text-xs !w-3 !h-3">check</mat-icon>
+                            </button>
+                            <button
+                              (click)="cancelEditIp()"
+                              class="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 cursor-pointer"
+                              title="Anuluj"
+                            >
+                              <mat-icon class="text-xs !w-3 !h-3">close</mat-icon>
+                            </button>
+                          </div>
+                        } @else {
+                          <div class="flex items-center gap-1.5 text-indigo-400">
+                            <mat-icon class="text-xs !w-3.5 !h-3.5">wifi</mat-icon>
+                            <span [class.text-amber-400]="!dev.ip_address">
+                              {{ dev.ip_address ? 'Wi-Fi (' + dev.ip_address + ')' : 'Wi-Fi (Brak IP)' }}
+                            </span>
+                            <button
+                              (click)="startEditIp(dev)"
+                              class="p-0.5 rounded text-cyan-400 hover:text-cyan-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Wpisz lub zmień adres IP urządzenia"
+                            >
+                              <mat-icon class="text-xs !w-3.5 !h-3.5">edit</mat-icon>
+                            </button>
+                          </div>
+                        }
                         @if (dev.local_key) {
                           <span class="text-[10px] text-emerald-400 block" [title]="'Pełny klucz: ' + dev.local_key">
                             Local Key: ••••{{ dev.local_key.slice(-4) }}
+                          </span>
+                        } @else if (dev.sonoff_device_id) {
+                          <span class="text-[10px] text-cyan-400 block" [title]="'Sonoff ID: ' + dev.sonoff_device_id">
+                            Sonoff: {{ dev.sonoff_device_id }}
                           </span>
                         } @else {
                           <span class="text-[10px] text-amber-500 block">Brak Local Key</span>
@@ -669,6 +708,28 @@ export class DevicesManager {
   readonly permanentTargetDevice = signal<Device | null>(null);
   readonly showBatchPermanentModal = signal<boolean>(false);
   readonly showLogsModal = signal<boolean>(false);
+
+  // Ręczna edycja adresu IP w tabeli
+  readonly editingIpIeee = signal<string | null>(null);
+  readonly editingIpValue = signal<string>('');
+
+  startEditIp(dev: Device): void {
+    this.editingIpIeee.set(dev.ieee_address);
+    this.editingIpValue.set(dev.ip_address || '');
+  }
+
+  cancelEditIp(): void {
+    this.editingIpIeee.set(null);
+    this.editingIpValue.set('');
+  }
+
+  async saveEditIp(dev: Device): Promise<void> {
+    const ip = this.editingIpValue().trim();
+    if (ip) {
+      await this.telemetry.assignDeviceIp(dev.ieee_address, ip);
+    }
+    this.cancelEditIp();
+  }
 
   // Lista wszystkich urządzeń z serwera (w tym usuniętych z pulpitu)
   readonly allDevices = computed(() => {

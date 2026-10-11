@@ -1,0 +1,19 @@
+{
+  "connection_mode": "network_tcp",
+  "host": "Dongle-M.local",
+  "port": 6638,
+  "serial_port": "/dev/ttyACM0",
+  "adapter": "ember",
+  "operating_mode": "coordinator",
+  "baudrate": 115200,
+  "rtscts": false,
+  "web_console_url": "http://Dongle-M.local",
+  "wifi_softap_mode": false,
+  "wifi_softap_ssid": "",
+  "wifi_softap_password": "",
+  "wifi_softap_channel": 6,
+  "wifi_softap_ip": "",
+  "wifi_softap_dhcp_start": "",
+  "wifi_softap_dhcp_end": "",
+  "scan_subnets": "192.168.1.0/24, 192.168.0.0/24"
+}

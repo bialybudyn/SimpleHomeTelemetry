@@ -612,7 +612,7 @@ function decryptPayload(encryptedData: string, ivBase64: string, apiKey: string)
 /**
  * Wysłanie żądania HTTP REST do urządzenia Sonoff w sieci LAN na porcie 8081
  */
-async function sendSonoffHttpRequest(
+export async function sendSonoffHttpRequest(
   ip: string,
   path: string,
   payloadData: Record<string, unknown>,
