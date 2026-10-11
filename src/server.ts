@@ -9,7 +9,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { Socket } from 'node:net';
 import { createSocket } from 'node:dgram';
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, hostname } from 'node:os';
+import { createHash } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import mqtt, { MqttClient } from 'mqtt';
 import nodemailer from 'nodemailer';
@@ -1986,29 +1987,61 @@ app.post('/api/devices/:ieee/test-connection', async (req: Request, res: Respons
     return;
   }
 
-  if (dev.protocol === 'wifi' || dev.local_key) {
+  if (dev.protocol === 'wifi' || dev.local_key || dev.sonoff_device_id || (dev.vendor || '').toLowerCase().includes('espressif')) {
     const ip = dev.ip_address || '';
-    const isSonoff = dev.model.toLowerCase().includes('s60') || (dev.vendor || '').toLowerCase().includes('sonoff');
+    const isSonoff = (
+      (dev.model || '').toLowerCase().includes('s60') ||
+      (dev.model || '').toLowerCase().includes('sonoff') ||
+      (dev.model || '').toLowerCase().includes('espressif') ||
+      (dev.vendor || '').toLowerCase().includes('sonoff') ||
+      (dev.vendor || '').toLowerCase().includes('espressif') ||
+      (dev.vendor || '').toLowerCase().includes('ewelink') ||
+      (dev.vendor || '').toLowerCase().includes('coolkit') ||
+      Boolean(dev.sonoff_device_id) ||
+      Boolean(dev.sonoff_api_key) ||
+      dev.ieee_address.startsWith('sonoff_') ||
+      dev.ieee_address.startsWith('wifi_')
+    );
 
     if (isSonoff) {
-      if (!ip) {
-        dev.connection_status = 'error';
-        dev.last_error = 'Brak skonfigurowanego adresu IP w sieci Wi-Fi LAN';
-        broadcastEvent({ type: 'device_updated', device: dev });
-        res.json({ success: false, message: dev.last_error, device: dev });
-        return;
+      // Auto-uzupełnij brakujące identyfikatory z zapamiętanej konfiguracji eWeLink
+      if (!dev.sonoff_device_id || !dev.sonoff_api_key) {
+        const storedEwe = getStoredEwelinkConfig();
+        if (Array.isArray(storedEwe.devices)) {
+          const matchedEwe = storedEwe.devices.find(
+            (d) =>
+              (ip && d.ip === ip) ||
+              (dev.sonoff_device_id && d.deviceId === dev.sonoff_device_id) ||
+              d.name === dev.friendly_name ||
+              dev.ieee_address.includes(d.deviceId)
+          );
+          if (matchedEwe) {
+            if (!dev.sonoff_device_id) dev.sonoff_device_id = matchedEwe.deviceId;
+            if (!dev.sonoff_api_key) dev.sonoff_api_key = matchedEwe.deviceKey || matchedEwe.apiKey;
+            dev.vendor = 'SONOFF / eWeLink (Espressif)';
+          }
+        }
       }
 
       const sonoffRes = await testSonoffLanConnection(ip, dev.sonoff_device_id || dev.tuya_dev_id || undefined, dev.sonoff_api_key || undefined);
-      dev.connection_status = 'online';
-      dev.last_error = null;
-      dev.last_seen = new Date().toISOString();
-      if (sonoffRes.deviceInfo?.switch) {
-        dev.state = sonoffRes.deviceInfo.switch === 'on' ? 'ON' : 'OFF';
+      
+      if (sonoffRes.success) {
+        dev.connection_status = 'online';
+        dev.last_error = null;
+        dev.last_seen = new Date().toISOString();
+        if (sonoffRes.deviceInfo?.switch) {
+          dev.state = sonoffRes.deviceInfo.switch === 'on' ? 'ON' : 'OFF';
+        }
+        triggerSaveDevices();
+        broadcastEvent({ type: 'device_updated', device: dev });
+        res.json({ success: true, message: sonoffRes.message, device: dev });
+      } else {
+        dev.connection_status = 'error';
+        dev.last_error = sonoffRes.message;
+        triggerSaveDevices();
+        broadcastEvent({ type: 'device_updated', device: dev });
+        res.json({ success: false, message: sonoffRes.message, device: dev });
       }
-      triggerSaveDevices();
-      broadcastEvent({ type: 'device_updated', device: dev });
-      res.json({ success: true, message: `SONOFF S60TFP (${ip}:8081): połączenie poprawne. ${sonoffRes.message}`, device: dev });
       return;
     }
 
@@ -2779,10 +2812,39 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
   const isSonoffDev = dev.protocol === 'wifi' && (
     (dev.model || '').toLowerCase().includes('s60') ||
     (dev.model || '').toLowerCase().includes('sonoff') ||
+    (dev.model || '').toLowerCase().includes('espressif') ||
     (dev.vendor || '').toLowerCase().includes('sonoff') ||
-    Boolean(dev.sonoff_device_id)
+    (dev.vendor || '').toLowerCase().includes('espressif') ||
+    (dev.vendor || '').toLowerCase().includes('ewelink') ||
+    (dev.vendor || '').toLowerCase().includes('coolkit') ||
+    Boolean(dev.sonoff_device_id) ||
+    Boolean(dev.sonoff_api_key) ||
+    dev.ieee_address.startsWith('sonoff_') ||
+    dev.ieee_address.startsWith('wifi_')
   );
-  if (isSonoffDev && (dev.ip_address || dev.sonoff_device_id)) {
+
+  if (isSonoffDev) {
+    // Auto-uzupełnij brakujące identyfikatory z zapamiętanej konfiguracji eWeLink
+    if (!dev.sonoff_device_id || !dev.sonoff_api_key) {
+      const storedEwe = getStoredEwelinkConfig();
+      if (Array.isArray(storedEwe.devices)) {
+        const matchedEwe = storedEwe.devices.find(
+          (d) =>
+            (dev.ip_address && d.ip === dev.ip_address) ||
+            (dev.sonoff_device_id && d.deviceId === dev.sonoff_device_id) ||
+            d.name === dev.friendly_name ||
+            dev.ieee_address.includes(d.deviceId)
+        );
+        if (matchedEwe) {
+          if (!dev.sonoff_device_id) dev.sonoff_device_id = matchedEwe.deviceId;
+          if (!dev.sonoff_api_key) dev.sonoff_api_key = matchedEwe.deviceKey || matchedEwe.apiKey;
+          if (!dev.vendor || dev.vendor === 'Espressif' || dev.vendor === 'Wi-Fi Device') {
+            dev.vendor = 'SONOFF / eWeLink (Espressif)';
+          }
+        }
+      }
+    }
+
     const sw = cmd.state ? (cmd.state === 'ON' ? 'on' : 'off') : undefined;
     const startup = cmd.power_on_behavior ? (cmd.power_on_behavior === 'on' ? 'on' : cmd.power_on_behavior === 'off' ? 'off' : 'stay') : undefined;
     const sled = cmd.network_indicator !== undefined ? (cmd.network_indicator ? 'on' : 'off') : undefined;
@@ -3310,17 +3372,29 @@ app.post('/api/tinytuya/device/config', (req: Request, res: Response) => {
 // ENDPOINTY SONOFF LAN (SONOFF SMARTPLUG S60TFP WI-FI)
 // ==========================================
 
-// 1. Test połączenia z urządzeniem Sonoff w sieci LAN (Port 8081)
+// 1. Test połączenia z urządzeniem Sonoff w sieci LAN (Port 8081) lub Chmurze eWeLink
 app.post('/api/sonoff/device/test', async (req: Request, res: Response) => {
   const { ip, device_id, api_key } = req.body || {};
   const cleanIp = String(ip || '').trim();
-  if (!cleanIp) {
-    res.status(400).json({ success: false, message: 'Wymagany jest adres IP gniazdka Sonoff' });
-    return;
+  
+  let resolvedDeviceId = device_id ? String(device_id).trim() : undefined;
+  let resolvedApiKey = api_key ? String(api_key).trim() : undefined;
+
+  if (!resolvedDeviceId || !resolvedApiKey) {
+    const storedEwe = getStoredEwelinkConfig();
+    if (Array.isArray(storedEwe.devices)) {
+      const matched = storedEwe.devices.find(
+        (d) => (cleanIp && d.ip === cleanIp) || (resolvedDeviceId && d.deviceId === resolvedDeviceId)
+      );
+      if (matched) {
+        if (!resolvedDeviceId) resolvedDeviceId = matched.deviceId;
+        if (!resolvedApiKey) resolvedApiKey = matched.deviceKey || matched.apiKey;
+      }
+    }
   }
 
   try {
-    const result = await testSonoffLanConnection(cleanIp, device_id, api_key);
+    const result = await testSonoffLanConnection(cleanIp, resolvedDeviceId, resolvedApiKey);
     res.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -3454,9 +3528,14 @@ app.post('/api/sonoff/ewelink/login', async (req: Request, res: Response) => {
     const result = await loginAndSyncEwelink(email_or_phone, password, region || 'eu', custom_app_id, custom_app_secret);
     if (result.success && Array.isArray(result.devices)) {
       for (const dev of result.devices) {
-        // Znajdź czy urządzenie już istnieje
+        // Znajdź czy urządzenie już istnieje w pamięci (po Device ID, IP, nazwie lub vendorze Espressif)
         let existingDev = Array.from(devices.values()).find(
-          (d) => d.sonoff_device_id === dev.deviceId || (d.ip_address && d.ip_address === dev.ip)
+          (d) =>
+            d.sonoff_device_id === dev.deviceId ||
+            (d.ip_address && dev.ip && d.ip_address === dev.ip) ||
+            d.friendly_name.toLowerCase() === dev.name.toLowerCase() ||
+            d.ieee_address.includes(dev.deviceId) ||
+            (d.protocol === 'wifi' && (d.vendor || '').toLowerCase().includes('espressif') && (d.ip_address === dev.ip || d.friendly_name.toLowerCase().includes('sonoff') || d.friendly_name.toLowerCase().includes('gniazdko')))
         );
 
         const nowIso = new Date().toISOString();
@@ -5013,6 +5092,268 @@ app.post('/api/weather/favorites', (req: Request, res: Response) => {
   }
   const updated = setImgwFavoriteStations(ids);
   res.json({ success: true, favorites: updated });
+});
+
+// =========================================================================
+// SYSTEM BACKUP & RESTORE API (Flota urządzeń Zigbee & Wi-Fi, DongleMAX, Klucze i Poświadczenia)
+// =========================================================================
+
+// Funkcja pomocnicza budująca pełną paczkę kopii zapasowej
+function buildFullBackupPackage() {
+  const allDevicesList = Array.from(devices.values());
+  const zigbeeCount = allDevicesList.filter((d) => d.protocol !== 'wifi').length;
+  const wifiCount = allDevicesList.filter((d) => d.protocol === 'wifi').length;
+  const sonoffCount = allDevicesList.filter(
+    (d) => Boolean(d.sonoff_device_id) || Boolean(d.sonoff_api_key) || (d.vendor || '').toLowerCase().includes('sonoff') || (d.model || '').toLowerCase().includes('s60')
+  ).length;
+  const tuyaCount = allDevicesList.filter(
+    (d) => Boolean(d.local_key) || Boolean(d.tuya_dev_id) || (d.vendor || '').toLowerCase().includes('tuya')
+  ).length;
+  const withIpCount = allDevicesList.filter((d) => Boolean(d.ip_address)).length;
+  
+  // Zlicz poświadczenia (klucze szyfrowania AES, klucze API)
+  let credentialsCount = allDevicesList.filter((d) => Boolean(d.local_key) || Boolean(d.sonoff_api_key)).length;
+  const storedEwelink = getStoredEwelinkConfig();
+  if (storedEwelink?.email || storedEwelink?.apiKey || storedEwelink?.at) {
+    credentialsCount += 1;
+  }
+
+  const exportDate = new Date().toISOString();
+
+  // Obliczenie sumy kontrolnej SHA-256 z danych urządzeń i koordynatora
+  const dataForHash = JSON.stringify({
+    devices: allDevicesList,
+    dongle: dongleMaxConfig,
+  });
+  const checksum = createHash('sha256').update(dataForHash).digest('hex');
+
+  const backupPackage = {
+    metadata: {
+      app_name: 'SmartHome Telemetry & DongleMAX',
+      version: '2.5.0',
+      exported_at: exportDate,
+      export_hostname: hostname(),
+      checksum,
+      description: 'Kompletna kopia zapasowa floty urządzeń Zigbee i Wi-Fi, koordynatora DongleMAX, poświadczeń i kluczy szyfrujących (Local Key, Device Key, API Key).',
+      counts: {
+        total_devices: allDevicesList.length,
+        zigbee_devices: zigbeeCount,
+        wifi_devices: wifiCount,
+        sonoff_devices: sonoffCount,
+        tuya_devices: tuyaCount,
+        with_ip_count: withIpCount,
+        credentials_count: credentialsCount,
+      },
+    },
+    devices: allDevicesList,
+    dongle_max: dongleMaxConfig,
+    ewelink: storedEwelink,
+    notifications: notificationConfig,
+    mqtt: {
+      url: mqttStatus.url,
+      topic_prefix: mqttStatus.topic_prefix,
+    },
+    system_settings: {
+      scan_subnets: dongleMaxConfig.scan_subnets,
+    },
+  };
+
+  return backupPackage;
+}
+
+// 1. Eksport i pobieranie kopii zapasowej (jako JSON lub załącznik .json)
+app.get('/api/backup/export', (req: Request, res: Response) => {
+  try {
+    const pkg = buildFullBackupPackage();
+    const isDownload = req.query['download'] === '1';
+
+    if (isDownload) {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const filename = `iot-telemetry-backup-${ts}.json`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    }
+
+    res.json(pkg);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: `Błąd podczas generowania kopii zapasowej: ${msg}` });
+  }
+});
+
+// 2. Podsumowanie stanu danych do wykonania kopii zapasowej
+app.get('/api/backup/summary', (_req: Request, res: Response) => {
+  try {
+    const pkg = buildFullBackupPackage();
+    res.json({
+      success: true,
+      metadata: pkg.metadata,
+      dongle_max: {
+        host: pkg.dongle_max.host,
+        port: pkg.dongle_max.port,
+        connection_mode: pkg.dongle_max.connection_mode,
+        operating_mode: pkg.dongle_max.operating_mode,
+        scan_subnets: pkg.dongle_max.scan_subnets,
+      },
+      ewelink_connected: Boolean(pkg.ewelink?.connected),
+      ewelink_email: pkg.ewelink?.email || null,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: `Błąd odczytu podsumowania: ${msg}` });
+  }
+});
+
+// 3. Wgrywanie i przywracanie kopii zapasowej (Import na nową instancję serwera)
+app.post('/api/backup/import', (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    // Wspieraj zarówno { backup: {...}, mode: 'replace' } jak i bezpośredni zrzut JSON
+    const rawBackup = body.backup || body;
+    const mode = body.mode === 'merge' ? 'merge' : 'replace';
+
+    if (!rawBackup || typeof rawBackup !== 'object') {
+      res.status(400).json({ success: false, message: 'Nieprawidłowy format pliku kopii zapasowej. Wymagany obiekt JSON.' });
+      return;
+    }
+
+    const devicesToRestore = Array.isArray(rawBackup.devices) ? rawBackup.devices : [];
+    const dongleMaxToRestore = rawBackup.dongle_max;
+    const ewelinkToRestore = rawBackup.ewelink;
+    const notificationsToRestore = rawBackup.notifications;
+    const systemSettingsToRestore = rawBackup.system_settings;
+
+    if (devicesToRestore.length === 0 && !dongleMaxToRestore && !ewelinkToRestore) {
+      res.status(400).json({
+        success: false,
+        message: 'Kopia zapasowa nie zawiera żadnych urządzeń ani konfiguracji DongleMAX/eWeLink.',
+      });
+      return;
+    }
+
+    // A. Przywracanie urządzeń (Rejestr floty Zigbee & Wi-Fi)
+    if (mode === 'replace') {
+      devices.clear();
+      for (const dev of devicesToRestore) {
+        if (dev && dev.ieee_address) {
+          devices.set(dev.ieee_address, {
+            ...dev,
+            connection_status: dev.connection_status || 'offline',
+          });
+        }
+      }
+    } else {
+      // Tryb merge (scalanie bez usuwania obecnych)
+      for (const dev of devicesToRestore) {
+        if (dev && dev.ieee_address) {
+          const existing = devices.get(dev.ieee_address);
+          if (existing) {
+            devices.set(dev.ieee_address, {
+              ...existing,
+              ...dev,
+              // Zachowaj istniejący stan jeśli backup nie ma nowszego
+              state: dev.state !== undefined ? dev.state : existing.state,
+              ip_address: dev.ip_address || existing.ip_address,
+              local_key: dev.local_key || existing.local_key,
+              sonoff_api_key: dev.sonoff_api_key || existing.sonoff_api_key,
+              sonoff_device_id: dev.sonoff_device_id || existing.sonoff_device_id,
+            });
+          } else {
+            devices.set(dev.ieee_address, dev);
+          }
+        }
+      }
+    }
+
+    // Natychmiastowy zapis bazy urządzeń na dysk
+    try {
+      const list = Array.from(devices.entries());
+      writeFileSync(devicesCachePath, JSON.stringify(list, null, 2), 'utf-8');
+    } catch (saveErr) {
+      console.warn('[BACKUP-RESTORE] Błąd zapisu devices_cache.json:', saveErr);
+    }
+
+    // B. Przywracanie parametrów Sonoff Dongle Max (Dongle-M)
+    let dongleMaxRestored = false;
+    if (dongleMaxToRestore && typeof dongleMaxToRestore === 'object') {
+      dongleMaxConfig = {
+        ...dongleMaxConfig,
+        ...dongleMaxToRestore,
+      };
+      if (systemSettingsToRestore?.scan_subnets) {
+        dongleMaxConfig.scan_subnets = systemSettingsToRestore.scan_subnets;
+      }
+      saveDongleMaxConfig();
+      dongleMaxRestored = true;
+      broadcastEvent({
+        type: 'dongle_max_config_updated',
+        config: dongleMaxConfig,
+      });
+    }
+
+    // C. Przywracanie konta eWeLink i DeviceKey chmury
+    let ewelinkRestored = false;
+    if (ewelinkToRestore && typeof ewelinkToRestore === 'object') {
+      updateStoredEwelinkConfig(ewelinkToRestore);
+      ewelinkRestored = true;
+    }
+
+    // D. Przywracanie konfiguracji powiadomień
+    let notificationsRestored = false;
+    if (notificationsToRestore && typeof notificationsToRestore === 'object') {
+      notificationConfig = {
+        ...notificationConfig,
+        ...notificationsToRestore,
+      };
+      saveNotificationConfig();
+      notificationsRestored = true;
+    }
+
+    // E. Audyt i powiadomienie zdarzeniowe SSE
+    const restoredList = Array.from(devices.values());
+    const zigbeeRestored = restoredList.filter((d) => d.protocol !== 'wifi').length;
+    const wifiRestored = restoredList.filter((d) => d.protocol === 'wifi').length;
+    const sonoffRestored = restoredList.filter(
+      (d) => Boolean(d.sonoff_device_id) || Boolean(d.sonoff_api_key) || (d.vendor || '').toLowerCase().includes('sonoff') || (d.model || '').toLowerCase().includes('s60')
+    ).length;
+    const tuyaRestored = restoredList.filter(
+      (d) => Boolean(d.local_key) || Boolean(d.tuya_dev_id) || (d.vendor || '').toLowerCase().includes('tuya')
+    ).length;
+    const credentialsRestored = restoredList.filter((d) => Boolean(d.local_key) || Boolean(d.sonoff_api_key)).length + (ewelinkRestored ? 1 : 0);
+
+    addDeviceLog(
+      'restore',
+      'SYSTEM_BACKUP',
+      'Kopia Zapasowa',
+      `[Przywracanie Backupu] Zaimportowano pomyślnie ${restoredList.length} urządzeń (ZigBee: ${zigbeeRestored}, Wi-Fi: ${wifiRestored}, Sonoff: ${sonoffRestored}, Tuya: ${tuyaRestored}) oraz konfigurację DongleMAX w trybie ${mode.toUpperCase()}.`
+    );
+
+    broadcastEvent({
+      type: 'devices_updated',
+      devices: restoredList,
+    });
+
+    res.json({
+      success: true,
+      message: `Kopia zapasowa została pomyślnie przywrócona! Przywrócono ${restoredList.length} urządzeń, konfigurację DongleMAX i poświadczenia kluczy.`,
+      mode,
+      restored_counts: {
+        devices: restoredList.length,
+        zigbee: zigbeeRestored,
+        wifi: wifiRestored,
+        sonoff: sonoffRestored,
+        tuya: tuyaRestored,
+        credentials: credentialsRestored,
+      },
+      dongle_max_restored: dongleMaxRestored,
+      ewelink_restored: ewelinkRestored,
+      notifications_restored: notificationsRestored,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[BACKUP-IMPORT] Błąd:', err);
+    res.status(500).json({ success: false, message: `Błąd podczas przywracania kopii zapasowej: ${msg}` });
+  }
 });
 
 // Obsluga plikow statycznych z /browser (CSS, JS, Fonts, Icons, Images)

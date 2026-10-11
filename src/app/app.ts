@@ -16,7 +16,7 @@ import { DeviceCard } from './components/device-card/device-card';
 import { AnalyticsModal } from './components/analytics-modal/analytics-modal';
 import { AnalyticsView } from './components/analytics-view/analytics-view';
 import { TopologyGraph } from './components/topology-graph/topology-graph';
-import { ServerSettings } from './components/server-settings/server-settings';
+import { ServerSettings, ServerSubTab } from './components/server-settings/server-settings';
 import { ScenesBuilder } from './components/scenes-builder/scenes-builder';
 import { WeatherView } from './components/weather-view/weather-view';
 import { WeatherWidget } from './components/weather-widget/weather-widget';

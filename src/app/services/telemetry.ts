@@ -20,6 +20,8 @@ import {
   TinyTuyaScanResponse,
   DeviceAuditLog,
   DiscoveredNetworkHost,
+  SystemBackupPackage,
+  BackupImportResponse,
 } from '../models/telemetry.models';
 import { format24hTime } from '../utils/date-format';
 import { directBrowserSonoffCommand } from '../utils/browser-sonoff-client';
@@ -1298,12 +1300,14 @@ export class Telemetry {
   readonly ewelinkConfig = signal<{
     email?: string;
     phoneNumber?: string;
+    password?: string;
     region?: string;
     connected?: boolean;
     lastSync?: string;
     devices?: Array<{
       deviceId: string;
       apiKey: string;
+      deviceKey?: string;
       name: string;
       model: string;
       switch?: string;
@@ -1330,9 +1334,10 @@ export class Telemetry {
     region = 'eu',
     customAppId?: string,
     customAppSecret?: string,
-  ): Promise<{ success: boolean; message: string; devicesCount: number }> {
+  ): Promise<{ success: boolean; message: string; devicesCount: number; devices?: any[] }> {
     return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string; devices: unknown[] }>('/api/sonoff/ewelink/login', {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.http.post<{ success: boolean; message: string; devices: any[] }>('/api/sonoff/ewelink/login', {
         email_or_phone: emailOrPhone,
         password,
         region,
@@ -1346,6 +1351,7 @@ export class Telemetry {
             success: res?.success || false,
             message: res?.message || 'Zalogowano pomyślnie do eWeLink!',
             devicesCount: res?.devices?.length || 0,
+            devices: res?.devices || [],
           });
         },
         error: (err) => {
@@ -1353,6 +1359,7 @@ export class Telemetry {
             success: false,
             message: err?.error?.message || 'Błąd logowania do eWeLink.',
             devicesCount: 0,
+            devices: [],
           });
         },
       });
@@ -1452,5 +1459,106 @@ export class Telemetry {
         });
     });
   }
+
+  // =========================================================================
+  // SYSTEM BACKUP & RESTORE (Kopia Zapasowa Floty, DongleMAX, Kluczy i Konfiguracji)
+  // =========================================================================
+  readonly isExportingBackup = signal<boolean>(false);
+  readonly isImportingBackup = signal<boolean>(false);
+  readonly lastImportResult = signal<BackupImportResponse | null>(null);
+
+  // Pobranie obiektu pełnej kopii zapasowej z serwera
+  getBackupPackage(): Promise<{ success: boolean; data?: SystemBackupPackage; message?: string }> {
+    this.isExportingBackup.set(true);
+    return new Promise((resolve) => {
+      this.http.get<SystemBackupPackage>('/api/backup/export').subscribe({
+        next: (data) => {
+          this.isExportingBackup.set(false);
+          resolve({ success: true, data });
+        },
+        error: (err) => {
+          this.isExportingBackup.set(false);
+          resolve({
+            success: false,
+            message: err?.error?.message || 'Błąd podczas generowania kopii zapasowej.',
+          });
+        },
+      });
+    });
+  }
+
+  // Bezpośrednie pobranie pliku .json kopii zapasowej do przeglądarki użytkownika
+  async triggerBackupDownload(): Promise<boolean> {
+    const res = await this.getBackupPackage();
+    if (res.success && res.data) {
+      if (!isPlatformBrowser(this.platformId)) return true;
+      try {
+        const jsonStr = JSON.stringify(res.data, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.href = url;
+        a.download = `iot-telemetry-backup-${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        return true;
+      } catch (err) {
+        console.error('Błąd pobierania pliku backupu:', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // Wgranie i odtworzenie kopii zapasowej na serwerze (nowa instancja lub scalenie)
+  restoreBackupPackage(
+    backupData: SystemBackupPackage,
+    mode: 'replace' | 'merge' = 'replace'
+  ): Promise<BackupImportResponse> {
+    this.isImportingBackup.set(true);
+    return new Promise((resolve) => {
+      this.http
+        .post<BackupImportResponse>('/api/backup/import', {
+          backup: backupData,
+          mode,
+        })
+        .subscribe({
+          next: (res) => {
+            this.isImportingBackup.set(false);
+            this.lastImportResult.set(res);
+            this.fetchDevices();
+            this.fetchDongleMaxConfig();
+            this.loadEwelinkConfig();
+            resolve(res);
+          },
+          error: (err) => {
+            this.isImportingBackup.set(false);
+            const errRes: BackupImportResponse = {
+              success: false,
+              message: err?.error?.message || 'Błąd połączenia podczas wgrywania kopii zapasowej.',
+              mode,
+              restored_counts: {
+                devices: 0,
+                zigbee: 0,
+                wifi: 0,
+                sonoff: 0,
+                tuya: 0,
+                credentials: 0,
+              },
+              dongle_max_restored: false,
+              ewelink_restored: false,
+              notifications_restored: false,
+              errors: [err?.message || 'Błąd serwera'],
+            };
+            this.lastImportResult.set(errRes);
+            resolve(errRes);
+          },
+        });
+    });
+  }
 }
+
 

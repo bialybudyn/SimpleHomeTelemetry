@@ -426,4 +426,65 @@ export interface DeviceAuditLog {
   message: string;
 }
 
+export interface SystemBackupMetadata {
+  app_name: string;
+  version: string;
+  exported_at: string;
+  export_hostname?: string;
+  checksum?: string;
+  description: string;
+  counts: {
+    total_devices: number;
+    zigbee_devices: number;
+    wifi_devices: number;
+    sonoff_devices: number;
+    tuya_devices: number;
+    with_ip_count: number;
+    credentials_count: number;
+  };
+}
+
+export interface SystemBackupPackage {
+  metadata: SystemBackupMetadata;
+  devices: Device[];
+  dongle_max: DongleMaxConfig;
+  ewelink?: {
+    email?: string;
+    password?: string;
+    region?: string;
+    appId?: string;
+    appSecret?: string;
+    apiKey?: string;
+    at?: string;
+    devices?: any[];
+  };
+  notifications?: Record<string, unknown>;
+  mqtt?: {
+    url?: string;
+    topic_prefix?: string;
+  };
+  system_settings?: {
+    scan_subnets?: string;
+  };
+}
+
+export interface BackupImportResponse {
+  success: boolean;
+  message: string;
+  mode: 'replace' | 'merge';
+  restored_counts: {
+    devices: number;
+    zigbee: number;
+    wifi: number;
+    sonoff: number;
+    tuya: number;
+    credentials: number;
+  };
+  dongle_max_restored: boolean;
+  ewelink_restored: boolean;
+  notifications_restored: boolean;
+  errors?: string[];
+}
+
+
 

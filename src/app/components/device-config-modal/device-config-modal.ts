@@ -236,15 +236,27 @@ import { Telemetry } from '../../services/telemetry';
                 </div>
 
                 <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
-                  <button
-                    (click)="testSonoffConnection()"
-                    [disabled]="!sonoffIp() || isTestingSonoff()"
-                    class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-700 transition-colors cursor-pointer disabled:opacity-40"
-                    title="Wyślij testowe zapytanie /zeroconf/info na port 8081"
-                  >
-                    <mat-icon class="text-sm !w-4 !h-4 text-cyan-400" [class.animate-spin]="isTestingSonoff()">network_check</mat-icon>
-                    <span>{{ isTestingSonoff() ? 'Testowanie...' : '⚡ Testuj połączenie LAN (Port 8081)' }}</span>
-                  </button>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button
+                      (click)="testSonoffConnection()"
+                      [disabled]="isTestingSonoff()"
+                      class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-700 transition-colors cursor-pointer disabled:opacity-40"
+                      title="Weryfikuj połączenie LAN (8081) oraz Chmurę eWeLink Bridge"
+                    >
+                      <mat-icon class="text-sm !w-4 !h-4 text-cyan-400" [class.animate-spin]="isTestingSonoff()">network_check</mat-icon>
+                      <span>{{ isTestingSonoff() ? 'Testowanie...' : '⚡ Testuj LAN (8081) / Chmurę' }}</span>
+                    </button>
+
+                    <button
+                      (click)="autoFetchKeyFromEwelink()"
+                      [disabled]="isSavingSonoff()"
+                      class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-950/80 hover:bg-indigo-900/80 text-xs font-semibold text-indigo-200 border border-indigo-700/80 transition-colors cursor-pointer disabled:opacity-40"
+                      title="Dociągnij Device ID i klucz szyfrowania AES z Twojego konta eWeLink"
+                    >
+                      <mat-icon class="text-sm !w-4 !h-4 text-indigo-400">cloud_download</mat-icon>
+                      <span>Pobierz klucz z eWeLink</span>
+                    </button>
+                  </div>
 
                   <button
                     (click)="saveSonoffConfig()"
@@ -252,7 +264,7 @@ import { Telemetry } from '../../services/telemetry';
                     class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-xs font-bold text-white shadow-lg shadow-cyan-950/50 transition-all cursor-pointer disabled:opacity-50"
                   >
                     <mat-icon class="text-sm !w-4 !h-4" [class.animate-spin]="isSavingSonoff()">save</mat-icon>
-                    <span>{{ isSavingSonoff() ? 'Zapisywanie...' : '💾 Zapisz konfigurację / Zmień IP' }}</span>
+                    <span>{{ isSavingSonoff() ? 'Zapisywanie...' : '💾 Zapisz konfigurację' }}</span>
                   </button>
                 </div>
 
@@ -899,13 +911,55 @@ export class DeviceConfigModal implements OnInit {
     this.sonoffFeedbackMsg.set(res.message);
   }
 
-  // Test połączenia Sonoff LAN na porcie 8081
+  // Automatyczne pobieranie Device ID i klucza AES z eWeLink
+  async autoFetchKeyFromEwelink(): Promise<void> {
+    const ewCfg = this.telemetry.ewelinkConfig();
+    const loginEmail = ewCfg.email || this.ewelinkEmail().trim();
+    const loginPass = ewCfg.password || this.ewelinkPassword().trim();
+
+    if (loginEmail && loginPass) {
+      this.isSavingSonoff.set(true);
+      this.sonoffFeedbackMsg.set('Łączenie z eWeLink i pobieranie kluczy lokalnych...');
+      try {
+        const res = await this.telemetry.loginEwelink(loginEmail, loginPass, ewCfg.region || 'eu');
+        this.isSavingSonoff.set(false);
+        this.sonoffFeedbackSuccess.set(res.success);
+        if (res.success && Array.isArray(res.devices)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const matched = res.devices.find((d: any) => 
+            (this.sonoffIp() && d.ip === this.sonoffIp()) ||
+            (this.sonoffDeviceId() && d.deviceId === this.sonoffDeviceId()) ||
+            (d.name && d.name.toLowerCase() === this.sonoffName().toLowerCase())
+          );
+          if (matched) {
+            if (matched.deviceId) this.sonoffDeviceId.set(matched.deviceId);
+            if (matched.deviceKey || matched.apiKey) this.sonoffApiKey.set(matched.deviceKey || matched.apiKey);
+            if (matched.ip && !this.sonoffIp()) this.sonoffIp.set(matched.ip);
+            this.sonoffFeedbackMsg.set(`Pobrano dane dla ${matched.name} (ID: ${matched.deviceId}, Key: obecny)!`);
+          } else {
+            this.sonoffFeedbackMsg.set(`Zsynchronizowano ${res.devices.length} urządzeń eWeLink z pamięcią panelu!`);
+          }
+          this.telemetry.fetchDevices();
+        } else {
+          this.sonoffFeedbackMsg.set(res.message);
+        }
+      } catch {
+        this.isSavingSonoff.set(false);
+        this.sonoffFeedbackSuccess.set(false);
+        this.sonoffFeedbackMsg.set('Błąd komunikacji z chmurą eWeLink.');
+      }
+    } else {
+      this.sonoffFeedbackSuccess.set(false);
+      this.sonoffFeedbackMsg.set('Wprowadź dane logowania eWeLink w sekcji poniżej lub w ustawieniach konta.');
+    }
+  }
+
+  // Test połączenia Sonoff LAN na porcie 8081 + Chmura eWeLink Bridge
   testSonoffConnection(): void {
     const ip = this.sonoffIp().trim();
-    if (!ip) return;
 
     this.isTestingSonoff.set(true);
-    this.sonoffFeedbackMsg.set('Wysyłanie zapytania AES port 8081 (/zeroconf/info)...');
+    this.sonoffFeedbackMsg.set('Testowanie połączenia (LAN 8081 + eWeLink Cloud Bridge)...');
 
     this.telemetry.testSonoffDevice({
       ip,
@@ -915,12 +969,12 @@ export class DeviceConfigModal implements OnInit {
       next: (res) => {
         this.isTestingSonoff.set(false);
         this.sonoffFeedbackSuccess.set(res.success);
-        this.sonoffFeedbackMsg.set(res.message || 'Gniazdko Sonoff odpowiada prawidłowo w sieci LAN!');
+        this.sonoffFeedbackMsg.set(res.message || 'Połączenie z gniazdkiem zweryfikowane pomyślnie!');
       },
       error: (err) => {
         this.isTestingSonoff.set(false);
         this.sonoffFeedbackSuccess.set(false);
-        this.sonoffFeedbackMsg.set(err?.error?.message || 'Brak odpowiedzi gniazdka Sonoff na porcie 8081.');
+        this.sonoffFeedbackMsg.set(err?.error?.message || 'Brak odpowiedzi gniazdka Sonoff na porcie 8081 oraz w Chmurze.');
       },
     });
   }

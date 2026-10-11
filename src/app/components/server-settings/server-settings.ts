@@ -4,6 +4,8 @@ import {
   computed,
   inject,
   signal,
+  input,
+  effect,
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { InstallerView } from '../installer-view/installer-view';
@@ -14,10 +16,12 @@ import { AndroidViewer } from '../android-viewer/android-viewer';
 import { Simulator } from '../simulator/simulator';
 import { NotificationsConfig } from './notifications-config';
 import { DevicesManager } from './devices-manager';
+import { BackupManager } from '../backup-manager/backup-manager';
 import { Telemetry } from '../../services/telemetry';
 
 export type ServerSubTab =
   | 'devices'
+  | 'backup'
   | 'installer'
   | 'catalog'
   | 'dongle-max'
@@ -48,6 +52,7 @@ interface SubTabItem {
     Simulator,
     NotificationsConfig,
     DevicesManager,
+    BackupManager,
   ],
   template: `
     <div class="space-y-6">
@@ -182,6 +187,9 @@ interface SubTabItem {
             @case ('notifications') {
               <app-notifications-config></app-notifications-config>
             }
+            @case ('backup') {
+              <app-backup-manager></app-backup-manager>
+            }
           }
         </div>
       </div>
@@ -190,8 +198,18 @@ interface SubTabItem {
 })
 export class ServerSettings {
   readonly telemetry = inject(Telemetry);
+  readonly subTab = input<ServerSubTab>();
 
   readonly activeSubTab = signal<ServerSubTab>('devices');
+
+  constructor() {
+    effect(() => {
+      const target = this.subTab();
+      if (target) {
+        this.activeSubTab.set(target);
+      }
+    });
+  }
 
   readonly subTabs = computed<SubTabItem[]>(() => {
     const allCount = this.telemetry.allDevices().length;
@@ -205,6 +223,14 @@ export class ServerSettings {
         icon: 'devices_other',
         badge: deletedCount > 0 ? `${allCount} (${deletedCount} usun.)` : `${allCount}`,
         badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+      },
+      {
+        id: 'backup',
+        title: 'Kopia Zapasowa (Backup & Restore)',
+        subtitle: 'Zgrywanie i odtwarzanie floty urządzeń, DongleMAX, poświadczeń i kluczy',
+        icon: 'settings_backup_restore',
+        badge: 'Eksport/Import',
+        badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
       },
       {
         id: 'installer',
