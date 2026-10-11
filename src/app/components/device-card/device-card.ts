@@ -796,7 +796,7 @@ import { Telemetry } from '../../services/telemetry';
             </div>
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
               <div class="text-slate-400 text-[10px]">Napięcie</div>
-              <div class="text-cyan-300 font-bold text-sm mt-0.5">{{ device().voltage !== undefined && device().voltage !== null ? device().voltage + ' V' : '230 V' }}</div>
+              <div class="text-cyan-300 font-bold text-sm mt-0.5">{{ formattedVoltage() }}</div>
             </div>
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
               <div class="text-slate-400 text-[10px]">Energia</div>
@@ -882,7 +882,7 @@ import { Telemetry } from '../../services/telemetry';
                   <mat-icon class="text-[11px] !w-3 !h-3 text-cyan-400">speed</mat-icon>
                 </div>
                 <div class="text-cyan-300 font-bold text-sm mt-0.5">
-                  {{ device().voltage !== undefined && device().voltage !== null ? device().voltage + ' V' : '230 V' }}
+                  {{ formattedVoltage() }}
                 </div>
               </div>
 
@@ -1665,6 +1665,22 @@ export class DeviceCard {
     const d = this.device();
     if (this.isBasicZb1gsp()) return true;
     return this.category() === 'switch' && (d.power !== undefined || d.voltage !== undefined || d.current !== undefined || d.energy !== undefined);
+  });
+
+  readonly formattedVoltage = computed<string>(() => {
+    const v = this.device().voltage;
+    if (v === undefined || v === null) return '230 V';
+    if (v > 1000) return (v / 100).toFixed(1) + ' V';
+    if (v > 500) return (v / 10).toFixed(1) + ' V';
+    return v + ' V';
+  });
+
+  readonly formattedCurrent = computed<string>(() => {
+    const c = this.device().current;
+    if (c === undefined || c === null) return '0.0 A';
+    if (c > 100) return (c / 100).toFixed(2) + ' A';
+    if (c > 50) return (c / 10).toFixed(1) + ' A';
+    return c + ' A';
   });
 
   readonly currentLoadPercent = computed<number>(() => {

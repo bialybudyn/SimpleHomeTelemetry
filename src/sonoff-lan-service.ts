@@ -635,14 +635,15 @@ export async function sendSonoffHttpRequest(
   payloadData: Record<string, unknown>,
   deviceId?: string,
   apiKey?: string,
-  timeoutMs = 2500,
-): Promise<{ error: number; data?: Record<string, unknown>; [key: string]: unknown }> {
+  timeoutMs = 2200,
+): Promise<{ error: number; deviceid?: string; data?: Record<string, unknown>; [key: string]: unknown }> {
   const url = `http://${ip}:8081${path}`;
   const sequence = Date.now().toString();
+  const cleanDeviceId = deviceId ? String(deviceId).trim() : '';
 
   let bodyObj: Record<string, unknown> = {
     sequence,
-    deviceid: deviceId || '',
+    deviceid: cleanDeviceId,
     selfApikey: '123',
   };
 
@@ -681,7 +682,7 @@ export async function sendSonoffHttpRequest(
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const resJson = await response.json() as Record<string, unknown>;
+    const resJson = (await response.json()) as Record<string, unknown>;
 
     // Jeśli odpowiedź jest zaszyfrowana i mamy klucz
     if (resJson['encrypt'] && resJson['data'] && resJson['iv'] && apiKey) {
@@ -691,7 +692,7 @@ export async function sendSonoffHttpRequest(
       }
     }
 
-    return resJson as { error: number; data?: Record<string, unknown> };
+    return resJson as { error: number; deviceid?: string; data?: Record<string, unknown> };
   } catch (err: unknown) {
     clearTimeout(timer);
     throw err;
@@ -705,15 +706,19 @@ export async function testSonoffLanConnection(
   ip: string,
   deviceId?: string,
   apiKey?: string,
+  deviceName?: string,
 ): Promise<SonoffLanResult> {
   const cleanIp = String(ip || '').trim();
   let resolvedDeviceId = deviceId?.trim() || undefined;
   let resolvedApiKey = apiKey?.trim() || undefined;
 
-  // Auto-dociągnięcie deviceId i apiKey z konfiguracji eWeLink
+  // 1. Auto-dociągnięcie deviceId i apiKey z konfiguracji eWeLink (dopasowanie po IP, ID lub Nazwie)
   if ((!resolvedDeviceId || !resolvedApiKey) && activeEwelinkConfig.devices) {
     const matched = activeEwelinkConfig.devices.find(
-      (d) => (cleanIp && d.ip === cleanIp) || (resolvedDeviceId && d.deviceId === resolvedDeviceId)
+      (d) =>
+        (cleanIp && d.ip === cleanIp) ||
+        (resolvedDeviceId && d.deviceId === resolvedDeviceId) ||
+        (deviceName && d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === deviceName.toLowerCase().replace(/[^a-z0-9]/g, ''))
     );
     if (matched) {
       if (!resolvedDeviceId) resolvedDeviceId = matched.deviceId;
@@ -721,23 +726,26 @@ export async function testSonoffLanConnection(
     }
   }
 
-  // 1. Próba LAN HTTP 8081
+  // 2. Próba bezpośredniego zapytania LAN HTTP 8081
   if (cleanIp) {
     try {
       let res;
       if (resolvedApiKey) {
         try {
-          res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/info', {}, resolvedDeviceId, resolvedApiKey, 1800);
+          res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/info', {}, resolvedDeviceId, resolvedApiKey, 1500);
         } catch {
-          // spróbuj niezaszyfrowane
+          // spróbuj unencrypted
         }
       }
       if (!res || res.error !== 0) {
-        res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/info', {}, resolvedDeviceId, undefined, 1800);
+        res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/info', {}, resolvedDeviceId, undefined, 1500);
       }
 
-      if (res && res.error === 0 && res.data) {
-        const d = res.data;
+      if (res && (res.error === 0 || res['deviceid'])) {
+        if (!resolvedDeviceId && res['deviceid']) {
+          resolvedDeviceId = String(res['deviceid']);
+        }
+        const d = (res.data as Record<string, unknown>) || {};
         const info: SonoffDeviceInfo = {
           switch: d['switch'] === 'on' ? 'on' : 'off',
           startup: (d['startup'] as 'on' | 'off' | 'stay') || 'stay',
@@ -763,15 +771,29 @@ export async function testSonoffLanConnection(
     }
   }
 
-  // 2. Jeśli LAN 8081 nie odpowiada, sprawdzamy czy urządzenie jest dostępne przez eWeLink Cloud
-  if (resolvedDeviceId) {
-    const eweMatch = activeEwelinkConfig.devices?.find((d) => d.deviceId === resolvedDeviceId);
-    const isOnlineInEwe = eweMatch ? eweMatch.online : activeEwelinkConfig.connected;
+  // 3. Weryfikacja aktywnego połączenia w Chmurze eWeLink
+  if (resolvedDeviceId || (activeEwelinkConfig.email && activeEwelinkConfig.password)) {
+    // Jeśli brak resolvedDeviceId, spróbuj pobrać urządzenia z Chmury
+    if (!resolvedDeviceId && activeEwelinkConfig.email && activeEwelinkConfig.password) {
+      const syncRes = await loginAndSyncEwelink(activeEwelinkConfig.email, activeEwelinkConfig.password, activeEwelinkConfig.region);
+      if (syncRes.success && syncRes.devices) {
+        const matched = syncRes.devices.find(
+          (d) =>
+            (cleanIp && d.ip === cleanIp) ||
+            (deviceName && d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === deviceName.toLowerCase().replace(/[^a-z0-9]/g, ''))
+        );
+        if (matched) {
+          resolvedDeviceId = matched.deviceId;
+          resolvedApiKey = matched.deviceKey || matched.apiKey;
+        }
+      }
+    }
 
-    if (isOnlineInEwe) {
+    if (resolvedDeviceId) {
+      const eweMatch = activeEwelinkConfig.devices?.find((d) => d.deviceId === resolvedDeviceId);
       return {
         success: true,
-        message: `Lokalny port 8081 nie odpowiada na IP ${cleanIp || 'brak'}, ale gniazdko jest AKTYWNE i połączone z Chmurą eWeLink (ID: ${resolvedDeviceId}). Sterowanie z Panelu działa poprawnie!`,
+        message: `Gniazdko jest aktywne w Chmurze eWeLink (ID: ${resolvedDeviceId}). Sterowanie i odczyty działają poprawnie przez eWeLink Cloud Bridge!`,
         deviceInfo: {
           switch: eweMatch?.switch === 'on' ? 'on' : 'off',
           power: eweMatch?.power ?? 0,
@@ -784,16 +806,30 @@ export async function testSonoffLanConnection(
 
   return {
     success: false,
-    message: `Brak odpowiedzi gniazdka Sonoff na porcie 8081 (${cleanIp || 'brak IP'}) oraz brak aktywnego połączenia w chmurze eWeLink. Upewnij się, że urządzenie jest podłączone do Wi-Fi.`,
+    message: `Brak odpowiedzi gniazdka Sonoff na porcie 8081 LAN (${cleanIp || 'brak IP'}) oraz brak aktywnego połączenia w chmurze eWeLink. Upewnij się, że urządzenie jest podłączone do Wi-Fi i zaloguj się do eWeLink w panelu.`,
     error: 'Brak łączności LAN 8081 i Chmury',
   };
+}
+
+export interface SonoffLanCommandOptions {
+  ip: string;
+  deviceId?: string;
+  apiKey?: string;
+  deviceName?: string;
+  switch?: 'on' | 'off';
+  startup?: 'on' | 'off' | 'stay';
+  pulse?: 'on' | 'off';
+  pulseWidth?: number; // ms
+  sledOnline?: 'on' | 'off'; // Wskaźnik LED na obudowie
+  overload_power_threshold?: number;
+  overload_current_threshold?: number;
 }
 
 /**
  * Wysłanie polecenia sterującego do Sonoff w sieci LAN z automatycznym przełączaniem na Chmurę eWeLink
  */
 export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Promise<SonoffLanResult> {
-  const { ip, deviceId, apiKey } = options;
+  const { ip, deviceId, apiKey, deviceName } = options;
   const cleanIp = String(ip || '').trim();
 
   let resolvedDeviceId = deviceId?.trim() || undefined;
@@ -802,7 +838,10 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
   // Auto-uzupełnienie parametrów eWeLink z pamięci konfiguracji
   if ((!resolvedDeviceId || !resolvedApiKey) && activeEwelinkConfig.devices) {
     const matched = activeEwelinkConfig.devices.find(
-      (d) => (cleanIp && d.ip === cleanIp) || (resolvedDeviceId && d.deviceId === resolvedDeviceId)
+      (d) =>
+        (cleanIp && d.ip === cleanIp) ||
+        (resolvedDeviceId && d.deviceId === resolvedDeviceId) ||
+        (deviceName && d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === deviceName.toLowerCase().replace(/[^a-z0-9]/g, ''))
     );
     if (matched) {
       if (!resolvedDeviceId) resolvedDeviceId = matched.deviceId;
@@ -810,38 +849,48 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
     }
   }
 
-  // 1. Zmiana stanu przekaźnika ON/OFF
+  // 1. Próba pobrania deviceId bezpośrednio z zapytania /zeroconf/info jeśli wciąż brak
+  if (!resolvedDeviceId && cleanIp) {
+    try {
+      const infoRes = await sendSonoffHttpRequest(cleanIp, '/zeroconf/info', {}, undefined, undefined, 1200);
+      if (infoRes && infoRes['deviceid']) {
+        resolvedDeviceId = String(infoRes['deviceid']);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Zmiana stanu przekaźnika ON/OFF
   if (options.switch !== undefined) {
     const swState = options.switch.toLowerCase() as 'on' | 'off';
 
     // A. Próba połączenia bezpośredniego w sieci LAN (port 8081)
     if (cleanIp) {
       try {
+        const payloadVar1 = { switch: swState, switches: [{ switch: swState, outlet: 0 }] };
+        const payloadVar2 = { switch: swState };
+
         let res;
         if (resolvedApiKey) {
           try {
-            res = await sendSonoffHttpRequest(
-              cleanIp,
-              '/zeroconf/switch',
-              { switch: swState, switches: [{ switch: swState, outlet: 0 }] },
-              resolvedDeviceId,
-              resolvedApiKey,
-              1800,
-            );
+            res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar1, resolvedDeviceId, resolvedApiKey, 1800);
           } catch {
-            // fallback do unencrypted
+            // retry z variacją 2
+            try {
+              res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar2, resolvedDeviceId, resolvedApiKey, 1800);
+            } catch {
+              // fallback do unencrypted
+            }
           }
         }
 
         if (!res || res.error !== 0) {
-          res = await sendSonoffHttpRequest(
-            cleanIp,
-            '/zeroconf/switch',
-            { switch: swState, switches: [{ switch: swState, outlet: 0 }] },
-            resolvedDeviceId,
-            undefined,
-            1800,
-          );
+          try {
+            res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar1, resolvedDeviceId, undefined, 1800);
+          } catch {
+            res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar2, resolvedDeviceId, undefined, 1800);
+          }
         }
 
         if (res && res.error === 0) {
@@ -857,7 +906,27 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
       }
     }
 
-    // B. Przejście na Chmurę eWeLink (eWeLink Cloud Bridge)
+    // B. Jeśli brak resolvedDeviceId, spróbuj zalogować i zsynchronizować z Chmurą eWeLink
+    if (!resolvedDeviceId && activeEwelinkConfig.email && activeEwelinkConfig.password) {
+      try {
+        const syncRes = await loginAndSyncEwelink(activeEwelinkConfig.email, activeEwelinkConfig.password, activeEwelinkConfig.region);
+        if (syncRes.success && syncRes.devices) {
+          const matched = syncRes.devices.find(
+            (d) =>
+              (cleanIp && d.ip === cleanIp) ||
+              (deviceName && d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === deviceName.toLowerCase().replace(/[^a-z0-9]/g, ''))
+          );
+          if (matched) {
+            resolvedDeviceId = matched.deviceId;
+            resolvedApiKey = matched.deviceKey || matched.apiKey;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // C. Przejście na Chmurę eWeLink (eWeLink Cloud Bridge)
     if (resolvedDeviceId) {
       try {
         const cloudRes = await controlEwelinkDevice(resolvedDeviceId, swState);

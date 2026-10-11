@@ -2023,7 +2023,7 @@ app.post('/api/devices/:ieee/test-connection', async (req: Request, res: Respons
         }
       }
 
-      const sonoffRes = await testSonoffLanConnection(ip, dev.sonoff_device_id || dev.tuya_dev_id || undefined, dev.sonoff_api_key || undefined);
+      const sonoffRes = await testSonoffLanConnection(ip, dev.sonoff_device_id || dev.tuya_dev_id || undefined, dev.sonoff_api_key || undefined, dev.friendly_name);
       
       if (sonoffRes.success) {
         dev.connection_status = 'online';
@@ -2833,6 +2833,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
             (dev.ip_address && d.ip === dev.ip_address) ||
             (dev.sonoff_device_id && d.deviceId === dev.sonoff_device_id) ||
             d.name === dev.friendly_name ||
+            (d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === dev.friendly_name.toLowerCase().replace(/[^a-z0-9]/g, '')) ||
             dev.ieee_address.includes(d.deviceId)
         );
         if (matchedEwe) {
@@ -2865,6 +2866,7 @@ app.post('/api/devices/:ieee/set', (req: Request, res: Response) => {
       ip: dev.ip_address || '',
       deviceId: dev.sonoff_device_id || dev.tuya_dev_id || undefined,
       apiKey: dev.sonoff_api_key || undefined,
+      deviceName: dev.friendly_name,
       switch: sw,
       startup,
       pulse,
