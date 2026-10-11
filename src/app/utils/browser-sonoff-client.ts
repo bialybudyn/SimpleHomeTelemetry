@@ -206,7 +206,6 @@ export async function directBrowserSonoffCommand(options: {
 
   const payloadData = {
     switch: state,
-    switches: [{ switch: state, outlet: 0 }],
   };
 
   let body: Record<string, unknown>;

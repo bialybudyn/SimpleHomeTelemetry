@@ -740,7 +740,7 @@ export class DeviceConfigModal implements OnInit {
   readonly scanSubnetsInput = signal<string>('192.168.1.0/24, 192.168.0.0/24, 192.168.4.0/24');
 
   // eWeLink Cloud sync
-  readonly ewelinkEmail = signal<string>('b.zbudniewek@gmail.com');
+  readonly ewelinkEmail = signal<string>('');
   readonly ewelinkPassword = signal<string>('');
   readonly isSyncingEwelink = signal<boolean>(false);
   readonly ewelinkFeedbackMsg = signal<string>('');

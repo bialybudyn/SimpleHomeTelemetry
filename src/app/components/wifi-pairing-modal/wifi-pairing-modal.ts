@@ -481,7 +481,7 @@ export class WifiPairingModal implements OnInit {
   readonly activeBrand = signal<'sonoff' | 'tuya'>('sonoff');
 
   // --- EWELINK SYNC STATE ---
-  readonly ewelinkEmail = signal<string>('b.zbudniewek@gmail.com');
+  readonly ewelinkEmail = signal<string>('');
   readonly ewelinkPassword = signal<string>('');
   readonly ewelinkRegion = signal<string>('eu');
   readonly customAppId = signal<string>('');

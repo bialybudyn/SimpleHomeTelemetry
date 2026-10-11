@@ -461,36 +461,36 @@ export async function controlEwelinkDevice(
   // 1. Próba CoolKit OpenAPI v2 (Standard CUBE-OS)
   try {
     const v2Url = `https://${region}-apia.coolkit.cc/v2/device/thing/status`;
-    const v2Body = {
-      type: 1,
-      id: deviceId,
-      params: {
-        switch: cleanState,
-        switches: [{ switch: cleanState, outlet: 0 }],
-      },
-    };
+    const singleParam = { switch: cleanState };
+    const multiParam = { switches: [{ switch: cleanState, outlet: 0 }] };
 
-    const v2Res = await fetch(v2Url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${at}`,
-        'X-CK-Appid': appId,
-      },
-      body: JSON.stringify(v2Body),
-    });
+    for (const paramsObj of [singleParam, multiParam]) {
+      const v2Res = await fetch(v2Url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${at}`,
+          'X-CK-Appid': appId,
+        },
+        body: JSON.stringify({
+          type: 1,
+          id: deviceId,
+          params: paramsObj,
+        }),
+      });
 
-    const v2Data = (await v2Res.json().catch(() => null)) as Record<string, unknown> | null;
-    if (v2Data) {
-      const errCode = Number(v2Data['error']);
-      if (errCode === 0) {
-        return {
-          success: true,
-          message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (OpenAPI v2).`,
-        };
-      }
-      if ((errCode === 401 || errCode === 10004 || errCode === 402) && retryCount === 0) {
-        return controlEwelinkDevice(deviceId, state, 1);
+      const v2Data = (await v2Res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (v2Data) {
+        const errCode = Number(v2Data['error']);
+        if (errCode === 0) {
+          return {
+            success: true,
+            message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (OpenAPI v2).`,
+          };
+        }
+        if ((errCode === 401 || errCode === 10004 || errCode === 402) && retryCount === 0) {
+          return controlEwelinkDevice(deviceId, state, 1);
+        }
       }
     }
   } catch {
@@ -503,43 +503,36 @@ export async function controlEwelinkDevice(
     const nonce = Math.random().toString(36).slice(5);
     const apiUrl = `https://${region}-api.coolkit.cc:8080/api`;
 
-    const body = {
-      deviceid: deviceId,
-      params: {
-        switch: cleanState,
-        switches: [{ switch: cleanState, outlet: 0 }],
-      },
-      appid: appId,
-      nonce,
-      ts,
-      version: 8,
-    };
+    for (const paramsObj of [{ switch: cleanState }, { switches: [{ switch: cleanState, outlet: 0 }] }]) {
+      const res = await fetch(`${apiUrl}/user/device/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${at}`,
+        },
+        body: JSON.stringify({
+          deviceid: deviceId,
+          params: paramsObj,
+          appid: appId,
+          nonce,
+          ts,
+          version: 8,
+        }),
+      });
 
-    const res = await fetch(`${apiUrl}/user/device/status`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${at}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-    if (data && typeof data['error'] === 'number') {
-      const errCode = Number(data['error']);
-      if (errCode === 0) {
-        return {
-          success: true,
-          message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (v1).`,
-        };
+      const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (data && typeof data['error'] === 'number') {
+        const errCode = Number(data['error']);
+        if (errCode === 0) {
+          return {
+            success: true,
+            message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (v1).`,
+          };
+        }
+        if ((errCode === 401 || errCode === 10004) && retryCount === 0) {
+          return controlEwelinkDevice(deviceId, state, 1);
+        }
       }
-      if ((errCode === 401 || errCode === 10004) && retryCount === 0) {
-        return controlEwelinkDevice(deviceId, state, 1);
-      }
-      return {
-        success: false,
-        message: `Błąd eWeLink API (kod ${errCode}): ${data['msg'] || 'Nieznany błąd'}`,
-      };
     }
 
     return {
@@ -746,8 +739,14 @@ export async function testSonoffLanConnection(
           resolvedDeviceId = String(res['deviceid']);
         }
         const d = (res.data as Record<string, unknown>) || {};
+        const swStatus =
+          typeof d['switch'] === 'string'
+            ? d['switch']
+            : Array.isArray(d['switches']) && d['switches'][0] && typeof d['switches'][0]['switch'] === 'string'
+            ? d['switches'][0]['switch']
+            : 'off';
         const info: SonoffDeviceInfo = {
-          switch: d['switch'] === 'on' ? 'on' : 'off',
+          switch: swStatus === 'on' ? 'on' : 'off',
           startup: (d['startup'] as 'on' | 'off' | 'stay') || 'stay',
           pulse: (d['pulse'] as 'on' | 'off') || 'off',
           pulseWidth: typeof d['pulseWidth'] === 'number' ? d['pulseWidth'] : undefined,
@@ -868,38 +867,35 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
     // A. Próba połączenia bezpośredniego w sieci LAN (port 8081)
     if (cleanIp) {
       try {
-        const payloadVar1 = { switch: swState, switches: [{ switch: swState, outlet: 0 }] };
-        const payloadVar2 = { switch: swState };
+        const singlePayload = { switch: swState };
+        const multiPayload = { switches: [{ switch: swState, outlet: 0 }] };
+
+        const attempts: Array<{ path: string; payload: Record<string, unknown>; key?: string }> = [];
+
+        if (resolvedApiKey) {
+          attempts.push({ path: '/zeroconf/switch', payload: singlePayload, key: resolvedApiKey });
+          attempts.push({ path: '/zeroconf/switches', payload: multiPayload, key: resolvedApiKey });
+          attempts.push({ path: '/zeroconf/switch', payload: multiPayload, key: resolvedApiKey });
+        }
+        attempts.push({ path: '/zeroconf/switch', payload: singlePayload });
+        attempts.push({ path: '/zeroconf/switches', payload: multiPayload });
+        attempts.push({ path: '/zeroconf/switch', payload: multiPayload });
 
         let res;
-        if (resolvedApiKey) {
+        for (const attempt of attempts) {
           try {
-            res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar1, resolvedDeviceId, resolvedApiKey, 1800);
-          } catch {
-            // retry z variacją 2
-            try {
-              res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar2, resolvedDeviceId, resolvedApiKey, 1800);
-            } catch {
-              // fallback do unencrypted
+            res = await sendSonoffHttpRequest(cleanIp, attempt.path, attempt.payload, resolvedDeviceId, attempt.key, 1500);
+            if (res && res.error === 0) {
+              return {
+                success: true,
+                message: `[Lokalny LAN 8081] Pomyślnie przestawiono Sonoff (${cleanIp}) na stan: ${swState.toUpperCase()}`,
+                deviceInfo: { switch: swState },
+                rawResponse: res,
+              };
             }
-          }
-        }
-
-        if (!res || res.error !== 0) {
-          try {
-            res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar1, resolvedDeviceId, undefined, 1800);
           } catch {
-            res = await sendSonoffHttpRequest(cleanIp, '/zeroconf/switch', payloadVar2, resolvedDeviceId, undefined, 1800);
+            // Kontynuuj próbę kolejnego wariantu
           }
-        }
-
-        if (res && res.error === 0) {
-          return {
-            success: true,
-            message: `[Lokalny LAN 8081] Pomyślnie przestawiono Sonoff (${cleanIp}) na stan: ${swState.toUpperCase()}`,
-            deviceInfo: { switch: swState },
-            rawResponse: res,
-          };
         }
       } catch (lanErr: unknown) {
         console.warn(`[SONOFF LAN 8081] Port 8081 niedostępny pod IP ${cleanIp}:`, lanErr);
