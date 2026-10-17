@@ -1,6 +1,8 @@
 import {
+  AngularNodeAppEngine,
   createNodeRequestHandler,
   isMainModule,
+  writeResponseToNodeResponse,
 } from '@angular/ssr/node';
 import express, { Request, Response } from 'express';
 import { createServer } from 'node:http';
@@ -68,6 +70,7 @@ if (!existsSync(browserDistFolder)) {
 }
 
 const app = express();
+const angularApp = new AngularNodeAppEngine();
 app.use(express.json());
 
 // Serwowanie plikow statycznych na samym poczatku lancucha Express dla natychmiastowego ladowania CSS i JS
@@ -1106,9 +1109,10 @@ function requestDeviceSyncAll() {
   if (!mqttClient || !mqttStatus.connected) return;
   const prefix = mqttStatus.topic_prefix || 'zigbee2mqtt';
 
-  // 1. Zażądaj pełnej listy urządzeń i definicji z mostka Z2M
+  // 1. Zażądaj pełnej listy urządzeń i definicji z mostka Z2M (kompatybilność v1 oraz v2)
   try {
     mqttClient.publish(`${prefix}/bridge/request/devices`, '');
+    mqttClient.publish(`${prefix}/bridge/config/devices`, '');
   } catch (err) {
     console.warn('[MQTT] Błąd publikacji bridge/request/devices:', err);
   }
@@ -1127,12 +1131,11 @@ function requestDeviceSyncAll() {
   }
 
   // 3. Dla urządzeń wykonawczych zasilanych sieciowo (gniazdka, wyłączniki) wyślij ukierunkowane zapytanie /get
-  // UWAGA: Nigdy nie wysyłamy /get dla czujników bateryjnych ani głowic TRVZB (brak konwertera GET dla pustego stringu w Z2M)!
   devices.forEach((dev) => {
+    if (dev.is_deleted) return;
     const name = dev.friendly_name || dev.ieee_address;
     if (!name) return;
 
-    // Upewnij się, że kategoria jest poprawnie zaktualizowana
     const cat = dev.category || detectDeviceCategory(dev.model || '', undefined, dev.friendly_name);
     dev.category = cat;
 
@@ -1172,7 +1175,14 @@ function connectMqtt(customUrl?: string) {
       mqttStatus.last_error = null;
       console.log(`[MQTT] Polaczono pomyslnie z brokerem ${mqttStatus.url}`);
       mqttClient?.subscribe(`${mqttStatus.topic_prefix}/#`, (err) => {
-        if (err) console.error('[MQTT] Blad subskrypcji:', err);
+        if (!err) {
+          console.log('[MQTT] Subskrypcja tematów Zigbee2MQTT aktywna.');
+          setTimeout(() => {
+            requestDeviceSyncAll();
+          }, 600);
+        } else {
+          console.error('[MQTT] Blad subskrypcji:', err);
+        }
       });
       broadcastEvent({ type: 'mqtt_status', data: mqttStatus });
     });
@@ -1246,6 +1256,7 @@ function connectMqtt(customUrl?: string) {
                   ieee_address: ieee,
                   friendly_name: devName,
                   model: modelName,
+                  category: detectDeviceCategory(modelName, undefined, devName),
                   last_seen: joinedNow,
                   added_at: joinedNow,
                   first_seen: joinedNow,
@@ -1282,12 +1293,18 @@ interface Z2mDeviceItem {
   modelId?: string;
 }
 
-      // 4. Obsluga listy urzadzen wykrytych przez Zigbee2MQTT
-      if (subtopic === 'bridge/devices') {
+      // 4. Obsluga listy urzadzen wykrytych przez Zigbee2MQTT (temat bridge/devices oraz bridge/response/devices)
+      if (subtopic === 'bridge/devices' || subtopic === 'bridge/response/devices') {
         try {
-          const list = JSON.parse(message.toString());
-          if (Array.isArray(list)) {
-            let updated = 0;
+          const rawPayload = JSON.parse(message.toString());
+          let list: Z2mDeviceItem[] = [];
+          if (Array.isArray(rawPayload)) {
+            list = rawPayload;
+          } else if (rawPayload && typeof rawPayload === 'object' && Array.isArray(rawPayload.data)) {
+            list = rawPayload.data;
+          }
+
+          if (Array.isArray(list) && list.length > 0) {
             list.forEach((item: Z2mDeviceItem) => {
               const ieee = item.ieee_address || item.ieeeAddress || item.ieeeAddr;
               const isCoordinator = item.type === 'Coordinator';
@@ -1317,17 +1334,16 @@ interface Z2mDeviceItem {
                   tempDev.ieee_address = ieee;
                   tempDev.friendly_name = devName;
                   tempDev.model = modelName;
+                  tempDev.is_deleted = false;
+                  tempDev.connection_status = 'online';
                   devices.set(ieee, tempDev);
                   
-                  // Migrujemy rowniez historie pomiarow
                   const history = telemetryStore.get(tempDevKey);
                   if (history) {
                     telemetryStore.delete(tempDevKey);
                     history.forEach((p) => { p.device_ieee = ieee; });
                     telemetryStore.set(ieee, history);
                   }
-                  
-                  updated++;
                 } else {
                   const existing = devices.get(ieee);
                   if (!existing) {
@@ -1337,16 +1353,18 @@ interface Z2mDeviceItem {
                       friendly_name: devName,
                       model: modelName,
                       category: detectedCategory,
-                      last_seen: null,
+                      last_seen: new Date().toISOString(),
+                      connection_status: 'online',
+                      is_deleted: false,
                       battery: null,
                       last_temperature: null,
                       last_humidity: null,
                       linkquality: null,
                     });
-                    updated++;
                   } else {
                     existing.friendly_name = devName;
                     existing.model = modelName;
+                    existing.is_deleted = false; // Przywróć aktywne urządzenie w Z2M jeśli było wcześniej ukryte
                     if (!existing.category || existing.category === 'sensor') {
                       existing.category = detectDeviceCategory(modelName, undefined, devName);
                     }
@@ -1354,12 +1372,11 @@ interface Z2mDeviceItem {
                 }
               }
             });
+
             mqttStatus.devices_discovered = devices.size;
-            if (updated > 0) {
-              broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
-              triggerSaveDevices();
-              triggerSaveTelemetry();
-            }
+            broadcastEvent({ type: 'devices_updated', devices: Array.from(devices.values()) });
+            triggerSaveDevices();
+            triggerSaveTelemetry();
           }
         } catch {
           // ignore json error
@@ -1699,8 +1716,43 @@ interface Z2mDeviceItem {
   }
 }
 
-// Automatyczne zaladowanie wykrytych wczesniej urzadzen z pliku bazy Z2M jesli istnieje
+// Automatyczne zaladowanie wykrytych wczesniej urzadzen z pliku bazy Z2M oraz plikow konfiguracyjnych YAML
 function tryLoadExistingZ2mDevices() {
+  const friendlyNamesMap = new Map<string, string>();
+
+  // 1. Wczytaj mapowanie friendly_name z plików konfiguracyjnych Z2M
+  const configPaths = [
+    '/opt/zigbee2mqtt/data/configuration.yaml',
+    '/opt/zigbee2mqtt/data/devices.yaml',
+    join(process.cwd(), 'configuration.yaml'),
+    join(process.cwd(), 'devices.yaml'),
+  ];
+
+  for (const cfgPath of configPaths) {
+    if (existsSync(cfgPath)) {
+      try {
+        const content = readFileSync(cfgPath, 'utf-8');
+        const lines = content.split('\n');
+        let currentIeee: string | null = null;
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          const ieeeMatch = line.match(/^'?(0x[0-9a-fA-F]+)'?:/);
+          if (ieeeMatch) {
+            currentIeee = ieeeMatch[1];
+          } else if (currentIeee && line.includes('friendly_name:')) {
+            const nameMatch = line.match(/friendly_name:\s*['"]?([^'"]+)['"]?/);
+            if (nameMatch) {
+              friendlyNamesMap.set(currentIeee, nameMatch[1].trim());
+            }
+          }
+        }
+      } catch (err) {
+        console.debug('[Z2M CONFIG] Błąd odczytu pliku YAML:', err);
+      }
+    }
+  }
+
+  // 2. Wczytaj baze urzadzen Z2M
   const possiblePaths = [
     '/opt/zigbee2mqtt/data/database.db',
     join(process.cwd(), 'database.db'),
@@ -1717,17 +1769,25 @@ function tryLoadExistingZ2mDevices() {
             const item = JSON.parse(trimmed);
             const ieee = item.ieeeAddr || item.ieee_address;
             if (ieee && item.type !== 'Coordinator') {
+              const knownName = friendlyNamesMap.get(ieee) || `Czujnik ${ieee.slice(-4)}`;
+              const modelName = item.modelId || 'Zigbee Device';
               if (!devices.has(ieee)) {
                 devices.set(ieee, {
                   ieee_address: ieee,
-                  friendly_name: `Czujnik ${ieee.slice(-4)}`,
-                  model: item.modelId || 'Zigbee Device',
+                  friendly_name: knownName,
+                  model: modelName,
+                  category: detectDeviceCategory(modelName, undefined, knownName),
                   last_seen: null,
                   battery: null,
                   last_temperature: null,
                   last_humidity: null,
                   linkquality: null,
                 });
+              } else {
+                const dev = devices.get(ieee)!;
+                if (knownName && knownName !== `Czujnik ${ieee.slice(-4)}`) {
+                  dev.friendly_name = knownName;
+                }
               }
             }
           } catch {
@@ -3705,7 +3765,6 @@ async function performDongleMaxAutoDiscovery(customSubnet?: string, customIps?: 
   if (mqttClient && mqttStatus.connected) {
     try {
       mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/devices`, '');
-      mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/permit_join`, JSON.stringify({ value: true, time: 180 }));
     } catch {
       // ignore
     }
@@ -5455,12 +5514,21 @@ app.use((req: Request, res: Response, next) => {
     }
   }
 
-  // W trybie deweloperskim (ng serve) przekazujemy do Angular / Vite middleware
-  return next();
+  // Próba renderowania przez Angular SSR engine lub przekazanie do middleware Vite
+  return angularApp
+    .handle(req)
+    .then((response: unknown) => (response ? writeResponseToNodeResponse(response as unknown as Parameters<typeof writeResponseToNodeResponse>[0], res) : next()))
+    .catch(() => next());
 });
 
-// WebSocket Server
-if (isMainModule(import.meta.url) || process.env['pm_id']) {
+// WebSocket Server & standalone production server
+// Podczas działania serwera deweloperskiego (ng serve), to Angular CLI/Vite zarządza portem 3000
+const isDevServer =
+  process.env['npm_lifecycle_event'] === 'dev' ||
+  process.argv.some((arg) => arg.includes('ng') || arg.includes('serve')) ||
+  Boolean(process.env['VITE']);
+
+if (isMainModule(import.meta.url) && !isDevServer) {
   const port = process.env['PORT'] || 3000;
   const server = createServer(app);
   wss = new WebSocketServer({ server, path: '/ws' });

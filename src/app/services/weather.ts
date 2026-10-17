@@ -730,17 +730,19 @@ export class Weather {
   }
 
   private loadSavedFavorites(): void {
-    try {
-      const stored = localStorage.getItem('imgw_favorites_locations');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          this.favoriteLocationIds.set(parsed);
-          return;
+    if (isPlatformBrowser(this.platformId)) {
+      try {
+        const stored = localStorage.getItem('imgw_favorites_locations');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.favoriteLocationIds.set(parsed);
+            return;
+          }
         }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     this.http.get<{ favorites: string[] }>('/api/weather/favorites').subscribe({

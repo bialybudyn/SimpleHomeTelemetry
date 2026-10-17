@@ -367,16 +367,16 @@ export async function loginAndSyncEwelink(
       const extra = (item['extra'] as Record<string, unknown>) || {};
       const extraInner = (extra['extra'] as Record<string, unknown>) || {};
 
-      const deviceKey = String(
+      const deviceKeyCandidate =
         item['devicekey'] ||
         item['deviceKey'] ||
         params['devicekey'] ||
         params['deviceKey'] ||
         extraInner['devicekey'] ||
         extra['devicekey'] ||
-        item['apikey'] ||
-        ''
-      );
+        (item['tags'] as Record<string, unknown> | undefined)?.['devicekey'];
+
+      const deviceKey = typeof deviceKeyCandidate === 'string' && deviceKeyCandidate.length > 5 ? String(deviceKeyCandidate) : '';
 
       const resolvedIp = typeof item['ip'] === 'string'
         ? item['ip']
@@ -500,6 +500,11 @@ export async function controlEwelinkDevice(
               message: `Pomyślnie przestawiono gniazdko ${deviceId} na stan ${state.toUpperCase()} przez eWeLink Cloud (OpenAPI v2 ${httpMethod}).`,
             };
           }
+          if (errCode === 301 && typeof v2Data['region'] === 'string' && retryCount === 0) {
+            activeEwelinkConfig.region = v2Data['region'] as string;
+            saveEwelinkConfig();
+            return controlEwelinkDevice(deviceId, state, 1);
+          }
           if ((errCode === 401 || errCode === 10004 || errCode === 402) && retryCount === 0) {
             return controlEwelinkDevice(deviceId, state, 1);
           }
@@ -558,6 +563,77 @@ export async function controlEwelinkDevice(
     success: false,
     message: `Błąd eWeLink Cloud (${deviceId}): ${lastCloudError}`,
   };
+}
+
+/**
+ * Sterowanie lokalnym urządzeniem przez eWeLink CUBE Open API (iHost / NSPanel Pro / CUBE Gateway)
+ * Zgodnie ze specyfikacją: https://ewelink.cc/ewelink-cube/introduce-open-api/document/
+ */
+export async function controlEwelinkCubeLocal(
+  ip: string,
+  deviceId: string,
+  state: 'on' | 'off',
+  accessToken?: string,
+  timeoutMs = 1800,
+): Promise<{ success: boolean; message: string }> {
+  if (!ip || !deviceId) {
+    return { success: false, message: 'Brak IP lub DeviceId dla eWeLink CUBE' };
+  }
+
+  const cleanState = state.toLowerCase() as 'on' | 'off';
+  const cubePorts = [8081, 80, 8321];
+  const endpoints = [
+    `/open-api/v1/rest/devices/${deviceId}/state`,
+    `/open-api/v2/rest/devices/${deviceId}/state`,
+  ];
+
+  const cubePayloads = [
+    { state: { power: { powerState: cleanState } } },
+    { state: { switch: { switch: cleanState } } },
+    { state: { toggle: { '1': { toggleState: cleanState } } } },
+  ];
+
+  for (const port of cubePorts) {
+    for (const ep of endpoints) {
+      for (const payload of cubePayloads) {
+        const url = `http://${ip}:${port}${ep}`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          };
+          if (accessToken) {
+            headers['Authorization'] = `Bearer ${accessToken}`;
+          }
+
+          const res = await fetch(url, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timer);
+
+          if (res.ok) {
+            const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+            if (data && (data['error'] === 0 || data['code'] === 0 || data['status'] === 'success')) {
+              return {
+                success: true,
+                message: `[eWeLink CUBE Local API] Pomyślnie przestawiono gniazdko (${deviceId}) na ${cleanState.toUpperCase()} przez lokalną bramkę CUBE (${ip}:${port}).`,
+              };
+            }
+          }
+        } catch {
+          clearTimeout(timer);
+        }
+      }
+    }
+  }
+
+  return { success: false, message: 'Brak odpowiedzi od lokalnej bramki eWeLink CUBE' };
 }
 
 export interface SonoffLanCommandOptions {
@@ -689,6 +765,33 @@ export async function sendSonoffHttpRequest(
 
     const resJson = (await response.json()) as Record<string, unknown>;
 
+    // Jeśli odpowiedź zgłasza błąd klucza lub błąd szyfrowania, spróbuj zapytania bez szyfrowania (DIY)
+    if (resJson['error'] !== undefined && Number(resJson['error']) !== 0 && apiKey && apiKey.trim().length > 0) {
+      const fallbackBody = {
+        sequence: Date.now().toString(),
+        deviceid: cleanDeviceId,
+        selfApikey: '123',
+        encrypt: false,
+        data: payloadData,
+      };
+      try {
+        const fRes = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fallbackBody),
+          timeout: timeoutMs,
+        } as any);
+        if (fRes.ok) {
+          const fJson = (await fRes.json().catch(() => null)) as Record<string, unknown> | null;
+          if (fJson && Number(fJson['error']) === 0) {
+            return fJson as { error: number; deviceid?: string; data?: Record<string, unknown> };
+          }
+        }
+      } catch {
+        // kontynuuj z oryginalną odpowiedzią
+      }
+    }
+
     // Jeśli odpowiedź jest zaszyfrowana i mamy klucz
     if (resJson['encrypt'] && resJson['data'] && resJson['iv'] && apiKey) {
       const dec = decryptPayload(String(resJson['data']), String(resJson['iv']), apiKey);
@@ -700,6 +803,31 @@ export async function sendSonoffHttpRequest(
     return resJson as { error: number; deviceid?: string; data?: Record<string, unknown> };
   } catch (err: unknown) {
     clearTimeout(timer);
+    if (apiKey && apiKey.trim().length > 0) {
+      // Spróbuj niezaszyfrowanego zapytania DIY w przypadku awarii szyfrowania
+      try {
+        const fallbackBody = {
+          sequence: Date.now().toString(),
+          deviceid: cleanDeviceId,
+          selfApikey: '123',
+          encrypt: false,
+          data: payloadData,
+        };
+        const fRes = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fallbackBody),
+        });
+        if (fRes.ok) {
+          const fJson = (await fRes.json().catch(() => null)) as Record<string, unknown> | null;
+          if (fJson && Number(fJson['error']) === 0) {
+            return fJson as { error: number; deviceid?: string; data?: Record<string, unknown> };
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
     throw err;
   }
 }
@@ -911,6 +1039,22 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
         }
       } catch (lanErr: unknown) {
         console.warn(`[SONOFF LAN 8081] Port 8081 niedostępny pod IP ${cleanIp}:`, lanErr);
+      }
+    }
+
+    // A2. Próba połączenia lokalnego przez eWeLink CUBE Open API (dla iHost / NSPanel Pro / CUBE bridges)
+    if (cleanIp && resolvedDeviceId) {
+      try {
+        const cubeRes = await controlEwelinkCubeLocal(cleanIp, resolvedDeviceId, swState, activeEwelinkConfig.at);
+        if (cubeRes.success) {
+          return {
+            success: true,
+            message: cubeRes.message,
+            deviceInfo: { switch: swState },
+          };
+        }
+      } catch {
+        // Kontynuuj do chmury eWeLink
       }
     }
 
