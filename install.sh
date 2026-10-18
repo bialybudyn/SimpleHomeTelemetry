@@ -36,15 +36,39 @@ USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 INITIAL_DIR="$(pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Automatyczne wylaczenie uciazliwych zapytan o telemetrie Google / Angular Analytics (domyslnie N / enter)
+export NG_CLI_ANALYTICS=false
+
+for CONF_HOME in "$USER_HOME" "/root"; do
+  if [ -n "$CONF_HOME" ] && [ -d "$CONF_HOME" ]; then
+    mkdir -p "$CONF_HOME/.config/configstore" 2>/dev/null || true
+    cat << 'EOF' > "$CONF_HOME/.angular-config.json"
+{
+  "version": 1,
+  "cli": {
+    "analytics": false
+  }
+}
+EOF
+    if [ "$CONF_HOME" = "$USER_HOME" ]; then
+      chown -R "$REAL_USER":"$REAL_USER" "$CONF_HOME/.angular-config.json" 2>/dev/null || true
+    fi
+  fi
+done
+
 # Wykrywanie katalogu zrodlowego panelu telemetrycznego (musi zawierac src/server.ts)
 PANEL_SOURCE=""
 if [ -f "$SCRIPT_DIR/src/server.ts" ]; then
   PANEL_SOURCE="$SCRIPT_DIR"
 elif [ -f "$INITIAL_DIR/src/server.ts" ]; then
   PANEL_SOURCE="$INITIAL_DIR"
+elif [ -f "$(pwd)/src/server.ts" ]; then
+  PANEL_SOURCE="$(pwd)"
+elif [ -f "/app/applet/src/server.ts" ]; then
+  PANEL_SOURCE="/app/applet"
 elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ]; then
   PANEL_SOURCE="/root/SimpleHomeTelemetry"
-elif [ -f "$USER_HOME/SimpleHomeTelemetry/src/server.ts" ]; then
+elif [ -n "$USER_HOME" ] && [ -f "$USER_HOME/SimpleHomeTelemetry/src/server.ts" ]; then
   PANEL_SOURCE="$USER_HOME/SimpleHomeTelemetry"
 fi
 
@@ -68,7 +92,7 @@ fi
 
 echo -e "${YELLOW}[1/7] Aktualizacja repozytoriow systemowych i instalacja narzedzi bazowych...${NC}"
 apt-get update -y
-apt-get install -y curl wget git gnupg gpg ca-certificates build-essential sqlite3 libsqlite3-dev socat ufw avahi-daemon libnss-mdns
+apt-get install -y curl wget git gnupg gpg ca-certificates build-essential sqlite3 libsqlite3-dev socat ufw avahi-daemon libnss-mdns rsync
 systemctl enable avahi-daemon 2>/dev/null || true
 systemctl restart avahi-daemon 2>/dev/null || true
 
@@ -305,18 +329,45 @@ echo -e "\n${YELLOW}[7/7] Konfiguracja i budowanie Panelu Telemetrycznego IoT...
 APP_DIR="/opt/zigbee-telemetry-panel"
 mkdir -p "$APP_DIR"
 
-# Kopiowanie plikow aplikacji do katalogu docelowego jesli uruchamiane z repozytorium
-if [ -n "$PANEL_SOURCE" ] && [ -f "$PANEL_SOURCE/src/server.ts" ]; then
-  echo -e "${CYAN}Kopiowanie kodu panelu z $PANEL_SOURCE do $APP_DIR...${NC}"
-  cp -r "$PANEL_SOURCE"/* "$APP_DIR/" 2>/dev/null || true
-elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ]; then
-  echo -e "${CYAN}Kopiowanie kodu panelu z /root/SimpleHomeTelemetry do $APP_DIR...${NC}"
-  cp -r /root/SimpleHomeTelemetry/* "$APP_DIR/" 2>/dev/null || true
+# Kopiowanie i aktualizacja plikow aplikacji do katalogu docelowego /opt/zigbee-telemetry-panel
+if [ -n "$PANEL_SOURCE" ] && [ -d "$PANEL_SOURCE" ] && [ "$PANEL_SOURCE" != "$APP_DIR" ]; then
+  echo -e "${CYAN}Aktualizowanie kodu i plikow panelu z $PANEL_SOURCE do $APP_DIR...${NC}"
+  # Synchronizacja plikow z zachowaniem bazy danych i plikow konfiguracyjnych uzytkownika
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -av \
+      --exclude='node_modules' \
+      --exclude='.git' \
+      --exclude='dist' \
+      --exclude='devices_cache.json' \
+      --exclude='notification_config.json' \
+      --exclude='custom_rules.json' \
+      --exclude='tuya_config.json' \
+      --exclude='ewelink_config.json' \
+      --exclude='*.db' \
+      --exclude='*.db-journal' \
+      "$PANEL_SOURCE/" "$APP_DIR/"
+  else
+    # Fallback gdy brak rsync (np. tar zachowujacy kropki i ukryte pliki takie jak .postcssrc.json)
+    (cd "$PANEL_SOURCE" && tar --exclude='./node_modules' --exclude='./.git' --exclude='./dist' --exclude='./*.db' -cf - .) | (cd "$APP_DIR" && tar -xf -) 2>/dev/null || cp -a "$PANEL_SOURCE"/. "$APP_DIR/" 2>/dev/null || true
+  fi
+  # Jawne uaktualnienie kluczowych plikow konfiguracyjnych (w tym plikow ukrytych)
+  for special_file in .postcssrc.json .angular-config.json angular.json package.json tsconfig.json tsconfig.app.json; do
+    if [ -f "$PANEL_SOURCE/$special_file" ]; then
+      cp -f "$PANEL_SOURCE/$special_file" "$APP_DIR/$special_file" 2>/dev/null || true
+    fi
+  done
+  echo -e "${GREEN}[OK] Pliki panelu w $APP_DIR zostaly pomyslnie zaktualizowane.${NC}"
+elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ] && [ "/root/SimpleHomeTelemetry" != "$APP_DIR" ]; then
+  echo -e "${CYAN}Aktualizowanie kodu panelu z /root/SimpleHomeTelemetry do $APP_DIR...${NC}"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -av --exclude='node_modules' --exclude='.git' --exclude='dist' --exclude='*.db' /root/SimpleHomeTelemetry/ "$APP_DIR/"
+  else
+    cp -a /root/SimpleHomeTelemetry/. "$APP_DIR/" 2>/dev/null || true
+  fi
+  echo -e "${GREEN}[OK] Pliki panelu w $APP_DIR zostaly zaktualizowane.${NC}"
 fi
 
 cd "$APP_DIR"
-# Usuniecie starych lub uszkodzonych dowiazan node_modules
-rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
 chown -R "$REAL_USER":"$REAL_USER" "$APP_DIR"
 
 echo -e "${CYAN}Instalacja zaleznosci panelu w $APP_DIR...${NC}"
@@ -337,10 +388,11 @@ else
 fi
 
 echo -e "${CYAN}Kompilacja produkcyjna panelu (Angular SSR + Node.js Backend)...${NC}"
+# Automatyczne odrzucenie telemetrii Google (opcja N / enter)
 if command -v pnpm >/dev/null 2>&1; then
-  sudo -u "$REAL_USER" pnpm run build
+  sudo -u "$REAL_USER" NG_CLI_ANALYTICS=false pnpm run build
 else
-  sudo -u "$REAL_USER" npm run build
+  sudo -u "$REAL_USER" NG_CLI_ANALYTICS=false npm run build
 fi
 
 cat << EOF > /etc/systemd/system/iot-telemetry.service

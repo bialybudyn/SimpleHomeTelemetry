@@ -5508,10 +5508,7 @@ app.use((req: Request, res: Response, next) => {
 // Podczas działania serwera deweloperskiego (ng serve), to Vite zarządza portem 3000.
 function shouldStartHttpServer(): boolean {
   // Podczas działania serwera deweloperskiego (ng serve / vite), Vite zarządza portem 3000
-  const isDevVite =
-    Boolean(process.env['VITE']) ||
-    process.env['npm_lifecycle_event'] === 'dev' ||
-    process.argv.some((arg) => arg.includes('ng') || arg.includes('serve') || arg.includes('vite'));
+  const isDevVite = Boolean(process.env['VITE']) || process.env['npm_lifecycle_event'] === 'dev';
 
   if (isDevVite) {
     return false;
