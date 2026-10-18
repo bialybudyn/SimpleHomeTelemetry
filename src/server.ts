@@ -6,7 +6,8 @@ import {
 } from '@angular/ssr/node';
 import express, { Request, Response } from 'express';
 import { createServer } from 'node:http';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { Socket } from 'node:net';
@@ -53,7 +54,8 @@ import {
 } from './imgw-weather-service';
 
 // Wykrywanie katalogu zasobow statycznych przegladarki (CSS, JS, Fonts)
-let browserDistFolder = join(import.meta.dirname, '../browser');
+const currentDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+let browserDistFolder = join(currentDir, '../browser');
 if (!existsSync(browserDistFolder)) {
   const fallbackPaths = [
     join(process.cwd(), 'dist/app/browser'),
@@ -5504,13 +5506,49 @@ app.use((req: Request, res: Response, next) => {
 
 // WebSocket Server & standalone production server
 // Podczas działania serwera deweloperskiego (ng serve), to Angular CLI/Vite zarządza portem 3000
-const isDevServer =
-  process.env['npm_lifecycle_event'] === 'dev' ||
-  process.argv.some((arg) => arg.includes('ng') || arg.includes('serve')) ||
-  Boolean(process.env['VITE']);
+function shouldStartHttpServer(): boolean {
+  // Podczas działania serwera deweloperskiego (ng serve / vite), Vite zarządza portem 3000
+  const isDevVite =
+    Boolean(process.env['VITE']) ||
+    process.env['npm_lifecycle_event'] === 'dev' ||
+    process.argv.some((arg) => arg.includes('ng') || arg.includes('serve') || arg.includes('vite'));
 
-if (isMainModule(import.meta.url) && !isDevServer) {
-  const port = process.env['PORT'] || 3000;
+  if (isDevVite) {
+    return false;
+  }
+
+  // W środowisku produkcyjnym (np. systemd iot-telemetry.service lub uruchomienie node dist/...):
+  // Sprawdzamy czy process.argv wskazuje na plik serwera (z uwzględnieniem ścieżek względnych i bezwzględnych)
+  if (process.argv[1]) {
+    try {
+      const currentFilePath = fileURLToPath(import.meta.url);
+      const executedFilePath = resolve(process.cwd(), process.argv[1]);
+      if (currentFilePath === executedFilePath) {
+        return true;
+      }
+      if (
+        executedFilePath.endsWith('server.mjs') ||
+        executedFilePath.endsWith('server.js') ||
+        executedFilePath.endsWith('server.ts')
+      ) {
+        return true;
+      }
+    } catch {}
+  }
+
+  try {
+    if (isMainModule(import.meta.url)) {
+      return true;
+    }
+  } catch {}
+
+  // Jeśli nie jesteśmy w trybie deweloperskim Vite, serwer produkcyjny musi nasłuchiwać
+  return true;
+}
+
+if (shouldStartHttpServer()) {
+  const port = Number(process.env['PORT']) || 3000;
+  const host = process.env['HOST'] || '0.0.0.0';
   const server = createServer(app);
   wss = new WebSocketServer({ server, path: '/ws' });
 
@@ -5528,8 +5566,14 @@ if (isMainModule(import.meta.url) && !isDevServer) {
     });
   });
 
-  server.listen(port, () => {
-    console.log(`Serwer IoT Zigbee Dongle-M uruchomiony na http://0.0.0.0:${port}`);
+  server.on('error', (err: any) => {
+    console.error(`[FATAL] Błąd serwera HTTP na ${host}:${port}:`, err);
+  });
+
+  server.listen(port, host, () => {
+    console.log(`[HTTP] Serwer IoT Zigbee Dongle-M uruchomiony i nasłuchuje na http://${host}:${port}`);
+    console.log(`[HTTP] Dostęp lokalny: http://localhost:${port}`);
+    console.log(`[HTTP] Dostęp sieciowy: http://0.0.0.0:${port}`);
   });
 }
 

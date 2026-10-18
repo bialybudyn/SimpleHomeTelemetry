@@ -354,9 +354,10 @@ Type=simple
 User=${REAL_USER}
 WorkingDirectory=${APP_DIR}
 Environment="PORT=3000"
+Environment="HOST=0.0.0.0"
 Environment="MQTT_URL=mqtt://127.0.0.1:1883"
 Environment="MQTT_TOPIC=zigbee2mqtt"
-ExecStart=$(which node) dist/app/server/server.mjs
+ExecStart=$(which node) ${APP_DIR}/dist/app/server/server.mjs
 Restart=always
 RestartSec=5
 StandardOutput=journal
