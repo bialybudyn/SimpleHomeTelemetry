@@ -5488,37 +5488,18 @@ if (existsSync(join(process.cwd(), 'static'))) {
   app.use(express.static(join(process.cwd(), 'static'), { index: false, redirect: false }));
 }
 
-// Catch-all SPA: serwowanie glownego interfejsu (index.html) dla kazdej trasy bez posrednictwa SSR engine
+// Angular SSR catch-all must be LAST
 app.use((req: Request, res: Response, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
     return next();
   }
 
-  // Prevent returning HTML index for missing static assets (which causes SyntaxError: expected expression, got '<')
-  if (/\.(js|css|json|map|ico|png|jpg|jpeg|gif|svg|woff2?|ttf|eot)$/i.test(req.path)) {
-    return res.status(404).send('Not found');
-  }
-
-  const possibleIndexes = [
-    join(browserDistFolder, 'index.html'),
-    join(browserDistFolder, 'index.csr.html'),
-    join(process.cwd(), 'dist/app/browser/index.html'),
-    join(process.cwd(), 'dist/app/browser/index.csr.html'),
-    '/opt/zigbee-telemetry-panel/dist/app/browser/index.html',
-    '/root/SimpleHomeTelemetry/dist/app/browser/index.html',
-  ];
-
-  for (const idx of possibleIndexes) {
-    if (existsSync(idx)) {
-      return res.sendFile(idx);
-    }
-  }
-
-  // Próba renderowania przez Angular SSR engine lub przekazanie do middleware Vite
-  return angularApp
+  angularApp
     .handle(req)
-    .then((response: unknown) => (response ? writeResponseToNodeResponse(response as unknown as Parameters<typeof writeResponseToNodeResponse>[0], res) : next()))
-    .catch(() => next());
+    .then((response: unknown) =>
+      response ? writeResponseToNodeResponse(response as unknown as Parameters<typeof writeResponseToNodeResponse>[0], res) : next(),
+    )
+    .catch(next);
 });
 
 // WebSocket Server & standalone production server

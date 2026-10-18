@@ -317,6 +317,28 @@ export class Weather {
     this.isWarningAlertDismissed.set(false);
   }
 
+  // Czytelne formatowanie okresu ważności ostrzeżenia (eliminuje techniczne daty IMGW 9999-12-31 dla suszy hydrologicznej)
+  formatValidity(dataOd?: string, dataDo?: string): string {
+    const from = (dataOd || '').trim();
+    const to = (dataDo || '').trim();
+
+    const isIndefinite =
+      !to ||
+      to.startsWith('9999') ||
+      to.includes('9999') ||
+      to.toLowerCase().includes('odwołania');
+
+    if (isIndefinite) {
+      return from ? `od ${from} — do odwołania` : 'do odwołania';
+    }
+
+    if (from && to) {
+      return `${from} — ${to}`;
+    }
+
+    return to ? `do ${to}` : `od ${from}`;
+  }
+
   // Wybrany czujnik domowy do porównania
   readonly comparisonSensorIeee = signal<string | null>(null);
 

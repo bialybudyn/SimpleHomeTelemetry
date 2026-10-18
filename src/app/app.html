@@ -128,15 +128,7 @@
         </mat-icon>
       </button>
 
-      <!-- Przycisk Testu Głośnego Alarmu Budzika -->
-      <button
-        (click)="telemetry.playAlarmAudio(true)"
-        class="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm transition-all cursor-pointer"
-        title="Przetestuj głośny alarm budzika w przeglądarce"
-      >
-        <mat-icon class="text-sm !w-4 !h-4 text-amber-400">alarm</mat-icon>
-        <span class="hidden lg:inline font-bold">Test budzika</span>
-      </button>
+
 
       <!-- Przycisk Panelu Konfiguracja Urządzenia (Sonoff / Tuya) -->
       <button
@@ -319,7 +311,11 @@
                 [class.border-amber-600]="alert.highestLevel < 3"
                 [class.text-amber-200]="alert.highestLevel < 3"
               >
-                Ostrzeżenie IMGW-PIB · Stopień {{ alert.highestLevel }}
+                @if (alert.primaryWarning.type === 'hydro' && (alert.primaryWarning.stopien === '-1' || alert.primaryWarning.stopien === -1 || alert.primaryWarning.zdarzenie.toLowerCase().includes('susza'))) {
+                  Ostrzeżenie IMGW-PIB · Hydrologiczne
+                } @else {
+                  Ostrzeżenie IMGW-PIB · Stopień {{ alert.highestLevel }}
+                }
               </span>
 
               <span class="text-xs font-bold text-white flex items-center gap-1">
@@ -345,7 +341,7 @@
             </p>
 
             <div class="flex flex-wrap items-center gap-3 text-[11px] font-mono text-white/70 mt-1.5">
-              <span>Ważność: {{ alert.primaryWarning.data_od }} — {{ alert.primaryWarning.data_do }}</span>
+              <span>Ważność: {{ weather.formatValidity(alert.primaryWarning.data_od, alert.primaryWarning.data_do) }}</span>
               @if (alert.primaryWarning.biuro) {
                 <span>· Biuro: {{ alert.primaryWarning.biuro }}</span>
               }
@@ -1277,7 +1273,7 @@
             <div class="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-400 font-mono">
               <div>
                 <span class="text-slate-500">Okres ważności:</span>
-                <div class="text-slate-300">{{ w.data_od }} — {{ w.data_do }}</div>
+                <div class="text-slate-300">{{ weather.formatValidity(w.data_od, w.data_do) }}</div>
               </div>
               @if (w.prawdopodobienstwo) {
                 <div>

@@ -260,6 +260,15 @@
         "cisnienie": 1004.6,
         "wiatr": 5,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.3,
+        "wilgotnosc": 62.6,
+        "cisnienie": 1032.1,
+        "wiatr": 12,
+        "opad": 0
       }
     ],
     "12100": [
@@ -523,6 +532,15 @@
         "cisnienie": 1005,
         "wiatr": 3,
         "opad": 4.3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.4,
+        "wilgotnosc": 73.7,
+        "cisnienie": 1031.2,
+        "wiatr": 9,
+        "opad": 2.2
       }
     ],
     "12105": [
@@ -786,6 +804,15 @@
         "cisnienie": 1005.5,
         "wiatr": 2,
         "opad": 2.8
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.8,
+        "wilgotnosc": 62.7,
+        "cisnienie": 1031.3,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12115": [
@@ -1049,6 +1076,15 @@
         "cisnienie": 1005.1,
         "wiatr": 5,
         "opad": 3.7
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.1,
+        "wilgotnosc": 68.7,
+        "cisnienie": 1031.7,
+        "wiatr": 10,
+        "opad": 0.6
       }
     ],
     "12120": [
@@ -1312,6 +1348,15 @@
         "cisnienie": 1005.4,
         "wiatr": 3,
         "opad": 3.7
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.6,
+        "wilgotnosc": 60.5,
+        "cisnienie": 1031.9,
+        "wiatr": 5,
+        "opad": 0.01
       }
     ],
     "12125": [
@@ -1575,6 +1620,15 @@
         "cisnienie": 1005.8,
         "wiatr": 1,
         "opad": 2.7
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.4,
+        "wilgotnosc": 64.7,
+        "cisnienie": 1031.3,
+        "wiatr": 5,
+        "opad": 0.1
       }
     ],
     "12135": [
@@ -1838,6 +1892,15 @@
         "cisnienie": 1006.3,
         "wiatr": 4,
         "opad": 0.8
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.7,
+        "wilgotnosc": 69.5,
+        "cisnienie": 1030.8,
+        "wiatr": 4,
+        "opad": 0
       }
     ],
     "12155": [
@@ -2101,6 +2164,15 @@
         "cisnienie": 1006.9,
         "wiatr": 2,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.4,
+        "wilgotnosc": 67.7,
+        "cisnienie": 1030.3,
+        "wiatr": 7,
+        "opad": 1.2
       }
     ],
     "12160": [
@@ -2364,6 +2436,15 @@
         "cisnienie": 1007.5,
         "wiatr": 3,
         "opad": 0.3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 9.2,
+        "wilgotnosc": 81.9,
+        "cisnienie": 1029.7,
+        "wiatr": 4,
+        "opad": 0
       }
     ],
     "12185": [
@@ -2627,6 +2708,15 @@
         "cisnienie": 1008.3,
         "wiatr": 3,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 9.5,
+        "wilgotnosc": 86.6,
+        "cisnienie": 1028.6,
+        "wiatr": 2,
+        "opad": 0
       }
     ],
     "12195": [
@@ -2890,6 +2980,15 @@
         "cisnienie": 1009.3,
         "wiatr": 2,
         "opad": 0.1
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 7.9,
+        "wilgotnosc": 94.6,
+        "cisnienie": 1027.9,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12200": [
@@ -3153,6 +3252,15 @@
         "cisnienie": 1005,
         "wiatr": 4,
         "opad": 5.7
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.7,
+        "wilgotnosc": 80.6,
+        "cisnienie": 1031.2,
+        "wiatr": 11,
+        "opad": 15.6
       }
     ],
     "12205": [
@@ -3416,6 +3524,15 @@
         "cisnienie": 1006.1,
         "wiatr": 3,
         "opad": 3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13,
+        "wilgotnosc": 80.7,
+        "cisnienie": 1029.9,
+        "wiatr": 2,
+        "opad": 0.2
       }
     ],
     "12210": [
@@ -3679,6 +3796,15 @@
         "cisnienie": 1005.8,
         "wiatr": 4,
         "opad": 3.9
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12,
+        "wilgotnosc": 77.8,
+        "cisnienie": 1030.4,
+        "wiatr": 4,
+        "opad": 3.2
       }
     ],
     "12215": [
@@ -3942,6 +4068,15 @@
         "cisnienie": 1006.9,
         "wiatr": 3,
         "opad": 2.3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.4,
+        "wilgotnosc": 68.1,
+        "cisnienie": 1030.5,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12230": [
@@ -4205,6 +4340,15 @@
         "cisnienie": 1007.8,
         "wiatr": 1,
         "opad": 0.9
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.4,
+        "wilgotnosc": 80.6,
+        "cisnienie": 1029.4,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12235": [
@@ -4468,6 +4612,15 @@
         "cisnienie": 1007.5,
         "wiatr": 2,
         "opad": 1.3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.8,
+        "wilgotnosc": 69.5,
+        "cisnienie": 1030.4,
+        "wiatr": 4,
+        "opad": 0
       }
     ],
     "12250": [
@@ -4731,6 +4884,15 @@
         "cisnienie": 1008.2,
         "wiatr": 2,
         "opad": 0.5
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.8,
+        "wilgotnosc": 89.1,
+        "cisnienie": 1028.8,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12270": [
@@ -4994,6 +5156,15 @@
         "cisnienie": 1008.8,
         "wiatr": 1,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.2,
+        "wilgotnosc": 85.6,
+        "cisnienie": 1027.6,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12272": [
@@ -5257,6 +5428,15 @@
         "cisnienie": 1008.2,
         "wiatr": 2,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 9.4,
+        "wilgotnosc": 92.8,
+        "cisnienie": 1028.7,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12280": [
@@ -5520,6 +5700,15 @@
         "cisnienie": 1008.7,
         "wiatr": 2,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 9.4,
+        "wilgotnosc": 92.1,
+        "cisnienie": 1028,
+        "wiatr": 4,
+        "opad": 0
       }
     ],
     "12285": [
@@ -5783,6 +5972,15 @@
         "cisnienie": 1009.2,
         "wiatr": 1,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.9,
+        "wilgotnosc": 83.8,
+        "cisnienie": 1026.8,
+        "wiatr": 2,
+        "opad": 0.1
       }
     ],
     "12295": [
@@ -6045,6 +6243,15 @@
         "wilgotnosc": 98,
         "cisnienie": 1010.1,
         "wiatr": 1,
+        "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.637Z",
+        "time_label": "15:00",
+        "temperatura": 10,
+        "wilgotnosc": 86,
+        "cisnienie": 1026.2,
+        "wiatr": 2,
         "opad": 0
       }
     ],
@@ -6309,6 +6516,15 @@
         "cisnienie": 1007.9,
         "wiatr": 2,
         "opad": 2.4
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13.4,
+        "wilgotnosc": 76.4,
+        "cisnienie": 1028.6,
+        "wiatr": 3,
+        "opad": 0.1
       }
     ],
     "12310": [
@@ -6572,6 +6788,15 @@
         "cisnienie": 1008.5,
         "wiatr": 3,
         "opad": 0.3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 14.5,
+        "wilgotnosc": 71.6,
+        "cisnienie": 1027.6,
+        "wiatr": 2,
+        "opad": 0.7
       }
     ],
     "12330": [
@@ -6835,6 +7060,15 @@
         "cisnienie": 1008.8,
         "wiatr": 2,
         "opad": 0.4
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.6,
+        "wilgotnosc": 74.8,
+        "cisnienie": 1028.4,
+        "wiatr": 5,
+        "opad": 0
       }
     ],
     "12345": [
@@ -7098,6 +7332,15 @@
         "cisnienie": 1009,
         "wiatr": 2,
         "opad": 0.6
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.2,
+        "wilgotnosc": 76.1,
+        "cisnienie": 1027.8,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12360": [
@@ -7361,6 +7604,15 @@
         "cisnienie": 1008.9,
         "wiatr": 3,
         "opad": 0.4
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.4,
+        "wilgotnosc": 74.6,
+        "cisnienie": 1027.5,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12375": [
@@ -7623,6 +7875,15 @@
         "wilgotnosc": 96.7,
         "cisnienie": 1009.7,
         "wiatr": 1,
+        "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 8.4,
+        "wilgotnosc": 85.9,
+        "cisnienie": 1027,
+        "wiatr": 2,
         "opad": 0
       }
     ],
@@ -7887,6 +8148,15 @@
         "cisnienie": 1010.2,
         "wiatr": 2,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 9.1,
+        "wilgotnosc": 76.9,
+        "cisnienie": 1026.1,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12399": [
@@ -8149,6 +8419,15 @@
         "wilgotnosc": 96.7,
         "cisnienie": 1010.9,
         "wiatr": 1,
+        "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.6,
+        "wilgotnosc": 78.7,
+        "cisnienie": 1024.3,
+        "wiatr": 3,
         "opad": 0
       }
     ],
@@ -8413,6 +8692,15 @@
         "cisnienie": 1009.5,
         "wiatr": 3,
         "opad": 2.7
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13.7,
+        "wilgotnosc": 63.5,
+        "cisnienie": 1027.7,
+        "wiatr": 3,
+        "opad": 0.5
       }
     ],
     "12415": [
@@ -8676,6 +8964,15 @@
         "cisnienie": 1010.7,
         "wiatr": 2,
         "opad": 0.6
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 14.5,
+        "wilgotnosc": 60.7,
+        "cisnienie": 1026.9,
+        "wiatr": 2,
+        "opad": 0.2
       }
     ],
     "12418": [
@@ -8939,6 +9236,15 @@
         "cisnienie": 1009.7,
         "wiatr": 3,
         "opad": 0.8
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13.3,
+        "wilgotnosc": 68.5,
+        "cisnienie": 1027.7,
+        "wiatr": 7,
+        "opad": 0
       }
     ],
     "12424": [
@@ -9202,6 +9508,15 @@
         "cisnienie": 1010.9,
         "wiatr": 3,
         "opad": 0.6
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 14.6,
+        "wilgotnosc": 58.7,
+        "cisnienie": 1026.6,
+        "wiatr": 2,
+        "opad": 0
       }
     ],
     "12435": [
@@ -9465,6 +9780,15 @@
         "cisnienie": 1009.7,
         "wiatr": 2,
         "opad": 1.4
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.1,
+        "wilgotnosc": 78.8,
+        "cisnienie": 1027.1,
+        "wiatr": 6,
+        "opad": 0
       }
     ],
     "12455": [
@@ -9719,6 +10043,15 @@
         "cisnienie": 1009.8,
         "wiatr": 3,
         "opad": 0.8
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13.1,
+        "wilgotnosc": 66.6,
+        "cisnienie": 1025.6,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12465": [
@@ -9982,6 +10315,15 @@
         "cisnienie": 1009.5,
         "wiatr": 3,
         "opad": 0.3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 9.6,
+        "wilgotnosc": 80.8,
+        "cisnienie": 1027.6,
+        "wiatr": 5,
+        "opad": 0
       }
     ],
     "12469": [
@@ -10245,6 +10587,15 @@
         "cisnienie": 1009.8,
         "wiatr": 3,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.2,
+        "wilgotnosc": 75.6,
+        "cisnienie": 1026.3,
+        "wiatr": 4,
+        "opad": 0
       }
     ],
     "12488": [
@@ -10507,6 +10858,15 @@
         "wilgotnosc": 96.7,
         "cisnienie": 1010.2,
         "wiatr": 1,
+        "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 8.8,
+        "wilgotnosc": 80.7,
+        "cisnienie": 1026.4,
+        "wiatr": 4,
         "opad": 0
       }
     ],
@@ -10771,6 +11131,15 @@
         "cisnienie": 1011.1,
         "wiatr": 1,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 9.5,
+        "wilgotnosc": 81.9,
+        "cisnienie": 1024.7,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12497": [
@@ -11034,6 +11403,15 @@
         "cisnienie": 1011.1,
         "wiatr": 2,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.6,
+        "wilgotnosc": 77.6,
+        "cisnienie": 1023.8,
+        "wiatr": 4,
+        "opad": 0.01
       }
     ],
     "12500": [
@@ -11296,6 +11674,15 @@
         "wilgotnosc": 97.9,
         "cisnienie": 1012.4,
         "wiatr": 1,
+        "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.4,
+        "wilgotnosc": 62.4,
+        "cisnienie": 1026.8,
+        "wiatr": 2,
         "opad": 0.01
       }
     ],
@@ -11560,6 +11947,15 @@
         "cisnienie": null,
         "wiatr": 8,
         "opad": 4.5
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 6.1,
+        "wilgotnosc": 22.8,
+        "cisnienie": null,
+        "wiatr": 13,
+        "opad": 0.7
       }
     ],
     "12520": [
@@ -11823,6 +12219,15 @@
         "cisnienie": 1012.4,
         "wiatr": 1,
         "opad": 0.4
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.5,
+        "wilgotnosc": 57.8,
+        "cisnienie": 1026.1,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12530": [
@@ -12086,6 +12491,15 @@
         "cisnienie": 1011.3,
         "wiatr": 1,
         "opad": 1.3
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13.5,
+        "wilgotnosc": 52.6,
+        "cisnienie": 1025.9,
+        "wiatr": 4,
+        "opad": 0
       }
     ],
     "12540": [
@@ -12349,6 +12763,15 @@
         "cisnienie": 1011.2,
         "wiatr": 4,
         "opad": 1.4
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13.9,
+        "wilgotnosc": 53.4,
+        "cisnienie": 1025.2,
+        "wiatr": 5,
+        "opad": 0
       }
     ],
     "12550": [
@@ -12612,6 +13035,15 @@
         "cisnienie": 1010.7,
         "wiatr": 1,
         "opad": 1.5
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.2,
+        "wilgotnosc": 61.5,
+        "cisnienie": 1025.9,
+        "wiatr": 3,
+        "opad": 0.2
       }
     ],
     "12560": [
@@ -12875,6 +13307,15 @@
         "cisnienie": 1011.3,
         "wiatr": 2,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.9,
+        "wilgotnosc": 47.4,
+        "cisnienie": 1025.4,
+        "wiatr": 2,
+        "opad": 0
       }
     ],
     "12566": [
@@ -13138,6 +13579,15 @@
         "cisnienie": 1011,
         "wiatr": 2,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.4,
+        "wilgotnosc": 50.4,
+        "cisnienie": 1025,
+        "wiatr": 3,
+        "opad": 0
       }
     ],
     "12570": [
@@ -13401,6 +13851,15 @@
         "cisnienie": 1010.8,
         "wiatr": 0,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.2,
+        "wilgotnosc": 71.8,
+        "cisnienie": 1025.8,
+        "wiatr": 2,
+        "opad": 0.01
       }
     ],
     "12575": [
@@ -13662,6 +14121,15 @@
         "temperatura": 13.1,
         "wilgotnosc": 91.1,
         "cisnienie": 1011.2,
+        "wiatr": 1,
+        "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.8,
+        "wilgotnosc": 55.4,
+        "cisnienie": 1024.4,
         "wiatr": 1,
         "opad": 0
       }
@@ -13927,6 +14395,15 @@
         "cisnienie": 1011.1,
         "wiatr": 2,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.2,
+        "wilgotnosc": 76.6,
+        "cisnienie": 1024.3,
+        "wiatr": 5,
+        "opad": 0.01
       }
     ],
     "12585": [
@@ -14181,6 +14658,15 @@
         "cisnienie": 1011.1,
         "wiatr": 2,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 7.9,
+        "wilgotnosc": 92,
+        "cisnienie": 1025.4,
+        "wiatr": 5,
+        "opad": 0
       }
     ],
     "12595": [
@@ -14444,6 +14930,15 @@
         "cisnienie": 1011.1,
         "wiatr": 1,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.6,
+        "wilgotnosc": 80.9,
+        "cisnienie": 1023.6,
+        "wiatr": 5,
+        "opad": 0.01
       }
     ],
     "12600": [
@@ -14707,6 +15202,15 @@
         "cisnienie": 1011.4,
         "wiatr": 2,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 13,
+        "wilgotnosc": 58.7,
+        "cisnienie": 1024.7,
+        "wiatr": 1,
+        "opad": 0
       }
     ],
     "12625": [
@@ -14960,6 +15464,15 @@
         "wilgotnosc": 92.8,
         "cisnienie": null,
         "wiatr": 0,
+        "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.3,
+        "wilgotnosc": 50.5,
+        "cisnienie": null,
+        "wiatr": 2,
         "opad": 0
       }
     ],
@@ -15224,6 +15737,15 @@
         "cisnienie": null,
         "wiatr": 3,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 4.2,
+        "wilgotnosc": 27.8,
+        "cisnienie": null,
+        "wiatr": 4,
+        "opad": 0
       }
     ],
     "12660": [
@@ -15487,6 +16009,15 @@
         "cisnienie": 1011.6,
         "wiatr": 1,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 12.7,
+        "wilgotnosc": 61.6,
+        "cisnienie": 1024.4,
+        "wiatr": 2,
+        "opad": 0
       }
     ],
     "12670": [
@@ -15750,6 +16281,15 @@
         "cisnienie": 1011.2,
         "wiatr": 1,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.1,
+        "wilgotnosc": 58.7,
+        "cisnienie": 1023.8,
+        "wiatr": 3,
+        "opad": 0.01
       }
     ],
     "12690": [
@@ -16013,6 +16553,15 @@
         "cisnienie": 1012.2,
         "wiatr": 1,
         "opad": 0.01
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 10.6,
+        "wilgotnosc": 74.4,
+        "cisnienie": 1023.6,
+        "wiatr": 2,
+        "opad": 0.4
       }
     ],
     "12695": [
@@ -16276,8 +16825,17 @@
         "cisnienie": 1010.8,
         "wiatr": 1,
         "opad": 0
+      },
+      {
+        "timestamp": "2026-10-18T15:33:00.638Z",
+        "time_label": "15:00",
+        "temperatura": 11.9,
+        "wilgotnosc": 74.1,
+        "cisnienie": 1022.8,
+        "wiatr": 4,
+        "opad": 0.6
       }
     ]
   },
-  "saved_at": "2026-10-10T23:21:20.634Z"
+  "saved_at": "2026-10-18T15:35:39.125Z"
 }

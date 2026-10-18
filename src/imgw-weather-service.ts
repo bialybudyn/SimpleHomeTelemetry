@@ -886,6 +886,15 @@ export async function getImgwWarnings(): Promise<{
     };
   }
 
+  function normalizeWarningEndDate(rawDate: unknown): string {
+    if (typeof rawDate !== 'string') return '';
+    const trimmed = rawDate.trim();
+    if (trimmed.startsWith('9999') || trimmed.includes('9999') || trimmed.toLowerCase().includes('odwołania')) {
+      return 'do odwołania';
+    }
+    return trimmed;
+  }
+
   // 1. Meteo warnings
   try {
     const rMeteo = await fetch('https://danepubliczne.imgw.pl/api/data/warningsmeteo', {
@@ -901,7 +910,7 @@ export async function getImgwWarnings(): Promise<{
           stopien: (item['stopień'] ?? item['stopien'] ?? '1') as string | number,
           prawdopodobienstwo: (item['prawdopodobienstwo'] ?? item['prawdopodobieństwo']) as string | number | undefined,
           data_od: typeof item['data_od'] === 'string' ? item['data_od'] : '',
-          data_do: typeof item['data_do'] === 'string' ? item['data_do'] : '',
+          data_do: normalizeWarningEndDate(item['data_do']),
           opublikowano: typeof item['opublikowano'] === 'string' ? item['opublikowano'] : undefined,
           biuro: typeof item['biuro'] === 'string' ? item['biuro'] : undefined,
           przebieg: typeof item['przebieg'] === 'string' ? item['przebieg'] : undefined,
@@ -931,7 +940,7 @@ export async function getImgwWarnings(): Promise<{
           stopien: (item['stopień'] ?? item['stopien'] ?? '1') as string | number,
           prawdopodobienstwo: (item['prawdopodobienstwo'] ?? item['prawdopodobieństwo']) as string | number | undefined,
           data_od: typeof item['data_od'] === 'string' ? item['data_od'] : '',
-          data_do: typeof item['data_do'] === 'string' ? item['data_do'] : '',
+          data_do: normalizeWarningEndDate(item['data_do']),
           opublikowano: typeof item['opublikowano'] === 'string' ? item['opublikowano'] : undefined,
           biuro: typeof item['biuro'] === 'string' ? item['biuro'] : undefined,
           przebieg: typeof item['przebieg'] === 'string' ? item['przebieg'] : undefined,

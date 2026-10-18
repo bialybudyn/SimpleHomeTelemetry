@@ -143,14 +143,18 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
                       }
                     </span>
                     <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-700/60 font-semibold shrink-0">
-                      Stopień {{ w.stopien }}
+                      @if (w.type === 'hydro' && (w.stopien === '-1' || w.stopien === -1 || w.zdarzenie.toLowerCase().includes('susza'))) {
+                        Hydrologiczne (ciągłe)
+                      } @else {
+                        Stopień {{ w.stopien }}
+                      }
                     </span>
                   </div>
                   @if (w.przebieg) {
                     <p class="text-slate-300 text-[11px] leading-relaxed">{{ w.przebieg }}</p>
                   }
                   <div class="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800 font-mono">
-                    <span>Ważne: {{ w.data_od }} — {{ w.data_do }}</span>
+                    <span>Ważne: {{ weather.formatValidity(w.data_od, w.data_do) }}</span>
                     @if (w.prawdopodobienstwo) {
                       <span>Prawdopodobieństwo: {{ w.prawdopodobienstwo }}%</span>
                     }

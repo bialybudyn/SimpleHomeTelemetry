@@ -1,0 +1,6 @@
+{
+  "summary": "Kompleksowy plan implementacji docelowej lokalizacji w Ustawieniach Serwera z wyszukiwarką dowolnych miejscowości w Polsce (OpenStreetMap Nominatim + IMGW), usunięcia przycisku Test Budzika, optymalizacji synchronizacji Zigbee2MQTT oraz udoskonalenia obsługi urządzeń Wi-Fi eWeLink/Sonoff w oparciu o bibliotekę ewelink.",
+  "updatedAt": "2026-10-18T14:24:31.853985182Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
