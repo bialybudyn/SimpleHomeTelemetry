@@ -1,7 +1,6 @@
 import {
   AngularNodeAppEngine,
   createNodeRequestHandler,
-  isMainModule,
   writeResponseToNodeResponse,
 } from '@angular/ssr/node';
 import express, { Request, Response } from 'express';
@@ -5505,7 +5504,8 @@ app.use((req: Request, res: Response, next) => {
 });
 
 // WebSocket Server & standalone production server
-// Podczas działania serwera deweloperskiego (ng serve), to Angular CLI/Vite zarządza portem 3000
+// Serwer HTTP na porcie 3000 zawsze startuje w środowisku produkcyjnym (systemd, node, bun).
+// Podczas działania serwera deweloperskiego (ng serve), to Vite zarządza portem 3000.
 function shouldStartHttpServer(): boolean {
   // Podczas działania serwera deweloperskiego (ng serve / vite), Vite zarządza portem 3000
   const isDevVite =
@@ -5517,32 +5517,8 @@ function shouldStartHttpServer(): boolean {
     return false;
   }
 
-  // W środowisku produkcyjnym (np. systemd iot-telemetry.service lub uruchomienie node dist/...):
-  // Sprawdzamy czy process.argv wskazuje na plik serwera (z uwzględnieniem ścieżek względnych i bezwzględnych)
-  if (process.argv[1]) {
-    try {
-      const currentFilePath = fileURLToPath(import.meta.url);
-      const executedFilePath = resolve(process.cwd(), process.argv[1]);
-      if (currentFilePath === executedFilePath) {
-        return true;
-      }
-      if (
-        executedFilePath.endsWith('server.mjs') ||
-        executedFilePath.endsWith('server.js') ||
-        executedFilePath.endsWith('server.ts')
-      ) {
-        return true;
-      }
-    } catch {}
-  }
-
-  try {
-    if (isMainModule(import.meta.url)) {
-      return true;
-    }
-  } catch {}
-
-  // Jeśli nie jesteśmy w trybie deweloperskim Vite, serwer produkcyjny musi nasłuchiwać
+  // W każdym środowisku produkcyjnym (systemd iot-telemetry.service, node dist/..., bun run etc.)
+  // serwer HTTP na porcie 3000 ZAWSZE startuje
   return true;
 }
 
