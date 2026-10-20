@@ -679,7 +679,7 @@ export interface SonoffLanResult {
  * Pomocnicze szyfrowanie payloadu dla urządzeń eWeLink z kluczem AES
  */
 function encryptPayload(data: Record<string, unknown>, apiKey: string): { data: string; iv: string } {
-  const hash = createHash('md5').update(apiKey).digest();
+  const hash = createHash('md5').update(Buffer.from(apiKey, 'utf-8')).digest();
   const ivBytes = randomBytes(16);
   const cipher = createCipheriv('aes-128-cbc', hash, ivBytes);
   const plainText = JSON.stringify(data);
@@ -696,7 +696,7 @@ function encryptPayload(data: Record<string, unknown>, apiKey: string): { data: 
  */
 function decryptPayload(encryptedData: string, ivBase64: string, apiKey: string): Record<string, unknown> | null {
   try {
-    const hash = createHash('md5').update(apiKey).digest();
+    const hash = createHash('md5').update(Buffer.from(apiKey, 'utf-8')).digest();
     const iv = Buffer.from(ivBase64, 'base64');
     const decipher = createDecipheriv('aes-128-cbc', hash, iv);
     let decrypted = decipher.update(encryptedData, 'base64', 'utf8');
@@ -764,6 +764,20 @@ export async function sendSonoffHttpRequest(
     }
 
     const resJson = (await response.json()) as Record<string, unknown>;
+
+    // Jeśli zapytanie na /zeroconf/switch zwróci błąd (np. gniazdka wielokanałowe / S60TFP), automatycznie ponów na /zeroconf/switches
+    if (resJson['error'] !== undefined && Number(resJson['error']) !== 0 && path === '/zeroconf/switch' && payloadData['switch']) {
+      try {
+        const swState = String(payloadData['switch']);
+        const altPayload = { switches: [{ switch: swState, outlet: 0 }] };
+        const altRes = await sendSonoffHttpRequest(ip, '/zeroconf/switches', altPayload, deviceId, apiKey, timeoutMs);
+        if (altRes && Number(altRes['error']) === 0) {
+          return altRes;
+        }
+      } catch {
+        // kontynuuj z oryginalną odpowiedzią
+      }
+    }
 
     // Jeśli odpowiedź zgłasza błąd klucza lub błąd szyfrowania, spróbuj zapytania bez szyfrowania (DIY)
     if (resJson['error'] !== undefined && Number(resJson['error']) !== 0 && apiKey && apiKey.trim().length > 0) {
@@ -1109,7 +1123,9 @@ export async function sendSonoffLanCommand(options: SonoffLanCommandOptions): Pr
 
     return {
       success: false,
-      message: `Urządzenie (${cleanIp || 'brak IP'}) nie odpowiada na porcie 8081 LAN oraz nie znaleziono eWeLink Device ID. Połącz konto eWeLink w panelu.`,
+      message: !resolvedApiKey
+        ? 'Urządzenie Sonoff wymaga klucza DeviceKey (zaloguj się do eWeLink w panelu lub wpisz 36-znakowy Device Key w konfiguracji urządzenia)'
+        : `Urządzenie (${cleanIp || 'brak IP'}) nie odpowiada na porcie 8081 LAN oraz nie udało się połączenie przez Chmurę eWeLink.`,
       error: 'Brak łączności LAN 8081 i Device ID',
       deviceInfo: { switch: swState },
     };

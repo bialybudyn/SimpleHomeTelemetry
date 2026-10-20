@@ -36,6 +36,26 @@ USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 INITIAL_DIR="$(pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Parsowanie argumentow uruchomieniowych (np. --reconfigure)
+RECONFIGURE=false
+for arg in "$@"; do
+  if [ "$arg" = "--reconfigure" ]; then
+    RECONFIGURE=true
+  fi
+done
+
+# Weryfikacja stanu dzialajacej uslugi Zigbee2MQTT i zapisanego portu koordynatora
+Z2M_CONF_PATH="/opt/zigbee2mqtt/data/configuration.yaml"
+Z2M_CURRENT_PORT=""
+if [ -f "$Z2M_CONF_PATH" ]; then
+  Z2M_CURRENT_PORT=$(grep -E '^\s*port:' "$Z2M_CONF_PATH" | head -n 1 | awk '{print $2}' | tr -d '"'\'' ')
+fi
+
+Z2M_ALREADY_ACTIVE=false
+if [ -f "/opt/zigbee2mqtt/index.js" ] && systemctl is-active --quiet zigbee2mqtt.service 2>/dev/null; then
+  Z2M_ALREADY_ACTIVE=true
+fi
+
 # Automatyczne wylaczenie uciazliwych zapytan o telemetrie Google / Angular Analytics (domyslnie N / enter)
 export NG_CLI_ANALYTICS=false
 
@@ -78,7 +98,11 @@ fi
 # ==============================================================================
 echo -e "${YELLOW}[CZYSZCZENIE] Zatrzymywanie uslug i zwalnianie portow (1883, 8080, 3000)...${NC}"
 systemctl stop iot-telemetry.service 2>/dev/null || true
-systemctl stop zigbee2mqtt.service 2>/dev/null || true
+if [ "$Z2M_ALREADY_ACTIVE" = "true" ]; then
+  echo -e "${GREEN}[OK] Usluga zigbee2mqtt jest aktywna – pomijam jej zatrzymywanie podczas aktualizacji panelu.${NC}"
+else
+  systemctl stop zigbee2mqtt.service 2>/dev/null || true
+fi
 
 # Bezpieczne zakonczenie ew. zawieszonych procesow node lub mosquitto
 pkill -f "dist/app/server/server.mjs" 2>/dev/null || true
@@ -152,46 +176,109 @@ NODE_VER=$(node -v)
 NPM_VER=$(npm -v)
 echo -e "${GREEN}[OK] Zainstalowano Node.js: ${NODE_VER}, npm: ${NPM_VER}${NC}"
 
-# 4. Wybor trybu polaczenia z koordynatorem Sonoff Dongle Max
+# 4. Wybor lub automatyczne odczytanie zapisanego portu koordynatora Sonoff Dongle Max
 echo -e "\n${YELLOW}[4/7] Konfiguracja polaczenia z koordynatorem Sonoff Dongle Max...${NC}"
-echo -e "Wybierz metode podlaczenia dongla:"
-echo -e "  1) Polaczenie sieciowe TCP (Ethernet / PoE / Wi-Fi) -> tcp://Dongle-M.local:6638 [ZALECANE]"
-echo -e "  2) Port USB bezposrednio wpiety do tego komputera -> /dev/ttyACM0"
-echo -e "  3) Wprowadz niestandardowy adres IP/port (np. tcp://192.168.1.120:6638)"
 
-read -rp "Twoj wybor [1/2/3, domyslnie 1]: " DONGLE_CHOICE
-DONGLE_CHOICE=${DONGLE_CHOICE:-1}
+DETECTED_DONGLE_PORT=""
 
-if [ "$DONGLE_CHOICE" -eq 1 ]; then
-  DONGLE_PORT="tcp://Dongle-M.local:6638"
-  # Sprawdzenie czy Dongle-M.local odpowiada w sieci
-  if ! getent hosts Dongle-M.local >/dev/null 2>&1 && ! ping -c 1 -W 1 Dongle-M.local >/dev/null 2>&1; then
-    echo -e "${YELLOW}[INFO] Nazwa 'Dongle-M.local' nie odpowiada jeszcze w sieci lokalnej.${NC}"
-    read -rp "Jesli znasz bezposredni adres IP Dongla (np. 10.0.0.50), podaj go teraz [pozostaw puste dla Dongle-M.local]: " MANUAL_IP
-    if [ -n "$MANUAL_IP" ]; then
-      MANUAL_IP=$(echo "$MANUAL_IP" | sed -e 's|^tcp://||' -e 's|:6638$||')
-      DONGLE_PORT="tcp://${MANUAL_IP}:6638"
-    fi
-  fi
-elif [ "$DONGLE_CHOICE" -eq 2 ]; then
-  # Sprawdzenie portu USB
-  if [ -e "/dev/ttyACM0" ]; then
-    DONGLE_PORT="/dev/ttyACM0"
-  else
-    DONGLE_PORT=$(ls /dev/serial/by-id/usb-Silicon_Labs* 2>/dev/null || echo "/dev/ttyACM0")
-  fi
-  usermod -aG dialout "$REAL_USER" || true
-else
-  read -rp "Podaj pelny ciag polaczenia (np. tcp://192.168.1.50:6638): " CUSTOM_PORT
-  CUSTOM_PORT=${CUSTOM_PORT:-"tcp://Dongle-M.local:6638"}
-  # Jesli uzytkownik podal sam IP:port (np. 10.0.0.2:6638), dodaj automatycznie prefiks tcp://
-  if [[ ! "$CUSTOM_PORT" =~ ^/dev/ ]] && [[ ! "$CUSTOM_PORT" =~ ^tcp:// ]]; then
-    CUSTOM_PORT="tcp://${CUSTOM_PORT}"
-  fi
-  DONGLE_PORT="$CUSTOM_PORT"
+# a) /etc/default/zigbee-dongle
+if [ -f "/etc/default/zigbee-dongle" ]; then
+  DETECTED_DONGLE_PORT=$(grep -E '^\s*DONGLE_PORT=' /etc/default/zigbee-dongle | head -n 1 | cut -d'=' -f2- | tr -d '"'\'' ')
 fi
 
-echo -e "${GREEN}[OK] Wybrano port koordynatora: ${DONGLE_PORT}${NC}"
+# b) /opt/zigbee-telemetry-panel/dongle_max_config.json
+if [ -z "$DETECTED_DONGLE_PORT" ] && [ -f "/opt/zigbee-telemetry-panel/dongle_max_config.json" ]; then
+  DETECTED_DONGLE_PORT=$(node -e "
+    try {
+      const cfg = JSON.parse(require('fs').readFileSync('/opt/zigbee-telemetry-panel/dongle_max_config.json', 'utf8'));
+      if (cfg.connection_mode === 'usb' && cfg.serial_port) {
+        console.log(cfg.serial_port.trim());
+      } else if (cfg.host) {
+        console.log('tcp://' + cfg.host.trim() + ':' + (cfg.port || 6638));
+      }
+    } catch {}
+  " 2>/dev/null || true)
+fi
+
+# c) /opt/zigbee2mqtt/data/configuration.yaml
+if [ -z "$DETECTED_DONGLE_PORT" ] && [ -f "/opt/zigbee2mqtt/data/configuration.yaml" ]; then
+  DETECTED_DONGLE_PORT=$(node -e "
+    try {
+      const yaml = require('fs').readFileSync('/opt/zigbee2mqtt/data/configuration.yaml', 'utf8');
+      const m = yaml.match(/serial:[\s\S]*?port:\s*([^\r\n#]+)/);
+      if (m && m[1]) console.log(m[1].trim().replace(/^['\"]|['\"]$/g, ''));
+    } catch {}
+  " 2>/dev/null || grep -E '^\s*port:' /opt/zigbee2mqtt/data/configuration.yaml | head -n 1 | awk '{print $2}' | tr -d '"'\'' ')
+fi
+
+if [ -n "$DETECTED_DONGLE_PORT" ] && [ "$RECONFIGURE" != "true" ]; then
+  DONGLE_PORT="$DETECTED_DONGLE_PORT"
+  echo -e "${GREEN}[OK] Wykryto zapisaną na serwerze konfigurację Dongle-M: ${DONGLE_PORT} (pomijam wybór ręczny)${NC}"
+else
+  echo -e "Wybierz metode podlaczenia dongla:"
+  echo -e "  1) Polaczenie sieciowe TCP (Ethernet / PoE / Wi-Fi) -> tcp://Dongle-M.local:6638 [ZALECANE]"
+  echo -e "  2) Port USB bezposrednio wpiety do tego komputera -> /dev/ttyACM0"
+  echo -e "  3) Wprowadz niestandardowy adres IP/port (np. tcp://192.168.1.120:6638)"
+
+  DONGLE_CHOICE=""
+  read -t 20 -rp "Twoj wybor [1/2/3, domyslnie 1]: " DONGLE_CHOICE || DONGLE_CHOICE=1
+  DONGLE_CHOICE=${DONGLE_CHOICE:-1}
+
+  if [ "$DONGLE_CHOICE" -eq 1 ]; then
+    DONGLE_PORT="tcp://Dongle-M.local:6638"
+    if ! getent hosts Dongle-M.local >/dev/null 2>&1 && ! ping -c 1 -W 1 Dongle-M.local >/dev/null 2>&1; then
+      echo -e "${YELLOW}[INFO] Nazwa 'Dongle-M.local' nie odpowiada jeszcze w sieci lokalnej.${NC}"
+      MANUAL_IP=""
+      read -t 20 -rp "Jesli znasz bezposredni adres IP Dongla (np. 10.0.0.50), podaj go teraz [pozostaw puste dla Dongle-M.local]: " MANUAL_IP || MANUAL_IP=""
+      if [ -n "$MANUAL_IP" ]; then
+        MANUAL_IP=$(echo "$MANUAL_IP" | sed -e 's|^tcp://||' -e 's|:6638$||')
+        DONGLE_PORT="tcp://${MANUAL_IP}:6638"
+      fi
+    fi
+  elif [ "$DONGLE_CHOICE" -eq 2 ]; then
+    if [ -e "/dev/ttyACM0" ]; then
+      DONGLE_PORT="/dev/ttyACM0"
+    else
+      DONGLE_PORT=$(ls /dev/serial/by-id/usb-Silicon_Labs* 2>/dev/null || echo "/dev/ttyACM0")
+    fi
+    usermod -aG dialout "$REAL_USER" || true
+  else
+    CUSTOM_PORT=""
+    read -t 20 -rp "Podaj pelny ciag polaczenia (np. tcp://192.168.1.50:6638): " CUSTOM_PORT || CUSTOM_PORT="tcp://Dongle-M.local:6638"
+    CUSTOM_PORT=${CUSTOM_PORT:-"tcp://Dongle-M.local:6638"}
+    if [[ ! "$CUSTOM_PORT" =~ ^/dev/ ]] && [[ ! "$CUSTOM_PORT" =~ ^tcp:// ]]; then
+      CUSTOM_PORT="tcp://${CUSTOM_PORT}"
+    fi
+    DONGLE_PORT="$CUSTOM_PORT"
+  fi
+  echo -e "${GREEN}[OK] Wybrano port koordynatora: ${DONGLE_PORT}${NC}"
+fi
+
+# Trwaly zapis konfiguracji koordynatora do /etc/default/zigbee-dongle oraz dongle_max_config.json
+mkdir -p /etc/default
+echo "DONGLE_PORT=\"${DONGLE_PORT}\"" > /etc/default/zigbee-dongle
+
+mkdir -p /opt/zigbee-telemetry-panel
+node -e "
+  const fs = require('fs');
+  const path = '/opt/zigbee-telemetry-panel/dongle_max_config.json';
+  let cfg = {};
+  if (fs.existsSync(path)) {
+    try { cfg = JSON.parse(fs.readFileSync(path, 'utf8')); } catch {}
+  }
+  const portStr = '${DONGLE_PORT}';
+  if (portStr.startsWith('tcp://')) {
+    cfg.connection_mode = 'network';
+    const clean = portStr.replace('tcp://', '');
+    const parts = clean.split(':');
+    cfg.host = parts[0] || 'Dongle-M.local';
+    cfg.port = parts[1] ? parseInt(parts[1], 10) : 6638;
+  } else {
+    cfg.connection_mode = 'usb';
+    cfg.serial_port = portStr;
+  }
+  fs.writeFileSync(path, JSON.stringify(cfg, null, 2), 'utf8');
+" 2>/dev/null || true
 
 # 5. Instalacja lub weryfikacja istniejacego Zigbee2MQTT w /opt/zigbee2mqtt
 echo -e "\n${YELLOW}[5/7] Sprawdzanie i konfiguracja Zigbee2MQTT w /opt/zigbee2mqtt...${NC}"
@@ -320,9 +407,13 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable zigbee2mqtt
-systemctl restart zigbee2mqtt
+if [ "$Z2M_ALREADY_ACTIVE" = "true" ] && [ "$Z2M_CURRENT_PORT" = "$DONGLE_PORT" ]; then
+  echo -e "${GREEN}[OK] Zigbee2MQTT już działa na porcie ${DONGLE_PORT} – pozostawiam usługę aktywną bez restartu.${NC}"
+else
+  systemctl daemon-reload
+  systemctl enable zigbee2mqtt
+  systemctl restart zigbee2mqtt
+fi
 
 # 7. Konfiguracja i uruchomienie Panelu Telemetrii IoT
 echo -e "\n${YELLOW}[7/7] Konfiguracja i budowanie Panelu Telemetrycznego IoT...${NC}"
@@ -332,23 +423,36 @@ mkdir -p "$APP_DIR"
 # Kopiowanie i aktualizacja plikow aplikacji do katalogu docelowego /opt/zigbee-telemetry-panel
 if [ -n "$PANEL_SOURCE" ] && [ -d "$PANEL_SOURCE" ] && [ "$PANEL_SOURCE" != "$APP_DIR" ]; then
   echo -e "${CYAN}Aktualizowanie kodu i plikow panelu z $PANEL_SOURCE do $APP_DIR...${NC}"
-  # Synchronizacja plikow z zachowaniem bazy danych i plikow konfiguracyjnych uzytkownika
+  # Synchronizacja plikow z zachowaniem repozytorium .git oraz bazy danych i konfiguracji uzytkownika
   if command -v rsync >/dev/null 2>&1; then
     rsync -av \
       --exclude='node_modules' \
-      --exclude='.git' \
       --exclude='dist' \
       --exclude='devices_cache.json' \
-      --exclude='notification_config.json' \
-      --exclude='custom_rules.json' \
-      --exclude='tuya_config.json' \
+      --exclude='telemetry_cache.json' \
+      --exclude='dongle_max_config.json' \
       --exclude='ewelink_config.json' \
+      --exclude='notification_config.json' \
+      --exclude='tuya_config.json' \
+      --exclude='custom_rules.json' \
       --exclude='*.db' \
       --exclude='*.db-journal' \
       "$PANEL_SOURCE/" "$APP_DIR/"
   else
-    # Fallback gdy brak rsync (np. tar zachowujacy kropki i ukryte pliki takie jak .postcssrc.json)
-    (cd "$PANEL_SOURCE" && tar --exclude='./node_modules' --exclude='./.git' --exclude='./dist' --exclude='./*.db' -cf - .) | (cd "$APP_DIR" && tar -xf -) 2>/dev/null || cp -a "$PANEL_SOURCE"/. "$APP_DIR/" 2>/dev/null || true
+    # Fallback gdy brak rsync (tar kopiujacy rowniez .git z pominieciem plikow konfiguracyjnych)
+    (cd "$PANEL_SOURCE" && tar \
+      --exclude='./node_modules' \
+      --exclude='./dist' \
+      --exclude='./devices_cache.json' \
+      --exclude='./telemetry_cache.json' \
+      --exclude='./dongle_max_config.json' \
+      --exclude='./ewelink_config.json' \
+      --exclude='./notification_config.json' \
+      --exclude='./tuya_config.json' \
+      --exclude='./custom_rules.json' \
+      --exclude='./*.db' \
+      --exclude='./*.db-journal' \
+      -cf - .) | (cd "$APP_DIR" && tar -xf -) 2>/dev/null || cp -a "$PANEL_SOURCE"/. "$APP_DIR/" 2>/dev/null || true
   fi
   # Jawne uaktualnienie kluczowych plikow konfiguracyjnych (w tym plikow ukrytych)
   for special_file in .postcssrc.json .angular-config.json angular.json package.json tsconfig.json tsconfig.app.json; do
@@ -360,7 +464,19 @@ if [ -n "$PANEL_SOURCE" ] && [ -d "$PANEL_SOURCE" ] && [ "$PANEL_SOURCE" != "$AP
 elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ] && [ "/root/SimpleHomeTelemetry" != "$APP_DIR" ]; then
   echo -e "${CYAN}Aktualizowanie kodu panelu z /root/SimpleHomeTelemetry do $APP_DIR...${NC}"
   if command -v rsync >/dev/null 2>&1; then
-    rsync -av --exclude='node_modules' --exclude='.git' --exclude='dist' --exclude='*.db' /root/SimpleHomeTelemetry/ "$APP_DIR/"
+    rsync -av \
+      --exclude='node_modules' \
+      --exclude='dist' \
+      --exclude='devices_cache.json' \
+      --exclude='telemetry_cache.json' \
+      --exclude='dongle_max_config.json' \
+      --exclude='ewelink_config.json' \
+      --exclude='notification_config.json' \
+      --exclude='tuya_config.json' \
+      --exclude='custom_rules.json' \
+      --exclude='*.db' \
+      --exclude='*.db-journal' \
+      /root/SimpleHomeTelemetry/ "$APP_DIR/"
   else
     cp -a /root/SimpleHomeTelemetry/. "$APP_DIR/" 2>/dev/null || true
   fi

@@ -286,65 +286,127 @@ function getDeviceCardHtml(dev) {
   else if (lqi && lqi > 70) lqiBars = 3;
   else if (lqi && lqi > 30) lqiBars = 2;
 
+  const isWifi = dev.protocol === 'wifi' || (dev.ieee_address && (dev.ieee_address.startsWith('wifi_') || dev.ieee_address.startsWith('sonoff_'))) || Boolean(dev.ip_address);
+  const protocolBadge = isWifi
+    ? `<span class="px-1.5 py-0.5 text-[9px] font-mono rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-semibold shrink-0">Wi-Fi</span>`
+    : `<span class="px-1.5 py-0.5 text-[9px] font-mono rounded bg-amber-950 text-amber-400 border border-amber-800/60 font-semibold shrink-0">Zigbee</span>`;
+
+  // Obsługa urządzeń typu gniazdko / włącznik / przekaźnik
+  const hasState = dev.state !== undefined && dev.state !== null;
+  const isStateOn = dev.state === 'ON' || dev.state === 'on' || dev.state === true;
+  const hasPower = dev.power !== null && dev.power !== undefined;
+  const hasVoltage = dev.voltage !== null && dev.voltage !== undefined;
+  const isPlugOrSwitch = dev.category === 'plug' || dev.category === 'switch' || hasState || hasPower;
+
+  let mainTilesHtml = '';
+  if (isPlugOrSwitch) {
+    const powerHtml = hasPower
+      ? `<span class="text-2xl font-bold font-mono text-white tabular-nums">${dev.power.toFixed(1)}</span><span class="text-xs font-mono text-emerald-400 ml-1">W</span>`
+      : `<span class="text-xs font-mono text-slate-500 italic">0.0 W</span>`;
+    
+    mainTilesHtml = `
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <!-- Kafelek Zasilanie / Przełącznik -->
+        <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-[11px] font-medium text-slate-400 mb-1">
+            <span class="flex items-center gap-1">
+              <span class="material-icons ${isStateOn ? 'text-emerald-400' : 'text-slate-500'} text-xs">power_settings_new</span>
+              <span>Stan</span>
+            </span>
+            <button class="toggle-state-btn px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-colors ${isStateOn ? 'bg-emerald-500 text-slate-950 hover:bg-emerald-400' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
+                    onclick="event.stopPropagation(); toggleDeviceState('${dev.ieee_address}')">
+              ${isStateOn ? 'ON' : 'OFF'}
+            </button>
+          </div>
+          <div class="flex items-baseline mt-1">
+            <span class="text-lg font-bold font-mono ${isStateOn ? 'text-emerald-400' : 'text-slate-500'}">${isStateOn ? 'WŁĄCZONE' : 'WYŁĄCZONE'}</span>
+          </div>
+        </div>
+
+        <!-- Kafelek Pobór Mocy -->
+        <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
+          <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
+            <span class="material-icons text-amber-400 text-xs">bolt</span>
+            <span>Moc czynna</span>
+          </div>
+          <div class="flex items-baseline">
+            ${powerHtml}
+          </div>
+          ${hasVoltage ? `<div class="text-[10px] font-mono text-slate-400 mt-1">${dev.voltage} V</div>` : ''}
+        </div>
+      </div>
+    `;
+  } else {
+    mainTilesHtml = `
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <!-- Kafelek Temperatura -->
+        <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
+          <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
+            <span class="material-icons text-cyan-400 text-xs">thermostat</span>
+            <span>Temperatura</span>
+          </div>
+          <div class="flex items-baseline">
+            ${tempHtml}
+          </div>
+        </div>
+
+        <!-- Kafelek Wilgotność -->
+        <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
+          <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
+            <span class="material-icons text-blue-400 text-xs">water_drop</span>
+            <span>Wilgotność</span>
+          </div>
+          <div class="flex items-baseline">
+            ${humHtml}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <!-- Nagłówek karty: Nazwa i IEEE -->
     <div class="flex items-start justify-between gap-3 mb-4">
       <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-1.5">
+        <div class="flex items-center gap-1.5 flex-wrap">
           <h3 class="text-sm font-bold text-white truncate">${escapeHtml(dev.friendly_name || dev.ieee_address)}</h3>
+          ${protocolBadge}
           <button class="edit-name-btn text-slate-500 hover:text-cyan-400 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity" 
                   onclick="event.stopPropagation(); promptRenameDeviceFromCard('${dev.ieee_address}', '${escapeHtml(dev.friendly_name || '')}')" 
                   title="Zmień nazwę">
             <span class="material-icons text-xs">edit</span>
           </button>
         </div>
-        <div class="text-[11px] font-mono text-slate-400 truncate mt-0.5">${dev.ieee_address}</div>
+        <div class="text-[11px] font-mono text-slate-400 truncate mt-0.5">${dev.ip_address ? `${dev.ip_address} · ` : ''}${dev.ieee_address}</div>
       </div>
 
       <!-- Wskaźnik zasilania (Bateria) -->
-      <div class="flex items-center gap-1 text-xs font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/70 border border-slate-800" title="${battery !== null ? 'Bateria: ' + battery + '%' : 'Brak danych o baterii'}">
+      ${battery !== null ? `
+      <div class="flex items-center gap-1 text-xs font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/70 border border-slate-800" title="Bateria: ${battery}%">
         <span class="material-icons text-sm ${batColor}">${batIcon}</span>
-        <span class="${batColor} tabular-nums font-semibold">${battery !== null ? battery + '%' : 'brak danych'}</span>
-      </div>
+        <span class="${batColor} tabular-nums font-semibold">${battery}%</span>
+      </div>` : (hasPower ? `
+      <div class="flex items-center gap-1 text-xs font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/70 border border-slate-800 text-slate-400" title="Zasilanie 230V AC">
+        <span class="material-icons text-sm text-emerald-400">electrical_services</span>
+        <span class="text-slate-300 font-semibold">230V</span>
+      </div>` : '')}
     </div>
 
-    <!-- Pomiary główne: Duża temperatura i wilgotność -->
-    <div class="grid grid-cols-2 gap-3 mb-4">
-      
-      <!-- Kafelek Temperatura -->
-      <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
-        <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
-          <span class="material-icons text-cyan-400 text-xs">thermostat</span>
-          <span>Temperatura</span>
-        </div>
-        <div class="flex items-baseline">
-          ${tempHtml}
-        </div>
-      </div>
+    <!-- Pomiary główne -->
+    ${mainTilesHtml}
 
-      <!-- Kafelek Wilgotność -->
-      <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
-        <div class="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
-          <span class="material-icons text-blue-400 text-xs">water_drop</span>
-          <span>Wilgotność</span>
-        </div>
-        <div class="flex items-baseline">
-          ${humHtml}
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Stopka kafelka: Znacznik czasu oraz jakość łącza (LQI) -->
+    <!-- Stopka kafelka: Znacznik czasu oraz jakość łącza (LQI / Wi-Fi IP) -->
     <div class="flex items-center justify-between text-[11px] text-slate-400 pt-3 border-t border-slate-800/60">
       <div class="flex items-center gap-1.5">
         <span class="material-icons text-xs text-slate-500">schedule</span>
         <span class="time-relative" data-time="${dev.last_seen || ''}">${timeRelative}</span>
       </div>
 
-      <div class="flex items-center gap-1" title="${hasLqi ? 'Jakość połączenia Zigbee (LQI: ' + lqi + ')' : 'Brak danych LQI'}">
-        <span class="material-icons text-xs ${hasLqi && lqiBars >= 3 ? 'text-emerald-400' : (hasLqi ? 'text-amber-400' : 'text-slate-600')}">signal_cellular_alt</span>
-        <span class="font-mono text-[10px] text-slate-400">${hasLqi ? lqi + ' LQI' : 'brak danych'}</span>
+      <div class="flex items-center gap-1" title="${isWifi ? 'Połączenie Wi-Fi LAN (' + (dev.ip_address || 'aktywne') + ')' : (hasLqi ? 'Jakość połączenia Zigbee (LQI: ' + lqi + ')' : 'Brak danych LQI')}">
+        <span class="material-icons text-xs ${isWifi ? 'text-cyan-400' : (hasLqi && lqiBars >= 3 ? 'text-emerald-400' : (hasLqi ? 'text-amber-400' : 'text-slate-600'))}">
+          ${isWifi ? 'wifi' : 'signal_cellular_alt'}
+        </span>
+        <span class="font-mono text-[10px] text-slate-400">${isWifi ? (dev.ip_address || 'Wi-Fi') : (hasLqi ? lqi + ' LQI' : 'brak danych')}</span>
       </div>
     </div>
   `;
@@ -637,6 +699,42 @@ function appendDataToChart(newPoint) {
   }
 
   chartInstance.update('none');
+}
+
+/**
+ * Przełączanie stanu zasilania urządzenia (ON/OFF) przez REST API
+ */
+async function toggleDeviceState(ieee) {
+  const dev = devices.find(d => d.ieee_address === ieee);
+  if (!dev) return;
+  const isCurrentlyOn = dev.state === 'ON' || dev.state === 'on' || dev.state === true;
+  const targetState = isCurrentlyOn ? 'OFF' : 'ON';
+  const previousState = dev.state;
+
+  // Optymistyczna aktualizacja UI
+  dev.state = targetState;
+  renderDeviceCard(dev, true);
+
+  try {
+    const res = await fetch(`/api/devices/${encodeURIComponent(ieee)}/set`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: targetState })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || (data && data.status === 'error')) {
+      dev.state = previousState;
+      renderDeviceCard(dev, true);
+      alert(`Błąd sterowania urządzeniem: ${(data && (data.detail || data.message)) || 'Urządzenie nie odpowiedziało'}`);
+    } else if (data && data.device) {
+      Object.assign(dev, data.device);
+      renderDeviceCard(dev, true);
+    }
+  } catch (err) {
+    dev.state = previousState;
+    renderDeviceCard(dev, true);
+    alert('Błąd sieciowy podczas wysyłania komendy sterującej.');
+  }
 }
 
 /**

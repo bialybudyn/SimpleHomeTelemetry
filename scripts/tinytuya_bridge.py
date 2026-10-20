@@ -455,11 +455,25 @@ def action_command(payload):
         # Wysłanie wielu wartości jednocześnie
         res = d.set_multiple_values(dps_to_send)
 
-        # Jeśli set_multiple_values zwróci błąd, próbujemy wysłać po kolei
+        # Jeśli set_multiple_values zwróci błąd, próbujemy wysłać po kolei lub przetestować alternatywne wersje protokołu (3.3, 3.4, 3.5)
         if isinstance(res, dict) and "Error" in res:
             for dp_key, dp_val in dps_to_send.items():
                 try:
                     d.set_value(int(dp_key), dp_val)
+                except Exception:
+                    pass
+            
+            alt_versions = [v for v in [3.3, 3.4, 3.5, 3.1] if v != version]
+            for alt_v in alt_versions:
+                try:
+                    d_alt = tinytuya.Device(dev_id, target_host, local_key, version=alt_v)
+                    d_alt.port = working_port
+                    d_alt.set_socketTimeout(2.0)
+                    res_alt = d_alt.set_multiple_values(dps_to_send)
+                    if isinstance(res_alt, dict) and "Error" not in res_alt:
+                        d = d_alt
+                        res = res_alt
+                        break
                 except Exception:
                     pass
 

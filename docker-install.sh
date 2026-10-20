@@ -25,5 +25,5 @@ fi
 
 echo "=== Stos kontenerow uruchomiony! ==="
 echo "• Broker Mosquitto: localhost:1883"
-echo "• Zigbee2MQTT Frontend: http://localhost:8080"
+echo "• Zigbee2MQTT Backend: http://localhost:8080"
 echo "• Panel Telemetrii: http://localhost:3000"

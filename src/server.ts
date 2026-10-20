@@ -8,7 +8,8 @@ import { createServer } from 'node:http';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execSync, exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { Socket } from 'node:net';
 import { createSocket } from 'node:dgram';
 import { networkInterfaces, hostname } from 'node:os';
@@ -51,6 +52,8 @@ import {
   getImgwLocations,
   getImgwLocationDetails,
 } from './imgw-weather-service';
+
+const execAsync = promisify(exec);
 
 // Wykrywanie katalogu zasobow statycznych przegladarki (CSS, JS, Fonts)
 const currentDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
@@ -776,6 +779,40 @@ function isDeviceOnline(dev: Device): boolean {
   return diffMinutes <= 60;
 }
 
+function isWifiDevice(dev: Device): boolean {
+  if (!dev) return false;
+  if (dev.protocol === 'wifi') return true;
+  if (dev.ieee_address.startsWith('wifi_') || dev.ieee_address.startsWith('sonoff_')) return true;
+  if (dev.ip_address || dev.local_key || dev.tuya_dev_id || dev.sonoff_device_id || dev.sonoff_api_key) return true;
+  const m = (dev.model || '').toLowerCase();
+  const v = (dev.vendor || '').toLowerCase();
+  const f = (dev.friendly_name || '').toLowerCase();
+  if (
+    m.includes('wi-fi') || m.includes('wifi') || m.includes('s60') || m.includes('gow') ||
+    v.includes('wi-fi') || v.includes('wifi') || v.includes('ewelink') || v.includes('espressif') ||
+    f.includes('wifi') || f.includes('wi-fi')
+  ) {
+    return true;
+  }
+  try {
+    const storedEwe = getStoredEwelinkConfig();
+    if (Array.isArray(storedEwe?.devices)) {
+      const matched = storedEwe.devices.some(
+        (d) =>
+          (dev.ip_address && d.ip === dev.ip_address) ||
+          (dev.sonoff_device_id && d.deviceId === dev.sonoff_device_id) ||
+          d.name === dev.friendly_name ||
+          (d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === f.replace(/[^a-z0-9]/g, '')) ||
+          dev.ieee_address.includes(d.deviceId)
+      );
+      if (matched) return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 function loadCache() {
   if (existsSync(telemetryCachePath)) {
     try {
@@ -813,6 +850,9 @@ function loadCache() {
             }
             if (!val.first_seen) {
               val.first_seen = val.added_at;
+            }
+            if (isWifiDevice(val)) {
+              val.protocol = 'wifi';
             }
           }
           devices.set(key, val);
@@ -1112,28 +1152,15 @@ function requestDeviceSyncAll() {
 
   // 1. Zażądaj pełnej listy urządzeń i definicji z mostka Z2M (kompatybilność v1 oraz v2)
   try {
-    mqttClient.publish(`${prefix}/bridge/request/devices`, '');
-    mqttClient.publish(`${prefix}/bridge/config/devices`, '');
+    mqttClient.publish(`${prefix}/bridge/request/devices`, '{}');
+    mqttClient.publish(`${prefix}/bridge/config/devices`, '{}');
   } catch (err) {
     console.warn('[MQTT] Błąd publikacji bridge/request/devices:', err);
   }
 
-  // 2. Przeładuj subskrypcję tematów, aby broker natychmiast wysłał wszystkie zachowane stany (retained)
-  try {
-    mqttClient.unsubscribe(`${prefix}/#`, () => {
-      mqttClient?.subscribe(`${prefix}/#`, (err) => {
-        if (!err) {
-          console.log('[MQTT] Ponownie zasubskrybowano tematy Z2M w celu natychmiastowego pobrania zachowanych stanów.');
-        }
-      });
-    });
-  } catch (err) {
-    console.warn('[MQTT] Błąd przeładowania subskrypcji MQTT:', err);
-  }
-
-  // 3. Dla urządzeń wykonawczych zasilanych sieciowo (gniazdka, wyłączniki) wyślij ukierunkowane zapytanie /get
+  // 2. Dla każdego znanego urządzenia Zigbee wyślij ukierunkowane zapytanie /get o stan
   devices.forEach((dev) => {
-    if (dev.is_deleted) return;
+    if (dev.is_deleted || isWifiDevice(dev)) return;
     const name = dev.friendly_name || dev.ieee_address;
     if (!name) return;
 
@@ -1141,9 +1168,7 @@ function requestDeviceSyncAll() {
     dev.category = cat;
 
     try {
-      if (cat === 'plug' || cat === 'switch') {
-        mqttClient?.publish(`${prefix}/${name}/get`, JSON.stringify({ state: '' }));
-      }
+      mqttClient?.publish(`${prefix}/${name}/get`, '{"state":""}');
     } catch {
       // ignore
     }
@@ -1354,6 +1379,7 @@ interface Z2mDeviceItem {
                       friendly_name: devName,
                       model: modelName,
                       category: detectedCategory,
+                      protocol: 'zigbee',
                       last_seen: new Date().toISOString(),
                       connection_status: 'online',
                       is_deleted: false,
@@ -1365,6 +1391,9 @@ interface Z2mDeviceItem {
                   } else {
                     existing.friendly_name = devName;
                     existing.model = modelName;
+                    existing.protocol = 'zigbee';
+                    existing.connection_status = 'online';
+                    if (!existing.last_seen) existing.last_seen = new Date().toISOString();
                     existing.is_deleted = false; // Przywróć aktywne urządzenie w Z2M jeśli było wcześniej ukryte
                     if (!existing.category || existing.category === 'sensor') {
                       existing.category = detectDeviceCategory(modelName, undefined, devName);
@@ -1528,7 +1557,9 @@ interface Z2mDeviceItem {
             devices.set(targetIeee, dev);
             addDeviceLog('created', targetIeee, baseTopic, `Wykryto nowe urządzenie "${baseTopic}" (${targetIeee}).`);
           } else {
-            dev.category = category;
+            if (!dev.category || dev.category === 'sensor') {
+              dev.category = category;
+            }
             if (temp !== null) dev.last_temperature = temp;
             if (hum !== null) dev.last_humidity = hum;
             if (bat !== null) dev.battery = bat;
@@ -1928,8 +1959,8 @@ const handlePermanentDelete = (req: Request, res: Response) => {
   devices.delete(ieee);
   telemetryStore.delete(ieee);
 
-  // 2. Usunięcie z Zigbee2MQTT
-  if (mqttClient?.connected && dev?.protocol !== 'wifi') {
+  // 2. Usunięcie z Zigbee2MQTT (wyłącznie dla urządzeń Zigbee)
+  if (mqttClient?.connected && dev && !isWifiDevice(dev)) {
     try {
       const topic = `${mqttStatus.topic_prefix}/bridge/request/device/remove`;
       mqttClient.publish(topic, JSON.stringify({ id: devName || ieee, force: true }));
@@ -1979,7 +2010,7 @@ app.post('/api/devices/batch', (req: Request, res: Response) => {
     if (action === 'soft_delete' && dev) {
       dev.is_deleted = true;
       dev.deleted_at = new Date().toISOString();
-      if (mqttClient?.connected && dev.protocol !== 'wifi') {
+      if (mqttClient?.connected && !isWifiDevice(dev)) {
         try {
           mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/device/remove`, JSON.stringify({ id: name || ieee, force: true }));
         } catch { /* ignore */ }
@@ -1994,7 +2025,7 @@ app.post('/api/devices/batch', (req: Request, res: Response) => {
     } else if (action === 'permanent_delete') {
       devices.delete(ieee);
       telemetryStore.delete(ieee);
-      if (mqttClient?.connected && dev?.protocol !== 'wifi') {
+      if (mqttClient?.connected && dev && !isWifiDevice(dev)) {
         try {
           mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/device/remove`, JSON.stringify({ id: name || ieee, force: true }));
         } catch { /* ignore */ }
@@ -2048,9 +2079,16 @@ app.post('/api/devices/:ieee/test-connection', async (req: Request, res: Respons
     return;
   }
 
-  if (dev.protocol === 'wifi' || dev.local_key || dev.sonoff_device_id || (dev.vendor || '').toLowerCase().includes('espressif')) {
+  if (isWifiDevice(dev)) {
     const ip = dev.ip_address || '';
-    const isSonoff = (
+    const isSonoff = !(
+      Boolean(dev.local_key) ||
+      Boolean(dev.tuya_dev_id) ||
+      dev.category === 'fan' ||
+      dev.category === 'smoke' ||
+      (dev.vendor || '').toLowerCase().includes('tuya') ||
+      (dev.model || '').toLowerCase().includes('gow')
+    ) && (
       (dev.model || '').toLowerCase().includes('s60') ||
       (dev.model || '').toLowerCase().includes('sonoff') ||
       (dev.model || '').toLowerCase().includes('espressif') ||
@@ -2060,8 +2098,7 @@ app.post('/api/devices/:ieee/test-connection', async (req: Request, res: Respons
       (dev.vendor || '').toLowerCase().includes('coolkit') ||
       Boolean(dev.sonoff_device_id) ||
       Boolean(dev.sonoff_api_key) ||
-      dev.ieee_address.startsWith('sonoff_') ||
-      dev.ieee_address.startsWith('wifi_')
+      dev.ieee_address.startsWith('sonoff_')
     );
 
     if (isSonoff) {
@@ -2288,8 +2325,8 @@ app.post('/api/devices/:ieee/rename', (req: Request, res: Response) => {
   });
   triggerSaveDevices();
 
-  // Przekaz zadanie zmiany nazwy do Zigbee2MQTT jesli broker jest podlaczony
-  if (mqttClient?.connected) {
+  // Przekaz zadanie zmiany nazwy do Zigbee2MQTT jesli broker jest podlaczony i NIE jest to urządzenie Wi-Fi
+  if (mqttClient?.connected && !isWifiDevice(dev)) {
     try {
       mqttClient.publish(
         `${mqttStatus.topic_prefix}/bridge/request/device/rename`,
@@ -2775,8 +2812,8 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
 
   dev.last_seen = new Date().toISOString();
 
-  // Przekazanie polecenia do brokera Mosquitto MQTT dla Zigbee2MQTT
-  if (mqttClient?.connected) {
+  // Przekazanie polecenia do brokera Mosquitto MQTT dla Zigbee2MQTT (wyłącznie urządzenia Zigbee)
+  if (mqttClient?.connected && !isWifiDevice(dev)) {
     const targetTopic = `${mqttStatus.topic_prefix}/${dev.friendly_name || ieee}/set`;
     try {
       // Przygotuj czysty ladunek tylko z kluczami zapisywalnymi dla Z2M
@@ -2870,7 +2907,14 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
   }
 
   // Sterowanie urządzeniem SONOFF Wi-Fi (S60TFP / S26 / Mini / eWeLink LAN na porcie 8081 / eWeLink Cloud CUBE-OS)
-  const isSonoffDev = dev.protocol === 'wifi' && (
+  const isSonoffDev = dev.protocol === 'wifi' && !(
+    Boolean(dev.local_key) ||
+    Boolean(dev.tuya_dev_id) ||
+    dev.category === 'fan' ||
+    dev.category === 'smoke' ||
+    (dev.vendor || '').toLowerCase().includes('tuya') ||
+    (dev.model || '').toLowerCase().includes('gow')
+  ) && (
     (dev.model || '').toLowerCase().includes('s60') ||
     (dev.model || '').toLowerCase().includes('sonoff') ||
     (dev.model || '').toLowerCase().includes('espressif') ||
@@ -2880,8 +2924,7 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
     (dev.vendor || '').toLowerCase().includes('coolkit') ||
     Boolean(dev.sonoff_device_id) ||
     Boolean(dev.sonoff_api_key) ||
-    dev.ieee_address.startsWith('sonoff_') ||
-    dev.ieee_address.startsWith('wifi_')
+    dev.ieee_address.startsWith('sonoff_')
   );
 
   if (isSonoffDev) {
@@ -2889,7 +2932,7 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
     if (!dev.sonoff_device_id || !dev.sonoff_api_key || !dev.ip_address) {
       const storedEwe = getStoredEwelinkConfig();
       if (Array.isArray(storedEwe.devices) && storedEwe.devices.length > 0) {
-        let matchedEwe = storedEwe.devices.find(
+        const matchedEwe = storedEwe.devices.find(
           (d) =>
             (dev.ip_address && d.ip === dev.ip_address) ||
             (dev.sonoff_device_id && d.deviceId === dev.sonoff_device_id) ||
@@ -2897,9 +2940,6 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
             (d.name && d.name.toLowerCase().replace(/[^a-z0-9]/g, '') === dev.friendly_name.toLowerCase().replace(/[^a-z0-9]/g, '')) ||
             dev.ieee_address.includes(d.deviceId)
         );
-        if (!matchedEwe && storedEwe.devices.length === 1) {
-          matchedEwe = storedEwe.devices[0];
-        }
         if (matchedEwe) {
           if (!dev.sonoff_device_id) dev.sonoff_device_id = matchedEwe.deviceId;
           if (!dev.sonoff_api_key) dev.sonoff_api_key = matchedEwe.deviceKey || matchedEwe.apiKey;
@@ -2953,6 +2993,25 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
         res.json({ status: 'ok', message: resCmd.message, device: dev });
         return;
       } else {
+        // Fallback do Chmury eWeLink jeśli posiadamy sonoff_device_id
+        if (dev.sonoff_device_id && sw) {
+          try {
+            console.log(`[SONOFF LAN FALLBACK] Komenda LAN nie powiodła się (${resCmd.message}), wywołuję eWeLink Cloud dla ${dev.sonoff_device_id}...`);
+            const cloudRes = await controlEwelinkDevice(dev.sonoff_device_id, sw);
+            if (cloudRes.success) {
+              dev.connection_status = 'online';
+              dev.last_error = null;
+              addDeviceLog('control', dev.ieee_address, dev.friendly_name, cloudRes.message);
+              broadcastEvent({ type: 'device_updated', device: dev });
+              triggerSaveDevices();
+              res.json({ status: 'ok', message: cloudRes.message, device: dev });
+              return;
+            }
+          } catch (cloudErr) {
+            console.warn(`[SONOFF LAN FALLBACK FAIL]`, cloudErr);
+          }
+        }
+
         dev.connection_status = 'error';
         dev.last_error = resCmd.message;
         if (cmd.state !== undefined && previousState) {
@@ -2982,74 +3041,82 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
   if (!isSonoffDev && (dev.protocol === 'wifi' || dev.category === 'fan' || dev.category === 'smoke' || dev.local_key)) {
     if (dev.ip_address && dev.local_key) {
       const devId = dev.tuya_dev_id || dev.ieee_address.replace('wifi_', '');
-      executeTinyTuyaCommand({
-        ip: dev.ip_address,
-        local_key: dev.local_key,
-        dev_id: devId,
-        version: dev.tuya_protocol_version || '3.3',
-        category: dev.category,
-        command: cmd,
-        gateway_ip: dev.dongle_gateway_ip || dongleMaxConfig.host,
-      })
-        .then((ttRes) => {
-          if (ttRes.success) {
-            console.log(
-              `[TINYTUYA] Pomyślnie wysłano instrukcję do ${dev.friendly_name} (${dev.ip_address}):`,
-              ttRes.message,
-            );
-            dev.connection_status = 'online';
-            dev.last_error = null;
-            dev.last_seen = new Date().toISOString();
-            if (ttRes.device_data) {
-              if (ttRes.device_data.state !== undefined) dev.state = ttRes.device_data.state;
-              if (ttRes.device_data.power !== undefined) dev.power = ttRes.device_data.power;
-              if (ttRes.device_data.voltage !== undefined) dev.voltage = ttRes.device_data.voltage;
-              if (ttRes.device_data.current !== undefined) dev.current = ttRes.device_data.current;
-              if (ttRes.device_data.fan_speed !== undefined) dev.fan_speed = ttRes.device_data.fan_speed;
-              if (ttRes.device_data.smoke_alarm !== undefined) dev.smoke_alarm = ttRes.device_data.smoke_alarm;
-              if (ttRes.device_data.smoke_status !== undefined) dev.smoke_status = ttRes.device_data.smoke_status;
-              if (ttRes.device_data.battery !== undefined) dev.battery = ttRes.device_data.battery;
-            }
-            broadcastEvent({ type: 'device_updated', device: dev });
-            triggerSaveDevices();
-          } else {
-            console.warn(
-              `[TINYTUYA] Błąd komunikacji z ${dev.friendly_name} (${dev.ip_address}): ${ttRes.error}`,
-            );
-            dev.connection_status = 'offline';
-            dev.last_error = ttRes.error || 'Brak połączenia z urządzeniem w sieci LAN na porcie 6668';
-            broadcastEvent({ type: 'device_updated', device: dev });
-            triggerSaveDevices();
+      try {
+        const ttRes = await executeTinyTuyaCommand({
+          ip: dev.ip_address,
+          local_key: dev.local_key,
+          dev_id: devId,
+          version: dev.tuya_protocol_version || '3.3',
+          category: dev.category,
+          command: cmd,
+          gateway_ip: dev.dongle_gateway_ip || dongleMaxConfig.host,
+        });
 
-            // Opcjonalna próba TuyAPI
-            sendTuyaLocalCommand(
+        if (ttRes.success) {
+          console.log(
+            `[TINYTUYA] Pomyślnie wysłano instrukcję do ${dev.friendly_name} (${dev.ip_address}):`,
+            ttRes.message,
+          );
+          dev.connection_status = 'online';
+          dev.last_error = null;
+          dev.last_seen = new Date().toISOString();
+          if (ttRes.device_data) {
+            if (ttRes.device_data.state !== undefined) dev.state = ttRes.device_data.state;
+            if (ttRes.device_data.power !== undefined) dev.power = ttRes.device_data.power;
+            if (ttRes.device_data.voltage !== undefined) dev.voltage = ttRes.device_data.voltage;
+            if (ttRes.device_data.current !== undefined) dev.current = ttRes.device_data.current;
+            if (ttRes.device_data.fan_speed !== undefined) dev.fan_speed = ttRes.device_data.fan_speed;
+            if (ttRes.device_data.smoke_alarm !== undefined) dev.smoke_alarm = ttRes.device_data.smoke_alarm;
+            if (ttRes.device_data.smoke_status !== undefined) dev.smoke_status = ttRes.device_data.smoke_status;
+            if (ttRes.device_data.battery !== undefined) dev.battery = ttRes.device_data.battery;
+          }
+          broadcastEvent({ type: 'device_updated', device: dev });
+          triggerSaveDevices();
+          res.json({ status: 'ok', message: ttRes.message, device: dev });
+          return;
+        } else {
+          console.warn(
+            `[TINYTUYA] Błąd komunikacji z ${dev.friendly_name} (${dev.ip_address}): ${ttRes.error}`,
+          );
+          dev.connection_status = 'offline';
+          dev.last_error = ttRes.error || 'Brak połączenia z urządzeniem w sieci LAN na porcie 6668';
+
+          // Opcjonalna próba TuyAPI
+          try {
+            const resFallback = await sendTuyaLocalCommand(
               dev.ip_address!,
               dev.local_key!,
               devId,
               cmd,
               dev.tuya_protocol_version || '3.3',
-            )
-              .then((resFallback) => {
-                if (resFallback.success) {
-                  dev.connection_status = 'online';
-                  dev.last_error = null;
-                  dev.last_seen = new Date().toISOString();
-                  broadcastEvent({ type: 'device_updated', device: dev });
-                  triggerSaveDevices();
-                }
-              })
-              .catch((errFallback) => {
-                console.warn(`[TUYA FALLBACK] Błąd:`, errFallback);
-              });
+            );
+            if (resFallback.success) {
+              dev.connection_status = 'online';
+              dev.last_error = null;
+              dev.last_seen = new Date().toISOString();
+              broadcastEvent({ type: 'device_updated', device: dev });
+              triggerSaveDevices();
+              res.json({ status: 'ok', message: 'Wysłano komendę Tuya (fallback)', device: dev });
+              return;
+            }
+          } catch (errFallback) {
+            console.warn(`[TUYA FALLBACK] Błąd:`, errFallback);
           }
-        })
-        .catch((err) => {
-          console.warn(`[TINYTUYA] Błąd wykonania dla ${dev.friendly_name}:`, err);
-          dev.connection_status = 'offline';
-          dev.last_error = err instanceof Error ? err.message : String(err);
+
           broadcastEvent({ type: 'device_updated', device: dev });
           triggerSaveDevices();
-        });
+          res.status(400).json({ status: 'error', detail: dev.last_error, device: dev });
+          return;
+        }
+      } catch (err) {
+        console.warn(`[TINYTUYA] Błąd wykonania dla ${dev.friendly_name}:`, err);
+        dev.connection_status = 'offline';
+        dev.last_error = err instanceof Error ? err.message : String(err);
+        broadcastEvent({ type: 'device_updated', device: dev });
+        triggerSaveDevices();
+        res.status(500).json({ status: 'error', detail: dev.last_error, device: dev });
+        return;
+      }
     } else {
       dev.connection_status = 'untested';
       dev.last_error = 'Urządzenie oczekuje na skonfigurowanie Local Key i lokalnego adresu IP w sieci LAN.';
@@ -3070,7 +3137,7 @@ app.post('/api/devices/:ieee/set', async (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     device: dev,
-    sent_to_mqtt: !!mqttClient?.connected,
+    sent_to_mqtt: !!mqttClient?.connected && !isWifiDevice(dev),
     sent_to_tuya_local: !!(dev.ip_address && dev.local_key),
   });
 });
@@ -4758,9 +4825,26 @@ app.get('/api/system/inspect-services', (_req: Request, res: Response) => {
 });
 
 // 18. Aktualizacja oprogramowania SimpleHomeTelemetry z Git / GitHub
-app.post('/api/system/git-update', (req: Request, res: Response) => {
+app.post('/api/system/git-update', async (req: Request, res: Response) => {
   const logSteps: string[] = [];
   const requestedDir = typeof req.body?.repo_path === 'string' && req.body.repo_path.trim() ? req.body.repo_path.trim() : null;
+
+  // Helper do asynchronicznego wykonywania komend Git/powłoki bez blokowania pętli zdarzeń HTTP
+  const runGitAsync = async (cmd: string, cwd: string, timeout = 20000): Promise<string> => {
+    try {
+      const { stdout, stderr } = await execAsync(cmd, {
+        cwd,
+        timeout,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        encoding: 'utf-8',
+      });
+      return stdout ? stdout.trim() : (stderr ? stderr.trim() : '');
+    } catch (e: unknown) {
+      const errObj = e as { stdout?: string; stderr?: string; message?: string };
+      const out = (errObj.stdout || errObj.stderr || errObj.message || String(e)).trim();
+      throw new Error(out);
+    }
+  };
 
   // Detekcja obecności repozytorium Git w środowisku uruchomieniowym
   let gitRepoDir: string | null = null;
@@ -4788,8 +4872,7 @@ app.post('/api/system/git-update', (req: Request, res: Response) => {
   // Jeśli brak repozytorium .git w żadnym z katalogów
   if (!gitRepoDir) {
     const workingDir = process.cwd();
-    const isBareMetalCandidate = existsSync('/opt/zigbee-telemetry-panel') || existsSync('/root/SimpleHomeTelemetry');
-    
+
     logSteps.push(`[Diagnostyka Ścieżek]: Sprawdzono katalogi:`);
     for (const cp of checkedPaths) {
       logSteps.push(` - ${cp.path}: ${cp.exists ? (cp.hasGit ? 'znaleziono .git' : 'katalog istnieje, brak podkatalogu .git') : 'katalog nie istnieje'}`);
@@ -4814,7 +4897,7 @@ app.post('/api/system/git-update', (req: Request, res: Response) => {
 
     // 1. Zabezpieczenie przed błędem dubious ownership w Git
     try {
-      execSync('git config --global --add safe.directory "*" || true', { cwd: gitRepoDir, encoding: 'utf-8' });
+      await runGitAsync('git config --global --add safe.directory "*"', gitRepoDir, 10000);
     } catch {
       // ignore
     }
@@ -4822,95 +4905,117 @@ app.post('/api/system/git-update', (req: Request, res: Response) => {
     let beforeCommit = 'unknown';
     let currentBranch = 'main';
     try {
-      beforeCommit = execSync('git rev-parse --short HEAD', { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
-      currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: gitRepoDir, encoding: 'utf-8' }).trim() || 'main';
+      beforeCommit = (await runGitAsync('git rev-parse --short HEAD', gitRepoDir, 10000)).trim();
+      currentBranch = (await runGitAsync('git rev-parse --abbrev-ref HEAD', gitRepoDir, 10000)).trim() || 'main';
       logSteps.push(`[Stan Lokalny]: Gałąź ${currentBranch}, aktualny commit: ${beforeCommit}`);
     } catch {
       // ignore
     }
 
-    // 2. Pobranie informacji o zdalnym repozytorium (git fetch)
+    // 2. Pobranie informacji o zdalnym repozytorium
     let remoteUrl = '';
     try {
-      remoteUrl = execSync('git remote get-url origin 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
+      remoteUrl = (await runGitAsync('git remote get-url origin', gitRepoDir, 10000)).trim();
       logSteps.push(`[Zdalne Repozytorium]: ${remoteUrl}`);
     } catch {
       logSteps.push(`[Zdalne Repozytorium]: brak skonfigurowanego remote origin`);
     }
 
+    // 3. Wczytanie do pamięci RAM zawartości plików danych i konfiguracji użytkownika
+    // (Zamiast zawodnego 'git stash', co całkowicie eliminuje konflikty merge/stash na plikach cache)
+    const filesToPreserve = [
+      'devices_cache.json',
+      'telemetry_cache.json',
+      'dongle_max_config.json',
+      'ewelink_config.json',
+      'notification_config.json',
+      'custom_rules.json',
+      'tuya_config.json',
+    ];
+    const preservedFiles = new Map<string, string>();
+    for (const fname of filesToPreserve) {
+      const primaryPath = join(gitRepoDir, fname);
+      const optPath = join('/opt/zigbee-telemetry-panel', fname);
+      if (existsSync(primaryPath)) {
+        try { preservedFiles.set(fname, readFileSync(primaryPath, 'utf-8')); } catch { /* ignore */ }
+      } else if (existsSync(optPath)) {
+        try { preservedFiles.set(fname, readFileSync(optPath, 'utf-8')); } catch { /* ignore */ }
+      }
+    }
+    logSteps.push(`[Ochrona Danych w RAM]: Zabezpieczono w pamięci ${preservedFiles.size} plików bazy i konfiguracji przed aktualizacją Git`);
+
+    // 4. Asynchroniczne pobranie zmian (git fetch) z limitem 20 sekund
     try {
-      const fetchOut = execSync('git fetch --all 2>&1', { cwd: gitRepoDir, encoding: 'utf-8', timeout: 30000 });
-      logSteps.push(`[Git Fetch]: ${fetchOut.trim() || 'Pobrano metadane ze zdalnego repozytorium'}`);
+      const fetchOut = await runGitAsync('git fetch --all', gitRepoDir, 20000);
+      logSteps.push(`[Git Fetch]: ${fetchOut || 'Pobrano metadane ze zdalnego repozytorium'}`);
     } catch (fetchErr: unknown) {
       const errStr = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       logSteps.push(`[Git Fetch Ostrzeżenie]: ${errStr}`);
     }
 
+    // Wykrycie commita zdalnego
     let remoteCommit = beforeCommit;
     try {
-      remoteCommit = execSync(`git rev-parse --short origin/${currentBranch} 2>&1 || git rev-parse --short origin/main 2>&1 || git rev-parse --short origin/master 2>&1`, { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
+      remoteCommit = (await runGitAsync(`git rev-parse --short origin/${currentBranch} || git rev-parse --short origin/main || git rev-parse --short origin/master`, gitRepoDir, 10000)).trim();
       logSteps.push(`[Najnowszy Commit Remote]: ${remoteCommit}`);
     } catch {
       // ignore
     }
 
-    // 3. Sprawdzenie czy rzeczywiście występują różnice między HEAD a zdalnym repozytorium
-    let behindCount = 0;
+    // 5. Czysty reset stanu lokalnego do wersji zdalnej (git reset --hard)
+    let resetOutput = '';
     try {
-      const countStr = execSync(`git rev-list --count HEAD..origin/${currentBranch} 2>&1 || git rev-list --count HEAD..origin/main 2>&1 || echo 0`, { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
-      behindCount = parseInt(countStr, 10) || 0;
-      logSteps.push(`[Commity do pobrania]: ${behindCount}`);
-    } catch {
-      // ignore
-    }
-
-    // 4. Przechowanie lokalnych zmian (stash) aby uniknąć konfliktów
-    try {
-      const stashOut = execSync('git stash --include-untracked 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
-      logSteps.push(`[Git Stash]: ${stashOut.trim()}`);
-    } catch {
-      // ignore
-    }
-
-    // 5. Pobranie zmian (git pull)
-    let pullOutput = '';
-    try {
-      pullOutput = execSync(`git pull origin ${currentBranch} 2>&1 || git pull origin main 2>&1 || git pull origin master 2>&1 || git pull 2>&1`, {
-        cwd: gitRepoDir,
-        encoding: 'utf-8',
-        timeout: 45000,
-      });
-      logSteps.push(`[Git Pull]: ${pullOutput.trim()}`);
-    } catch (pullErr: unknown) {
-      const errStr = pullErr instanceof Error && 'stdout' in pullErr ? String((pullErr as { stdout?: unknown }).stdout || pullErr.message) : String(pullErr);
-      logSteps.push(`[Git Pull Notice]: ${errStr}`);
-
-      // Fallback: Hard reset do stanu zdalnego
+      resetOutput = await runGitAsync(`git reset --hard origin/${currentBranch}`, gitRepoDir, 20000);
+      logSteps.push(`[Git Reset]: ${resetOutput || `Zresetowano stan lokalny do origin/${currentBranch}`}`);
+    } catch (resetErr: unknown) {
+      const errStr = resetErr instanceof Error ? resetErr.message : String(resetErr);
+      logSteps.push(`[Git Reset Notice]: ${errStr}`);
       try {
-        const resetOut = execSync(`git reset --hard origin/${currentBranch} 2>&1 || git reset --hard origin/main 2>&1`, { cwd: gitRepoDir, encoding: 'utf-8' });
-        logSteps.push(`[Git Reset Fallback]: ${resetOut.trim()}`);
-      } catch (resetErr: unknown) {
-        logSteps.push(`[Git Reset Error]: ${String(resetErr)}`);
+        const resetFb = await runGitAsync('git reset --hard origin/main || git reset --hard origin/master', gitRepoDir, 20000);
+        logSteps.push(`[Git Reset Fallback]: ${resetFb}`);
+      } catch (fbErr: unknown) {
+        logSteps.push(`[Git Reset Error]: ${String(fbErr)}`);
       }
     }
 
-    // 6. Przywrócenie lokalnego stash
-    try {
-      const popOut = execSync('git stash pop 2>&1', { cwd: gitRepoDir, encoding: 'utf-8' });
-      logSteps.push(`[Git Stash Pop]: ${popOut.trim()}`);
-    } catch {
-      // ignore
+    // 6. Jeśli gitRepoDir jest inny niż /opt/zigbee-telemetry-panel, zsynchronizuj pliki źródłowe wraz z .git
+    const optPanelDir = '/opt/zigbee-telemetry-panel';
+    if (gitRepoDir !== optPanelDir && existsSync(optPanelDir)) {
+      try {
+        const rsyncCmd = `rsync -av --exclude="node_modules" --exclude="dist" --exclude="devices_cache.json" --exclude="telemetry_cache.json" --exclude="dongle_max_config.json" --exclude="ewelink_config.json" --exclude="notification_config.json" --exclude="tuya_config.json" --exclude="custom_rules.json" --exclude="*.db" --exclude="*.db-journal" "${gitRepoDir}/" "${optPanelDir}/"`;
+        await runGitAsync(rsyncCmd, gitRepoDir, 20000);
+        logSteps.push(`[Sync do /opt]: Pomyślnie zsynchronizowano kod źródłowy wraz z .git do ${optPanelDir}`);
+      } catch (syncErr: unknown) {
+        const sMsg = syncErr instanceof Error ? syncErr.message : String(syncErr);
+        logSteps.push(`[Sync do /opt Ostrzeżenie]: ${sMsg}`);
+      }
     }
+
+    // 7. Bezpośredni zapis zachowanych plików z pamięci RAM z powrotem na dysk
+    const targetDirs = [gitRepoDir];
+    if (gitRepoDir !== optPanelDir && existsSync(optPanelDir)) {
+      targetDirs.push(optPanelDir);
+    }
+    for (const dir of targetDirs) {
+      for (const [fname, content] of preservedFiles.entries()) {
+        try {
+          writeFileSync(join(dir, fname), content, 'utf-8');
+        } catch {
+          // ignore
+        }
+      }
+    }
+    logSteps.push(`[Przywrócenie z RAM]: Zapisano z powrotem konfigurację i bazę telemetryczną na dysk`);
 
     let afterCommit = beforeCommit;
     try {
-      afterCommit = execSync('git rev-parse --short HEAD', { cwd: gitRepoDir, encoding: 'utf-8' }).trim();
+      afterCommit = (await runGitAsync('git rev-parse --short HEAD', gitRepoDir, 10000)).trim();
     } catch {
       // ignore
     }
 
     const fullLogs = logSteps.join('\n');
-    const wasUpdated = beforeCommit !== afterCommit || fullLogs.includes('Updating') || fullLogs.includes('Fast-forward') || fullLogs.includes('HEAD is now at');
+    const wasUpdated = beforeCommit !== afterCommit || fullLogs.includes('HEAD is now at') || fullLogs.includes('Updating');
     const isUpToDate = !wasUpdated && (beforeCommit === remoteCommit || fullLogs.includes('Already up to date'));
 
     const message = wasUpdated
