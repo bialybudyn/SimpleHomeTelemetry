@@ -1,13 +1,14 @@
 {
-  "name": "smart-home-telemetry",
+  "name": "simple-home-telemetry",
   "version": "1.0.0",
   "scripts": {
     "ng": "ng",
     "dev": "ng serve",
-    "start": "node server.ts",
     "build": "ng build",
+    "start": "node dist/app/server/server.mjs",
     "watch": "ng build --watch --configuration development",
-    "lint": "echo 'No lint errors'"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "test": "vitest run"
   },
   "private": true,
   "dependencies": {
@@ -45,5 +46,8 @@
     "@tailwindcss/postcss": "^4.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

@@ -1,8 +1,0 @@
-{
-  "name": "Smart Home Telemetry & IMGW Weather",
-  "description": "Smart Home IoT monitoring and Polish IMGW-PIB weather station network",
-  "permissions": [],
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
-}

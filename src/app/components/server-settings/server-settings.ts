@@ -8,12 +8,6 @@ import {
   effect,
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
-import { InstallerView } from '../installer-view/installer-view';
-import { DeviceCatalog } from '../device-catalog/device-catalog';
-import { DongleMaxManager } from '../dongle-max/dongle-max';
-import { CodeViewer } from '../code-viewer/code-viewer';
-import { AndroidViewer } from '../android-viewer/android-viewer';
-import { Simulator } from '../simulator/simulator';
 import { NotificationsConfig } from './notifications-config';
 import { DevicesManager } from './devices-manager';
 import { BackupManager } from '../backup-manager/backup-manager';
@@ -22,12 +16,6 @@ import { Telemetry } from '../../services/telemetry';
 export type ServerSubTab =
   | 'devices'
   | 'backup'
-  | 'installer'
-  | 'catalog'
-  | 'dongle-max'
-  | 'code'
-  | 'android'
-  | 'simulator'
   | 'notifications';
 
 interface SubTabItem {
@@ -44,12 +32,6 @@ interface SubTabItem {
   selector: 'app-server-settings',
   imports: [
     MatIconModule,
-    InstallerView,
-    DeviceCatalog,
-    DongleMaxManager,
-    CodeViewer,
-    AndroidViewer,
-    Simulator,
     NotificationsConfig,
     DevicesManager,
     BackupManager,
@@ -67,18 +49,10 @@ interface SubTabItem {
             Ustawienia Serwera & Konfiguracja Usług Systemowych
           </h2>
           <p class="text-xs text-slate-400">
-            Kompletne zarządzanie flotą urządzeń, usługami systemd, bramką Sonoff Dongle Max, kodem źródłowym oraz aplikacją Android (.APK).
+            Zarządzanie urządzeniami, powiadomieniami i kopią zapasową.
           </p>
         </div>
 
-        <a
-          href="/api/files/SimpleHomeTelemetry.apk"
-          download="SimpleHomeTelemetry.apk"
-          class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-950/40 transition-all cursor-pointer shrink-0"
-        >
-          <mat-icon class="text-sm !w-4 !h-4">android</mat-icon>
-          <span>Pobierz Aplikację Android (.APK) ↗</span>
-        </a>
       </div>
 
       <!-- KAFELKI POD SOBĄ Z PODZAKŁADKAMI (Zamiast niewygodnego poziomego paska) -->
@@ -166,24 +140,6 @@ interface SubTabItem {
             @case ('devices') {
               <app-devices-manager></app-devices-manager>
             }
-            @case ('installer') {
-              <app-installer-view></app-installer-view>
-            }
-            @case ('catalog') {
-              <app-device-catalog></app-device-catalog>
-            }
-            @case ('dongle-max') {
-              <app-dongle-max></app-dongle-max>
-            }
-            @case ('code') {
-              <app-code-viewer></app-code-viewer>
-            }
-            @case ('android') {
-              <app-android-viewer></app-android-viewer>
-            }
-            @case ('simulator') {
-              <app-simulator></app-simulator>
-            }
             @case ('notifications') {
               <app-notifications-config></app-notifications-config>
             }
@@ -231,50 +187,6 @@ export class ServerSettings {
         icon: 'settings_backup_restore',
         badge: 'Eksport/Import',
         badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
-      },
-      {
-        id: 'installer',
-        title: 'Instalator & Usługi w tle',
-        subtitle: 'Status procesów systemd, porty sieciowe, restarty demonów',
-        icon: 'terminal',
-        badge: 'systemd',
-        badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
-      },
-      {
-        id: 'catalog',
-        title: 'Katalog Sonoff & Tuya',
-        subtitle: 'Baza wspieranych czujników, głowic TRVZB, wentylatorów i smart plugów',
-        icon: 'hub',
-        badge: 'Zigbee/Wi-Fi',
-        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-      },
-      {
-        id: 'dongle-max',
-        title: 'Dongle Max (Sieć & Wi-Fi)',
-        subtitle: 'Tryb Ember EFR32MG24, punkt dostępowy SoftAP i konfiguracja TCP',
-        icon: 'router',
-        badge: 'TCP 6638',
-        badgeClass: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-      },
-      {
-        id: 'code',
-        title: 'Pliki Python & Wdrożenie',
-        subtitle: 'Podgląd skryptów mostka TinyTuya, backendu MQTT i instalatora',
-        icon: 'code',
-      },
-      {
-        id: 'android',
-        title: 'Aplikacja Android (.APK)',
-        subtitle: 'Natywna aplikacja z powiadomieniami push i usługą foreground',
-        icon: 'android',
-        badge: '.APK',
-        badgeClass: 'bg-teal-500/20 text-teal-300 border-teal-500/40',
-      },
-      {
-        id: 'simulator',
-        title: 'Konsola Testowa',
-        subtitle: 'Wstrzykiwanie testowych pakietów telemetrii i weryfikacja wykresów',
-        icon: 'tune',
       },
       {
         id: 'notifications',
