@@ -1,558 +1,289 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Zigbee Sonoff Dongle Max (Dongle-M) & Zigbee2MQTT + Mosquitto Auto-Installer
+# SimpleHomeTelemetry — instalator / aktualizator panelu (Debian / Ubuntu / Raspberry Pi OS, LXC)
+#
+# Użycie (z katalogu repozytorium):
+#   sudo ./install.sh                     # instalacja lub aktualizacja panelu
+#   sudo ./install.sh --with-mosquitto    # dodatkowo zainstaluj broker MQTT (jeśli go nie ma)
+#   sudo ./install.sh --with-z2m          # dodatkowo zainstaluj Zigbee2MQTT (jeśli go nie ma)
+#
+# Zasady:
+#  - Istniejące instalacje Mosquitto i Zigbee2MQTT NIE są modyfikowane (konfiguracja, restarty).
+#  - Panel działa jako osobny użytkownik systemowy "simplehome".
+#  - Kod: /opt/simplehome, dane: /var/lib/simplehome, ustawienia: /etc/simplehome/panel.env
 # ==============================================================================
-# Ten skrypt instaluje i konfiguruje na systemie Linux (Debian, Ubuntu, Raspberry Pi OS, Armbian):
-# 1. Broker MQTT Eclipse Mosquitto (dzialajacy w tle jako usluga systemd na porcie 1883)
-# 2. Node.js LTS (v20+) i menedzer pakietow npm
-# 3. Zigbee2MQTT (zainstalowane w /opt/zigbee2mqtt, dzialajace w tle jako usluga systemd)
-# 4. Sterownik dla koordynatora Sonoff Dongle Max (uklad EFR32MG24 / adapter: ember)
-#    z obsluga polaczenia sieciowego (tcp://Dongle-M.local:6638) lub portu USB (/dev/ttyACM0)
-# 5. Serwer panelu telemetrycznego IoT z baza SQLite
-# ==============================================================================
+set -euo pipefail
 
-set -e
+APP_USER="simplehome"
+APP_DIR="/opt/simplehome"
+DATA_DIR="/var/lib/simplehome"
+CONF_DIR="/etc/simplehome"
+ENV_FILE="${CONF_DIR}/panel.env"
+SERVICE="simplehome"
+NODE_MAJOR=22
+NODE_MIN_MINOR=13 # node:sqlite bez flagi od 22.13
 
-# Kolory wyjscia terminala
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "${CYAN}====================================================================${NC}"
-echo -e "${CYAN}   AUTOMATYCZNY INSTALATOR: ZIGBEE2MQTT + MOSQUITTO BROKER + PANEL   ${NC}"
-echo -e "${CYAN}   Dla koordynatora Sonoff Dongle Max (uklad Silicon Labs EFR32MG24) ${NC}"
-echo -e "${CYAN}====================================================================${NC}\n"
-
-# 1. Weryfikacja uprawnien root / sudo
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}[BLAD] Prosze uruchomic ten skrypt z uprawnieniami roota (sudo bash install.sh)${NC}"
-  exit 1
-fi
-
-REAL_USER=${SUDO_USER:-$USER}
-USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
-INITIAL_DIR="$(pwd)"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Parsowanie argumentow uruchomieniowych (np. --reconfigure)
-RECONFIGURE=false
+WITH_MOSQUITTO=false
+WITH_Z2M=false
+MOSQUITTO_INSTALLED_NOW=false
+Z2M_INSTALLED_NOW=false
 for arg in "$@"; do
-  if [ "$arg" = "--reconfigure" ]; then
-    RECONFIGURE=true
-  fi
+  case "$arg" in
+    --with-mosquitto) WITH_MOSQUITTO=true ;;
+    --with-z2m) WITH_Z2M=true ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    *) echo "Nieznana opcja: $arg"; exit 1 ;;
+  esac
 done
 
-# Weryfikacja stanu dzialajacej uslugi Zigbee2MQTT i zapisanego portu koordynatora
-Z2M_CONF_PATH="/opt/zigbee2mqtt/data/configuration.yaml"
-Z2M_CURRENT_PORT=""
-if [ -f "$Z2M_CONF_PATH" ]; then
-  Z2M_CURRENT_PORT=$(grep -E '^\s*port:' "$Z2M_CONF_PATH" | head -n 1 | awk '{print $2}' | tr -d '"'\'' ')
-fi
+c_ok() { echo -e "\033[0;32m[OK]\033[0m $*"; }
+c_info() { echo -e "\033[0;36m[..]\033[0m $*"; }
+c_warn() { echo -e "\033[1;33m[!!]\033[0m $*"; }
+die() { echo -e "\033[0;31m[BŁĄD]\033[0m $*" >&2; exit 1; }
 
-Z2M_ALREADY_ACTIVE=false
-if [ -f "/opt/zigbee2mqtt/index.js" ] && systemctl is-active --quiet zigbee2mqtt.service 2>/dev/null; then
-  Z2M_ALREADY_ACTIVE=true
-fi
+[ "$(id -u)" -eq 0 ] || die "Uruchom jako root: sudo ./install.sh"
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SRC_DIR/package.json" ] && [ -f "$SRC_DIR/src/server.ts" ] || die "Uruchom skrypt z katalogu repozytorium SimpleHomeTelemetry."
 
-# Automatyczne wylaczenie uciazliwych zapytan o telemetrie Google / Angular Analytics (domyslnie N / enter)
-export NG_CLI_ANALYTICS=false
+gen_secret() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24; }
 
-for CONF_HOME in "$USER_HOME" "/root"; do
-  if [ -n "$CONF_HOME" ] && [ -d "$CONF_HOME" ]; then
-    mkdir -p "$CONF_HOME/.config/configstore" 2>/dev/null || true
-    cat << 'EOF' > "$CONF_HOME/.angular-config.json"
-{
-  "version": 1,
-  "cli": {
-    "analytics": false
-  }
+# ------------------------------------------------------------------------------
+# 1. Pakiety systemowe i Node.js
+# ------------------------------------------------------------------------------
+c_info "Instalacja pakietów bazowych..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y >/dev/null
+apt-get install -y --no-install-recommends ca-certificates curl gnupg git rsync >/dev/null
+
+node_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  local v major minor
+  v="$(node -v | tr -d v)"
+  major="${v%%.*}"
+  minor="$(echo "$v" | cut -d. -f2)"
+  [ "$major" -gt "$NODE_MAJOR" ] || { [ "$major" -eq "$NODE_MAJOR" ] && [ "$minor" -ge "$NODE_MIN_MINOR" ]; }
 }
-EOF
-    if [ "$CONF_HOME" = "$USER_HOME" ]; then
-      chown -R "$REAL_USER":"$REAL_USER" "$CONF_HOME/.angular-config.json" 2>/dev/null || true
-    fi
-  fi
-done
 
-# Wykrywanie katalogu zrodlowego panelu telemetrycznego (musi zawierac src/server.ts)
-PANEL_SOURCE=""
-if [ -f "$SCRIPT_DIR/src/server.ts" ]; then
-  PANEL_SOURCE="$SCRIPT_DIR"
-elif [ -f "$INITIAL_DIR/src/server.ts" ]; then
-  PANEL_SOURCE="$INITIAL_DIR"
-elif [ -f "$(pwd)/src/server.ts" ]; then
-  PANEL_SOURCE="$(pwd)"
-elif [ -f "/app/applet/src/server.ts" ]; then
-  PANEL_SOURCE="/app/applet"
-elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ]; then
-  PANEL_SOURCE="/root/SimpleHomeTelemetry"
-elif [ -n "$USER_HOME" ] && [ -f "$USER_HOME/SimpleHomeTelemetry/src/server.ts" ]; then
-  PANEL_SOURCE="$USER_HOME/SimpleHomeTelemetry"
-fi
-
-# ==============================================================================
-# 0. Czyszczenie srodowiska ze starych, zawieszonych procesow i konfliktow
-# (Z zachowaniem bazy danych sparowanych urzadzen /opt/zigbee2mqtt/data/database.db)
-# ==============================================================================
-echo -e "${YELLOW}[CZYSZCZENIE] Zatrzymywanie uslug i zwalnianie portow (1883, 8080, 3000)...${NC}"
-systemctl stop iot-telemetry.service 2>/dev/null || true
-if [ "$Z2M_ALREADY_ACTIVE" = "true" ]; then
-  echo -e "${GREEN}[OK] Usluga zigbee2mqtt jest aktywna – pomijam jej zatrzymywanie podczas aktualizacji panelu.${NC}"
-else
-  systemctl stop zigbee2mqtt.service 2>/dev/null || true
-fi
-
-# Bezpieczne zakonczenie ew. zawieszonych procesow node lub mosquitto
-pkill -f "dist/app/server/server.mjs" 2>/dev/null || true
-pkill -f "opt/zigbee-telemetry-panel" 2>/dev/null || true
-
-# Zabezpieczenie bazy danych Zigbee2MQTT przed czyszczeniem
-if [ -f "/opt/zigbee2mqtt/data/database.db" ]; then
-  echo -e "${GREEN}[BEZPIECZENSTWO] Zachowano baze sparowanych urzadzen Zigbee: /opt/zigbee2mqtt/data/database.db${NC}"
-  cp /opt/zigbee2mqtt/data/database.db /opt/zigbee2mqtt/data/database.db.autobak 2>/dev/null || true
-fi
-
-echo -e "${YELLOW}[1/7] Aktualizacja repozytoriow systemowych i instalacja narzedzi bazowych...${NC}"
-apt-get update -y
-apt-get install -y curl wget git gnupg gpg ca-certificates build-essential sqlite3 libsqlite3-dev socat ufw avahi-daemon libnss-mdns rsync
-systemctl enable avahi-daemon 2>/dev/null || true
-systemctl restart avahi-daemon 2>/dev/null || true
-
-# 2. Instalacja i konfiguracja brokera Mosquitto
-echo -e "\n${YELLOW}[2/7] Instalacja i konfiguracja brokera MQTT Eclipse Mosquitto...${NC}"
-apt-get install -y mosquitto mosquitto-clients
-
-# Zapewnienie poprawnych uprawnien i katalogow dla uzytkownika systemowego mosquitto
-mkdir -p /var/log/mosquitto /var/lib/mosquitto /run/mosquitto /etc/mosquitto/conf.d
-chown -R mosquitto:mosquitto /var/log/mosquitto /var/lib/mosquitto 2>/dev/null || true
-
-# Usuniecie starych konfliktowych plikow
-rm -f /etc/mosquitto/conf.d/*.conf.bak 2>/dev/null || true
-
-echo -e "${CYAN}Tworzenie czystej konfiguracji brokera /etc/mosquitto/conf.d/iot-zigbee.conf...${NC}"
-cat << 'EOF' > /etc/mosquitto/conf.d/iot-zigbee.conf
-# Konfiguracja Mosquitto dla sieci IoT Zigbee (wymagane od Mosquitto v2.0+)
-# Glowny plik /etc/mosquitto/mosquitto.conf zawiera juz log_dest oraz persistence.
-# Tutaj definiujemy wylacznie nasluchiwanie na porcie 1883 oraz dostep anonimowy:
-listener 1883
-allow_anonymous true
-EOF
-
-# Weryfikacja skladni konfiguracji Mosquitto przed uruchomieniem
-if mosquitto -c /etc/mosquitto/mosquitto.conf --test >/dev/null 2>&1; then
-  echo -e "${GREEN}[OK] Skladnia konfiguracji Mosquitto jest poprawna.${NC}"
-else
-  echo -e "${YELLOW}[INFO] Konfiguracja Mosquitto utworzona pomyslnie.${NC}"
-fi
-
-systemctl daemon-reload
-systemctl enable mosquitto
-systemctl restart mosquitto
-
-sleep 1
-if systemctl is-active --quiet mosquitto; then
-  echo -e "${GREEN}[OK] Broker Mosquitto MQTT dziala w tle na porcie 1883.${NC}"
-else
-  echo -e "${RED}[BLAD] Usluga mosquitto nie mogla wystartowac. Ostatnie logi systemd:${NC}"
-  journalctl -u mosquitto.service -n 12 --no-pager || true
-  exit 1
-fi
-
-# 3. Instalacja Node.js LTS
-echo -e "\n${YELLOW}[3/7] Sprawdzanie i instalacja srodowiska Node.js LTS...${NC}"
-if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d'.' -f1 | tr -d 'v')" -lt 18 ]; then
-  echo -e "${CYAN}Instalacja Node.js LTS (wersja 20.x)...${NC}"
-  apt-get install -y gnupg gpg ca-certificates curl
+if ! node_ok; then
+  c_info "Instalacja Node.js ${NODE_MAJOR}.x (NodeSource)..."
   mkdir -p /etc/apt/keyrings
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg --yes
-  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
-  apt-get update -y
-  apt-get install -y nodejs
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+  apt-get update -y >/dev/null
+  apt-get install -y nodejs >/dev/null
 fi
+node_ok || die "Wymagany Node.js >= ${NODE_MAJOR}.${NODE_MIN_MINOR} (jest: $(node -v 2>/dev/null || echo brak))."
+NODE_BIN="$(command -v node)"
+c_ok "Node.js $(node -v)"
 
-NODE_VER=$(node -v)
-NPM_VER=$(npm -v)
-echo -e "${GREEN}[OK] Zainstalowano Node.js: ${NODE_VER}, npm: ${NPM_VER}${NC}"
-
-# 4. Wybor lub automatyczne odczytanie zapisanego portu koordynatora Sonoff Dongle Max
-echo -e "\n${YELLOW}[4/7] Konfiguracja polaczenia z koordynatorem Sonoff Dongle Max...${NC}"
-
-DETECTED_DONGLE_PORT=""
-
-# a) /etc/default/zigbee-dongle
-if [ -f "/etc/default/zigbee-dongle" ]; then
-  DETECTED_DONGLE_PORT=$(grep -E '^\s*DONGLE_PORT=' /etc/default/zigbee-dongle | head -n 1 | cut -d'=' -f2- | tr -d '"'\'' ')
-fi
-
-# b) /opt/zigbee-telemetry-panel/dongle_max_config.json
-if [ -z "$DETECTED_DONGLE_PORT" ] && [ -f "/opt/zigbee-telemetry-panel/dongle_max_config.json" ]; then
-  DETECTED_DONGLE_PORT=$(node -e "
-    try {
-      const cfg = JSON.parse(require('fs').readFileSync('/opt/zigbee-telemetry-panel/dongle_max_config.json', 'utf8'));
-      if (cfg.connection_mode === 'usb' && cfg.serial_port) {
-        console.log(cfg.serial_port.trim());
-      } else if (cfg.host) {
-        console.log('tcp://' + cfg.host.trim() + ':' + (cfg.port || 6638));
-      }
-    } catch {}
-  " 2>/dev/null || true)
-fi
-
-# c) /opt/zigbee2mqtt/data/configuration.yaml
-if [ -z "$DETECTED_DONGLE_PORT" ] && [ -f "/opt/zigbee2mqtt/data/configuration.yaml" ]; then
-  DETECTED_DONGLE_PORT=$(node -e "
-    try {
-      const yaml = require('fs').readFileSync('/opt/zigbee2mqtt/data/configuration.yaml', 'utf8');
-      const m = yaml.match(/serial:[\s\S]*?port:\s*([^\r\n#]+)/);
-      if (m && m[1]) console.log(m[1].trim().replace(/^['\"]|['\"]$/g, ''));
-    } catch {}
-  " 2>/dev/null || grep -E '^\s*port:' /opt/zigbee2mqtt/data/configuration.yaml | head -n 1 | awk '{print $2}' | tr -d '"'\'' ')
-fi
-
-if [ -n "$DETECTED_DONGLE_PORT" ] && [ "$RECONFIGURE" != "true" ]; then
-  DONGLE_PORT="$DETECTED_DONGLE_PORT"
-  echo -e "${GREEN}[OK] Wykryto zapisaną na serwerze konfigurację Dongle-M: ${DONGLE_PORT} (pomijam wybór ręczny)${NC}"
-else
-  echo -e "Wybierz metode podlaczenia dongla:"
-  echo -e "  1) Polaczenie sieciowe TCP (Ethernet / PoE / Wi-Fi) -> tcp://Dongle-M.local:6638 [ZALECANE]"
-  echo -e "  2) Port USB bezposrednio wpiety do tego komputera -> /dev/ttyACM0"
-  echo -e "  3) Wprowadz niestandardowy adres IP/port (np. tcp://192.168.1.120:6638)"
-
-  DONGLE_CHOICE=""
-  read -t 20 -rp "Twoj wybor [1/2/3, domyslnie 1]: " DONGLE_CHOICE || DONGLE_CHOICE=1
-  DONGLE_CHOICE=${DONGLE_CHOICE:-1}
-
-  if [ "$DONGLE_CHOICE" -eq 1 ]; then
-    DONGLE_PORT="tcp://Dongle-M.local:6638"
-    if ! getent hosts Dongle-M.local >/dev/null 2>&1 && ! ping -c 1 -W 1 Dongle-M.local >/dev/null 2>&1; then
-      echo -e "${YELLOW}[INFO] Nazwa 'Dongle-M.local' nie odpowiada jeszcze w sieci lokalnej.${NC}"
-      MANUAL_IP=""
-      read -t 20 -rp "Jesli znasz bezposredni adres IP Dongla (np. 10.0.0.50), podaj go teraz [pozostaw puste dla Dongle-M.local]: " MANUAL_IP || MANUAL_IP=""
-      if [ -n "$MANUAL_IP" ]; then
-        MANUAL_IP=$(echo "$MANUAL_IP" | sed -e 's|^tcp://||' -e 's|:6638$||')
-        DONGLE_PORT="tcp://${MANUAL_IP}:6638"
-      fi
-    fi
-  elif [ "$DONGLE_CHOICE" -eq 2 ]; then
-    if [ -e "/dev/ttyACM0" ]; then
-      DONGLE_PORT="/dev/ttyACM0"
-    else
-      DONGLE_PORT=$(ls /dev/serial/by-id/usb-Silicon_Labs* 2>/dev/null || echo "/dev/ttyACM0")
-    fi
-    usermod -aG dialout "$REAL_USER" || true
+# ------------------------------------------------------------------------------
+# 2. Mosquitto (opcjonalnie, tylko jeśli nie ma)
+# ------------------------------------------------------------------------------
+MQTT_USER_PANEL=""
+MQTT_PASS_PANEL=""
+MQTT_USER_Z2M=""
+MQTT_PASS_Z2M=""
+if $WITH_MOSQUITTO; then
+  if command -v mosquitto >/dev/null 2>&1; then
+    c_warn "Mosquitto jest już zainstalowany — pomijam (konfiguracja bez zmian)."
   else
-    CUSTOM_PORT=""
-    read -t 20 -rp "Podaj pelny ciag polaczenia (np. tcp://192.168.1.50:6638): " CUSTOM_PORT || CUSTOM_PORT="tcp://Dongle-M.local:6638"
-    CUSTOM_PORT=${CUSTOM_PORT:-"tcp://Dongle-M.local:6638"}
-    if [[ ! "$CUSTOM_PORT" =~ ^/dev/ ]] && [[ ! "$CUSTOM_PORT" =~ ^tcp:// ]]; then
-      CUSTOM_PORT="tcp://${CUSTOM_PORT}"
-    fi
-    DONGLE_PORT="$CUSTOM_PORT"
+    c_info "Instalacja Mosquitto z logowaniem użytkowników..."
+    apt-get install -y mosquitto mosquitto-clients >/dev/null
+    MQTT_USER_PANEL="simplehome"; MQTT_PASS_PANEL="$(gen_secret)"
+    MQTT_USER_Z2M="zigbee2mqtt"; MQTT_PASS_Z2M="$(gen_secret)"
+    touch /etc/mosquitto/passwd
+    mosquitto_passwd -b /etc/mosquitto/passwd "$MQTT_USER_PANEL" "$MQTT_PASS_PANEL"
+    mosquitto_passwd -b /etc/mosquitto/passwd "$MQTT_USER_Z2M" "$MQTT_PASS_Z2M"
+    chown mosquitto:mosquitto /etc/mosquitto/passwd
+    chmod 600 /etc/mosquitto/passwd
+    cat > /etc/mosquitto/conf.d/simplehome.conf <<'EOF'
+listener 1883
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+EOF
+    systemctl enable --now mosquitto >/dev/null
+    systemctl restart mosquitto
+    MOSQUITTO_INSTALLED_NOW=true
+    c_ok "Mosquitto działa na porcie 1883 (logowanie wymagane)."
   fi
-  echo -e "${GREEN}[OK] Wybrano port koordynatora: ${DONGLE_PORT}${NC}"
 fi
 
-# Trwaly zapis konfiguracji koordynatora do /etc/default/zigbee-dongle oraz dongle_max_config.json
-mkdir -p /etc/default
-echo "DONGLE_PORT=\"${DONGLE_PORT}\"" > /etc/default/zigbee-dongle
+# ------------------------------------------------------------------------------
+# 3. Zigbee2MQTT (opcjonalnie, tylko jeśli nie ma)
+# ------------------------------------------------------------------------------
+if $WITH_Z2M; then
+  if [ -d /opt/zigbee2mqtt ]; then
+    c_warn "Zigbee2MQTT już istnieje w /opt/zigbee2mqtt — pomijam (konfiguracja bez zmian)."
+  else
+    read -rp "Port koordynatora (np. tcp://192.168.1.50:6638 lub /dev/ttyACM0): " Z2M_PORT
+    [ -n "$Z2M_PORT" ] || die "Nie podano portu koordynatora."
+    read -rp "Adapter [ember]: " Z2M_ADAPTER
+    Z2M_ADAPTER="${Z2M_ADAPTER:-ember}"
 
-mkdir -p /opt/zigbee-telemetry-panel
-node -e "
-  const fs = require('fs');
-  const path = '/opt/zigbee-telemetry-panel/dongle_max_config.json';
-  let cfg = {};
-  if (fs.existsSync(path)) {
-    try { cfg = JSON.parse(fs.readFileSync(path, 'utf8')); } catch {}
-  }
-  const portStr = '${DONGLE_PORT}';
-  if (portStr.startsWith('tcp://')) {
-    cfg.connection_mode = 'network';
-    const clean = portStr.replace('tcp://', '');
-    const parts = clean.split(':');
-    cfg.host = parts[0] || 'Dongle-M.local';
-    cfg.port = parts[1] ? parseInt(parts[1], 10) : 6638;
-  } else {
-    cfg.connection_mode = 'usb';
-    cfg.serial_port = portStr;
-  }
-  fs.writeFileSync(path, JSON.stringify(cfg, null, 2), 'utf8');
-" 2>/dev/null || true
-
-# 5. Instalacja lub weryfikacja istniejacego Zigbee2MQTT w /opt/zigbee2mqtt
-echo -e "\n${YELLOW}[5/7] Sprawdzanie i konfiguracja Zigbee2MQTT w /opt/zigbee2mqtt...${NC}"
-
-if [ -f "/opt/zigbee2mqtt/index.js" ]; then
-  echo -e "${GREEN}[OK] Wykryto juz zainstalowana instancje Zigbee2MQTT w /opt/zigbee2mqtt.${NC}"
-  echo -e "${CYAN}Weryfikacja konfiguracji koordynatora Sonoff Dongle-M (adapter: ember, port: ${DONGLE_PORT})...${NC}"
-else
-  # Instalacja pnpm (oficjalny menedzer pakietow dla Zigbee2MQTT v2)
-  if ! command -v pnpm >/dev/null 2>&1; then
-    echo -e "${CYAN}Instalacja menedzera pnpm (rekomendowany przez Zigbee2MQTT)...${NC}"
-    npm install -g pnpm || true
-  fi
-
-  mkdir -p /opt/zigbee2mqtt
-  chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
-
-  if [ ! -d "/opt/zigbee2mqtt/.git" ]; then
+    c_info "Instalacja Zigbee2MQTT (git + pnpm + build)..."
+    id zigbee2mqtt >/dev/null 2>&1 || useradd --system --home /opt/zigbee2mqtt --shell /usr/sbin/nologin --groups dialout zigbee2mqtt
+    command -v pnpm >/dev/null 2>&1 || npm install -g pnpm >/dev/null
     git clone --depth 1 https://github.com/Koenkk/zigbee2mqtt.git /opt/zigbee2mqtt
-  fi
+    chown -R zigbee2mqtt:zigbee2mqtt /opt/zigbee2mqtt
+    (cd /opt/zigbee2mqtt && sudo -u zigbee2mqtt pnpm install --frozen-lockfile && sudo -u zigbee2mqtt pnpm run build)
 
-  chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt
-  cd /opt/zigbee2mqtt
-
-  echo -e "${CYAN}Pobieranie i instalacja zaleznosci Zigbee2MQTT...${NC}"
-  if command -v pnpm >/dev/null 2>&1; then
-    sudo -u "$REAL_USER" pnpm install --frozen-lockfile || sudo -u "$REAL_USER" pnpm install
-  else
-    sudo -u "$REAL_USER" npm install --no-audit --no-fund
-  fi
-fi
-
-# Przygotowanie lub aktualizacja konfiguracji Zigbee2MQTT
-mkdir -p /opt/zigbee2mqtt/data
-Z2M_CONF="/opt/zigbee2mqtt/data/configuration.yaml"
-
-if [ -f "$Z2M_CONF" ]; then
-  echo -e "${CYAN}Wykryto istniejacy plik configuration.yaml. Sprawdzanie i naprawa parametrow...${NC}"
-  cp "$Z2M_CONF" "${Z2M_CONF}.bak" 2>/dev/null || true
-
-  # Bezpieczna aktualizacja configuration.yaml z uzyciem Node.js bez uszkadzania frontend/port
-  node -e "
-    const fs = require('fs');
-    const path = '$Z2M_CONF';
-    let c = fs.readFileSync(path, 'utf8');
-
-    // 1. Sekcja serial (adapter: ember oraz port koordynatora)
-    if (!c.includes('serial:')) {
-      c += '\nserial:\n  port: \"$DONGLE_PORT\"\n  adapter: ember\n  baudrate: 115200\n';
-    } else {
-      if (!c.includes('adapter: ember')) {
-        c = c.replace(/(serial:\s*\n)/, '\$1  adapter: ember\n');
-      }
-      c = c.replace(/(serial:[\s\S]*?port:\s*)([^\r\n]+)/, (m, p) => p + '\"$DONGLE_PORT\"');
-    }
-
-    // 2. Sekcja frontend (port musi byc czysta liczba 8080, nie string / url)
-    if (!c.includes('frontend:')) {
-      c += '\nfrontend:\n  port: 8080\n  host: 0.0.0.0\n';
-    } else {
-      c = c.replace(/(frontend:[\s\S]*?port:\s*)([^\r\n]+)/, (m, p) => p + '8080');
-      if (!c.includes('host: 0.0.0.0')) {
-        c = c.replace(/(frontend:\s*\n)/, '\$1  host: 0.0.0.0\n');
-      }
-    }
-
-    // 3. Sekcja mqtt
-    if (!c.includes('mqtt:')) {
-      c += '\nmqtt:\n  base_topic: zigbee2mqtt\n  server: \"mqtt://localhost:1883\"\n';
-    }
-
-    fs.writeFileSync(path, c, 'utf8');
-  "
-  echo -e "${GREEN}[OK] Konfiguracja Zigbee2MQTT zweryfikowana: serial.port='${DONGLE_PORT}', serial.adapter='ember', frontend.port=8080.${NC}"
-else
-  echo -e "${CYAN}Tworzenie nowej zoptymalizowanej konfiguracji Zigbee2MQTT...${NC}"
-  cat << EOF > "$Z2M_CONF"
-homeassistant: false
-permit_join: false
-
+    MQTT_AUTH_YAML=""
+    if [ -n "$MQTT_USER_Z2M" ]; then
+      MQTT_AUTH_YAML="  user: ${MQTT_USER_Z2M}
+  password: ${MQTT_PASS_Z2M}"
+    fi
+    mkdir -p /opt/zigbee2mqtt/data
+    cat > /opt/zigbee2mqtt/data/configuration.yaml <<EOF
+version: 4
+homeassistant:
+  enabled: false
 mqtt:
   base_topic: zigbee2mqtt
-  server: 'mqtt://localhost:1883'
-
+  server: mqtt://localhost:1883
+${MQTT_AUTH_YAML}
 serial:
-  port: '${DONGLE_PORT}'
-  adapter: ember
-  baudrate: 115200
-
+  port: ${Z2M_PORT}
+  adapter: ${Z2M_ADAPTER}
 frontend:
+  enabled: true
   port: 8080
-  host: 0.0.0.0
-
 advanced:
   network_key: GENERATE
   pan_id: GENERATE
   ext_pan_id: GENERATE
-  channel: 15
-  log_level: info
+availability:
+  enabled: true
 EOF
-fi
+    chown -R zigbee2mqtt:zigbee2mqtt /opt/zigbee2mqtt/data
+    chmod 600 /opt/zigbee2mqtt/data/configuration.yaml
 
-chown -R "$REAL_USER":"$REAL_USER" /opt/zigbee2mqtt/data
-
-# 6. Utworzenie uslugi systemd dla Zigbee2MQTT
-echo -e "\n${YELLOW}[6/7] Konfiguracja uslugi systemd dla Zigbee2MQTT...${NC}"
-cat << EOF > /etc/systemd/system/zigbee2mqtt.service
+    cat > /etc/systemd/system/zigbee2mqtt.service <<EOF
 [Unit]
-Description=Zigbee2MQTT Daemon (Sonoff Dongle Max EFR32MG24)
-After=network.target mosquitto.service
-Wants=mosquitto.service
+Description=Zigbee2MQTT
+After=network-online.target mosquitto.service
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=${REAL_USER}
+User=zigbee2mqtt
 WorkingDirectory=/opt/zigbee2mqtt
-ExecStart=$(which node) index.js
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=zigbee2mqtt
+ExecStart=${NODE_BIN} index.js
 Environment=NODE_ENV=production
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-if [ "$Z2M_ALREADY_ACTIVE" = "true" ] && [ "$Z2M_CURRENT_PORT" = "$DONGLE_PORT" ]; then
-  echo -e "${GREEN}[OK] Zigbee2MQTT już działa na porcie ${DONGLE_PORT} – pozostawiam usługę aktywną bez restartu.${NC}"
-else
-  systemctl daemon-reload
-  systemctl enable zigbee2mqtt
-  systemctl restart zigbee2mqtt
+    systemctl daemon-reload
+    systemctl enable --now zigbee2mqtt
+    Z2M_INSTALLED_NOW=true
+    c_ok "Zigbee2MQTT zainstalowany (frontend na porcie 8080)."
+  fi
 fi
 
-# 7. Konfiguracja i uruchomienie Panelu Telemetrii IoT
-echo -e "\n${YELLOW}[7/7] Konfiguracja i budowanie Panelu Telemetrycznego IoT...${NC}"
-APP_DIR="/opt/zigbee-telemetry-panel"
-mkdir -p "$APP_DIR"
+# ------------------------------------------------------------------------------
+# 4. Budowanie panelu
+# ------------------------------------------------------------------------------
+c_info "Budowanie panelu (npm ci + ng build)..."
+BUILD_OWNER="$(stat -c %U "$SRC_DIR")"
+run_as_owner() { if [ "$BUILD_OWNER" = "root" ]; then bash -c "$1"; else sudo -u "$BUILD_OWNER" bash -c "$1"; fi; }
+run_as_owner "cd '$SRC_DIR' && NG_CLI_ANALYTICS=false npm ci --no-audit --no-fund && NG_CLI_ANALYTICS=false npm run build"
+[ -f "$SRC_DIR/dist/app/server/server.mjs" ] || die "Build nie utworzył dist/app/server/server.mjs."
+c_ok "Zbudowano."
 
-# Kopiowanie i aktualizacja plikow aplikacji do katalogu docelowego /opt/zigbee-telemetry-panel
-if [ -n "$PANEL_SOURCE" ] && [ -d "$PANEL_SOURCE" ] && [ "$PANEL_SOURCE" != "$APP_DIR" ]; then
-  echo -e "${CYAN}Aktualizowanie kodu i plikow panelu z $PANEL_SOURCE do $APP_DIR...${NC}"
-  # Synchronizacja plikow z zachowaniem repozytorium .git oraz bazy danych i konfiguracji uzytkownika
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -av \
-      --exclude='node_modules' \
-      --exclude='dist' \
-      --exclude='devices_cache.json' \
-      --exclude='telemetry_cache.json' \
-      --exclude='dongle_max_config.json' \
-      --exclude='ewelink_config.json' \
-      --exclude='notification_config.json' \
-      --exclude='tuya_config.json' \
-      --exclude='custom_rules.json' \
-      --exclude='*.db' \
-      --exclude='*.db-journal' \
-      "$PANEL_SOURCE/" "$APP_DIR/"
-  else
-    # Fallback gdy brak rsync (tar kopiujacy rowniez .git z pominieciem plikow konfiguracyjnych)
-    (cd "$PANEL_SOURCE" && tar \
-      --exclude='./node_modules' \
-      --exclude='./dist' \
-      --exclude='./devices_cache.json' \
-      --exclude='./telemetry_cache.json' \
-      --exclude='./dongle_max_config.json' \
-      --exclude='./ewelink_config.json' \
-      --exclude='./notification_config.json' \
-      --exclude='./tuya_config.json' \
-      --exclude='./custom_rules.json' \
-      --exclude='./*.db' \
-      --exclude='./*.db-journal' \
-      -cf - .) | (cd "$APP_DIR" && tar -xf -) 2>/dev/null || cp -a "$PANEL_SOURCE"/. "$APP_DIR/" 2>/dev/null || true
-  fi
-  # Jawne uaktualnienie kluczowych plikow konfiguracyjnych (w tym plikow ukrytych)
-  for special_file in .postcssrc.json .angular-config.json angular.json package.json tsconfig.json tsconfig.app.json; do
-    if [ -f "$PANEL_SOURCE/$special_file" ]; then
-      cp -f "$PANEL_SOURCE/$special_file" "$APP_DIR/$special_file" 2>/dev/null || true
-    fi
-  done
-  echo -e "${GREEN}[OK] Pliki panelu w $APP_DIR zostaly pomyslnie zaktualizowane.${NC}"
-elif [ -f "/root/SimpleHomeTelemetry/src/server.ts" ] && [ "/root/SimpleHomeTelemetry" != "$APP_DIR" ]; then
-  echo -e "${CYAN}Aktualizowanie kodu panelu z /root/SimpleHomeTelemetry do $APP_DIR...${NC}"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -av \
-      --exclude='node_modules' \
-      --exclude='dist' \
-      --exclude='devices_cache.json' \
-      --exclude='telemetry_cache.json' \
-      --exclude='dongle_max_config.json' \
-      --exclude='ewelink_config.json' \
-      --exclude='notification_config.json' \
-      --exclude='tuya_config.json' \
-      --exclude='custom_rules.json' \
-      --exclude='*.db' \
-      --exclude='*.db-journal' \
-      /root/SimpleHomeTelemetry/ "$APP_DIR/"
-  else
-    cp -a /root/SimpleHomeTelemetry/. "$APP_DIR/" 2>/dev/null || true
-  fi
-  echo -e "${GREEN}[OK] Pliki panelu w $APP_DIR zostaly zaktualizowane.${NC}"
-fi
+# ------------------------------------------------------------------------------
+# 5. Użytkownik, katalogi, ustawienia
+# ------------------------------------------------------------------------------
+id "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$APP_USER"
+mkdir -p "$APP_DIR" "$DATA_DIR" "$CONF_DIR"
+rsync -a --delete "$SRC_DIR/dist/" "$APP_DIR/dist/"
+chown -R root:root "$APP_DIR"
+chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
+chmod 750 "$DATA_DIR"
 
-cd "$APP_DIR"
-chown -R "$REAL_USER":"$REAL_USER" "$APP_DIR"
+NEW_PASSWORD=""
+if [ ! -f "$ENV_FILE" ]; then
+  NEW_PASSWORD="$(gen_secret)"
+  cat > "$ENV_FILE" <<EOF
+# Ustawienia panelu SimpleHome (po zmianie: systemctl restart ${SERVICE})
+PORT=3000
+HOST=0.0.0.0
+DATA_DIR=${DATA_DIR}
 
-echo -e "${CYAN}Instalacja zaleznosci panelu w $APP_DIR...${NC}"
-# Utworz lub uaktualnij .npmrc w katalogu aplikacji z zezwoleniem na skrypty budowania
-cat << 'EOF' > "$APP_DIR/.npmrc"
-ignored-builds=[]
-side-effects-cache=true
-auto-install-peers=true
+# Logowanie do panelu (HTTP Basic). Puste hasło = brak logowania.
+PANEL_USER=admin
+PANEL_PASSWORD=${NEW_PASSWORD}
+
+# Broker MQTT i temat bazowy Zigbee2MQTT
+MQTT_URL=mqtt://127.0.0.1:1883
+MQTT_TOPIC=zigbee2mqtt
+MQTT_USER=${MQTT_USER_PANEL}
+MQTT_PASSWORD=${MQTT_PASS_PANEL}
+
+# Retencja historii (dni)
+RAW_RETENTION_DAYS=30
+HOURLY_RETENTION_DAYS=730
 EOF
-chown "$REAL_USER":"$REAL_USER" "$APP_DIR/.npmrc" 2>/dev/null || true
-
-# W pnpm / npm upewnij sie, ze instalowane sa rowniez devDependencies (niezbedne do budowania Tailwind i Angular)
-if command -v pnpm >/dev/null 2>&1; then
-  sudo -u "$REAL_USER" pnpm config set ignored-builds '[]' 2>/dev/null || true
-  sudo -u "$REAL_USER" NODE_ENV=development pnpm install --no-frozen-lockfile --ignore-scripts --prod=false || sudo -u "$REAL_USER" pnpm install || ( rm -rf node_modules package-lock.json && sudo -u "$REAL_USER" NODE_ENV=development npm install --include=dev --no-audit --no-fund )
+  c_ok "Utworzono ${ENV_FILE}"
 else
-  sudo -u "$REAL_USER" NODE_ENV=development npm install --include=dev --no-audit --no-fund
+  c_ok "Zachowano istniejące ustawienia ${ENV_FILE}"
+fi
+chown root:"$APP_USER" "$ENV_FILE"
+chmod 640 "$ENV_FILE"
+
+# ------------------------------------------------------------------------------
+# 6. Usługa systemd
+# ------------------------------------------------------------------------------
+# Wyłączenie starej wersji panelu (iot-telemetry.service z /opt/zigbee-telemetry-panel)
+if systemctl list-unit-files 2>/dev/null | grep -q '^iot-telemetry.service'; then
+  c_warn "Wyłączam starą usługę iot-telemetry (stary panel). Katalog /opt/zigbee-telemetry-panel możesz usunąć ręcznie."
+  systemctl disable --now iot-telemetry.service >/dev/null 2>&1 || true
 fi
 
-echo -e "${CYAN}Kompilacja produkcyjna panelu (Angular SSR + Node.js Backend)...${NC}"
-# Automatyczne odrzucenie telemetrii Google (opcja N / enter)
-if command -v pnpm >/dev/null 2>&1; then
-  sudo -u "$REAL_USER" NG_CLI_ANALYTICS=false pnpm run build
-else
-  sudo -u "$REAL_USER" NG_CLI_ANALYTICS=false npm run build
-fi
-
-cat << EOF > /etc/systemd/system/iot-telemetry.service
+cat > "/etc/systemd/system/${SERVICE}.service" <<EOF
 [Unit]
-Description=Zigbee IoT Telemetry Panel & SQLite Backend
-After=network.target mosquitto.service zigbee2mqtt.service
-Wants=mosquitto.service
+Description=SimpleHome Telemetry panel
+After=network-online.target mosquitto.service zigbee2mqtt.service
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=${REAL_USER}
-WorkingDirectory=${APP_DIR}
-Environment="PORT=3000"
-Environment="HOST=0.0.0.0"
-Environment="MQTT_URL=mqtt://127.0.0.1:1883"
-Environment="MQTT_TOPIC=zigbee2mqtt"
-ExecStart=$(which node) ${APP_DIR}/dist/app/server/server.mjs
+User=${APP_USER}
+EnvironmentFile=${ENV_FILE}
+WorkingDirectory=${DATA_DIR}
+ExecStart=${NODE_BIN} --disable-warning=ExperimentalWarning ${APP_DIR}/dist/app/server/server.mjs
 Restart=always
 RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=iot-telemetry
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable iot-telemetry 2>/dev/null || true
-systemctl restart iot-telemetry 2>/dev/null || true
+systemctl enable "$SERVICE" >/dev/null
+systemctl restart "$SERVICE"
+sleep 2
+if systemctl is-active --quiet "$SERVICE"; then
+  c_ok "Panel działa: http://$(hostname -I | awk '{print $1}'):$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2)"
+else
+  journalctl -u "$SERVICE" -n 30 --no-pager || true
+  die "Usługa ${SERVICE} nie wystartowała."
+fi
 
-echo -e "\n${GREEN}====================================================================${NC}"
-echo -e "${GREEN}   INSTALACJA ZAKONCZONA SUKCESEM!                                  ${NC}"
-echo -e "${GREEN}====================================================================${NC}"
-echo -e "Uslugi dzialajace w tle:"
-echo -e "  • ${CYAN}Mosquitto MQTT Broker${NC} : port 1883 (systemctl status mosquitto)"
-echo -e "  • ${CYAN}Zigbee2MQTT Daemon${NC}    : port 8080 (systemctl status zigbee2mqtt)"
-echo -e "  • ${CYAN}Panel IoT & SQLite${NC}    : port 3000 (systemctl status iot-telemetry)"
-echo -e "Koordynator:"
-echo -e "  • ${CYAN}Sonoff Dongle Max${NC}     : ${DONGLE_PORT} (adapter: ember)"
-echo -e "\nAdresy WWW:"
-echo -e "  • Pulpit monitoringu: ${YELLOW}http://$(hostname -I | awk '{print $1}'):3000${NC} lub ${YELLOW}http://localhost:3000${NC}"
-echo -e "  • Frontend Zigbee2MQTT: ${YELLOW}http://$(hostname -I | awk '{print $1}'):8080${NC}"
-echo -e "\nLogi na zywo:"
-echo -e "  journalctl -u zigbee2mqtt -f"
-echo -e "  journalctl -u mosquitto -f"
-echo -e "${GREEN}====================================================================${NC}\n"
+if [ -n "$NEW_PASSWORD" ]; then
+  echo
+  c_ok "Login do panelu: admin"
+  c_ok "Hasło do panelu: ${NEW_PASSWORD}   (zmiana w ${ENV_FILE})"
+fi
+if $MOSQUITTO_INSTALLED_NOW && ! $Z2M_INSTALLED_NOW; then
+  c_warn "Mosquitto wymaga logowania. Dla istniejącego Zigbee2MQTT ustaw w configuration.yaml: mqtt.user=${MQTT_USER_Z2M}, mqtt.password=${MQTT_PASS_Z2M}"
+fi
+echo
+c_info "Logi: journalctl -u ${SERVICE} -f"
+c_info "Aktualizacja: git pull && sudo ./install.sh"

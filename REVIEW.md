@@ -1,5 +1,9 @@
 # Code review — SimpleHomeTelemetry
 
+> **Status:** wszystkie punkty z tego raportu zostały zaadresowane w kolejnych commitach
+> (hotfix → porządki → nowy backend w `src/backend/` → nowy `install.sh`). Szczegóły w README.md.
+> Raport zostaje jako opis stanu sprzed zmian.
+
 Stan na commit `3fc321e`. Wdrożenie produkcyjne to to, co instaluje `install.sh`:
 Mosquitto + Zigbee2MQTT + **serwer Node (`src/server.ts`, Angular SSR, port 3000)** jako usługa `iot-telemetry`.
 Backend w Pythonie (`backend_*.py`, `database.py`, `Dockerfile`, `docker-compose.yml`) **nie jest w ogóle uruchamiany**.
@@ -82,7 +86,7 @@ Lista `exposes` z `bridge/devices` jest w ogóle ignorowana — aplikacja nie wi
 ### 2.4 Odczyt „na żądanie” nie działa
 `requestDeviceSyncAll()` (`server.ts:1149-1176`):
 - publikuje do `bridge/request/devices` i `bridge/config/devices` — **takich endpointów w Z2M nie ma** (lista urządzeń przychodzi sama jako retained `bridge/devices`),
-- do każdego urządzenia wysyła `/get` z `{"state":""}` — czujniki nie mają atrybutu `state`, więc nic nie odpowiada. Poprawny `/get` musi zawierać atrybuty z `exposes`, które mają bit `access & 2` (GET),
+- do każdego urządzenia wysyła `/get` z `{"state":""}` — czujniki nie mają atrybutu `state`, więc nic nie odpowiada. Poprawny `/get` musi zawierać atrybuty z `exposes`, które mają bit GET (`access & 4`),
 - urządzenia bateryjne (śpiące) i tak nie odpowiedzą na `/get` — dla nich jedyne źródło to ostatni retained/zgłoszony stan.
 
 ### 2.5 Status online/offline
@@ -156,7 +160,7 @@ Problemów nie da się sensownie załatać punktowo — logika integracji (Sonof
    - rejestr urządzeń wyłącznie z `bridge/devices` (retained), z `exposes`,
    - stan = pełny ostatni payload (generycznie, bez listy pól), tematy dopasowywane po pełnym `friendly_name`,
    - `availability` jako źródło online/offline,
-   - odczyt na żądanie: `/get` z atrybutami `exposes` mającymi `access & 2`,
+   - odczyt na żądanie: `/get` z atrybutami `exposes` mającymi bit GET (`access & 4`),
    - UI renderuje kafelki z `exposes` zamiast zahardkodowanych pól.
 4. **Adapter Sonoff:** jednorazowe pobranie `deviceid` + `devicekey` z chmury eWeLink, potem nasłuch mDNS `_ewelink._tcp` (stan bez odpytywania) + szyfrowane komendy na 8081, **jedno** zapytanie na komendę, bez skanowania sieci.
 5. **Adapter Tuya:** trwałe połączenie (TuyAPI / tinytuya w jednym procesie), rzeczywiste DP odczytane z urządzenia, mapowanie per model.
