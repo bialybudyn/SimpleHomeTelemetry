@@ -1145,18 +1145,38 @@ function triggerDeviceAlarm(dev: Device, alertType: string, message: string) {
   }
 }
 
+// Znajduje urządzenie Zigbee po pełnej nazwie friendly_name lub adresie IEEE
+function findZ2mDeviceByName(name: string): Device | undefined {
+  for (const d of devices.values()) {
+    if (isWifiDevice(d)) continue;
+    if (d.friendly_name === name || d.ieee_address === name) return d;
+  }
+  return undefined;
+}
+
+// Rozbija temat "<friendly_name>[/<reszta>]" z uwzględnieniem nazw zawierających "/".
+// Wybiera najdłuższe pasujące friendly_name.
+function resolveZ2mTopic(subtopic: string): { name: string; rest: string } | null {
+  let best: string | null = null;
+  for (const d of devices.values()) {
+    if (isWifiDevice(d)) continue;
+    for (const candidate of [d.friendly_name, d.ieee_address]) {
+      if (!candidate) continue;
+      if (subtopic === candidate || subtopic.startsWith(candidate + '/')) {
+        if (!best || candidate.length > best.length) best = candidate;
+      }
+    }
+  }
+  if (!best) return null;
+  return { name: best, rest: subtopic.slice(best.length).replace(/^\//, '') };
+}
+
 // Helper do wymuszenia odczytu stanu ze wszystkich urzadzen Zigbee2MQTT
 function requestDeviceSyncAll() {
   if (!mqttClient || !mqttStatus.connected) return;
   const prefix = mqttStatus.topic_prefix || 'zigbee2mqtt';
 
-  // 1. Zażądaj pełnej listy urządzeń i definicji z mostka Z2M (kompatybilność v1 oraz v2)
-  try {
-    mqttClient.publish(`${prefix}/bridge/request/devices`, '{}');
-    mqttClient.publish(`${prefix}/bridge/config/devices`, '{}');
-  } catch (err) {
-    console.warn('[MQTT] Błąd publikacji bridge/request/devices:', err);
-  }
+  // Lista urządzeń przychodzi automatycznie jako retained "bridge/devices" — nie ma potrzeby o nią prosić.
 
   // 2. Dla każdego znanego urządzenia Zigbee wyślij ukierunkowane zapytanie /get o stan
   devices.forEach((dev) => {
@@ -1417,10 +1437,40 @@ interface Z2mDeviceItem {
       // 5. Ignoruj inne tematy techniczne bridge
       if (subtopic.startsWith('bridge/')) return;
 
-      // 6. Odczyt telemetrii z czujnika (topic: zigbee2mqtt/<device_name_or_ieee>)
+      // 6. Dostępność urządzenia (zigbee2mqtt/<friendly_name>/availability) — NIE jest to telemetria.
+      // Wcześniej payload {"state":"online"} nadpisywał stan ON/OFF przekaźników.
+      if (subtopic.endsWith('/availability')) {
+        const availName = subtopic.slice(0, -'/availability'.length);
+        const rawAvail = message.toString().trim();
+        let online: boolean | null = null;
+        try {
+          const parsedAvail = JSON.parse(rawAvail);
+          if (parsedAvail && typeof parsedAvail === 'object' && typeof parsedAvail.state === 'string') {
+            online = parsedAvail.state === 'online';
+          }
+        } catch {
+          if (rawAvail === 'online') online = true;
+          else if (rawAvail === 'offline') online = false;
+        }
+        const availDev = findZ2mDeviceByName(availName);
+        if (availDev && online !== null) {
+          availDev.connection_status = online ? 'online' : 'offline';
+          broadcastEvent({ type: 'device_updated', device: availDev });
+          triggerSaveDevices();
+        }
+        return;
+      }
+
+      // 7. Odczyt telemetrii z czujnika (topic: zigbee2mqtt/<friendly_name>[/<atrybut>])
+      // friendly_name może zawierać ukośniki (np. "salon/termometr"), więc dopasowujemy pełną nazwę.
       try {
-        const topicParts = subtopic.split('/');
-        const baseTopic = topicParts[0].trim();
+        const resolvedDev = resolveZ2mTopic(subtopic);
+        if (!resolvedDev) {
+          // Nieznane urządzenie — nie tworzymy "duchów". Lista urządzeń przychodzi z bridge/devices.
+          return;
+        }
+        const baseTopic = resolvedDev.name;
+        const topicParts = [baseTopic, ...(resolvedDev.rest ? resolvedDev.rest.split('/') : [])];
 
         // Ignoruj powiadomienia komend wyjsciowych /get i /set
         if (topicParts.length > 1 && (topicParts[1] === 'get' || topicParts[1] === 'set')) {
@@ -3830,13 +3880,6 @@ async function performDongleMaxAutoDiscovery(customSubnet?: string, customIps?: 
   console.log('[AUTO-DISCOVERY] Uruchamianie automatycznego skanowania podsieci DongleMAX & Zigbee Mesh...');
 
   // 1. Wyślij zapytanie do Zigbee2MQTT o listę sparowanych urządzeń Zigbee z Dongle MAX
-  if (mqttClient && mqttStatus.connected) {
-    try {
-      mqttClient.publish(`${mqttStatus.topic_prefix}/bridge/request/devices`, '');
-    } catch {
-      // ignore
-    }
-  }
 
   const newlyDiscovered: Device[] = [];
   const allDetectedMap = new Map<string, {
@@ -3979,17 +4022,13 @@ async function performDongleMaxAutoDiscovery(customSubnet?: string, customIps?: 
               connection_status: 'online',
               last_error: null,
               battery: null,
-              linkquality: 100,
+              linkquality: null,
               last_temperature: null,
               last_humidity: null,
-              state: found.switch === 'on' ? 'ON' : 'OFF',
-              power: found.power ?? (found.switch === 'on' ? 140 : 0),
-              voltage: found.voltage ?? 230,
-              current: found.current ?? (found.switch === 'on' ? 0.6 : 0),
-              energy: 0.1,
-              overload_protection: true,
-              overload_power_threshold: 4000,
-              overload_current_threshold: 16,
+              state: found.switch === 'on' ? 'ON' : found.switch === 'off' ? 'OFF' : undefined,
+              power: found.power ?? null,
+              voltage: found.voltage ?? null,
+              current: found.current ?? null,
             };
             devices.set(ieee, newPlug);
             newlyDiscovered.push(newPlug);
@@ -4044,10 +4083,9 @@ app.post(['/api/dongle-max/auto-discover', '/api/devices/scan-donglemax-subnet']
   }
 });
 
-// Automatyczny cykl skanowania w tle co 45 sekund
-setInterval(() => {
-  performDongleMaxAutoDiscovery().catch(() => {});
-}, 45000);
+// HOTFIX: automatyczne skanowanie sieci co 45 s zostało wyłączone.
+// Zalewało gniazdka Sonoff (ESP) zapytaniami HTTP i blokowało ich komunikację z chmurą eWeLink.
+// Skanowanie jest dostępne wyłącznie ręcznie przez POST /api/dongle-max/auto-discover.
 
 // Endpointy konfiguracji powiadomień SMTP i Telegram
 app.get('/api/notifications/config', (_req: Request, res: Response) => {
