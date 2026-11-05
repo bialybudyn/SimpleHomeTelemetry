@@ -3,7 +3,8 @@ import type { Backend } from '../context';
 import { sonoffId } from '../drivers/sonoff';
 import { tuyaId } from '../drivers/tuya';
 import { DEFAULT_PLUG_DP_MAP } from '../drivers/tuya-protocol';
-import { ewelinkImportDevices } from '../drivers/ewelink-cloud';
+import { randomBytes } from 'node:crypto';
+import { ewelinkExchangeCode, ewelinkListDevices, ewelinkOauthUrl, type EwelinkCloudDevice } from '../drivers/ewelink-cloud';
 import { checkTuyaQrStatus, generateTuyaQrCode } from '../drivers/tuya-cloud';
 import { SECRET_MASK } from '../notifications';
 import type { Device, DeviceCategory } from '../../app/models/telemetry.models';
@@ -11,8 +12,8 @@ import type { Device, DeviceCategory } from '../../app/models/telemetry.models';
 interface EwelinkSettings {
   app_id?: string;
   app_secret?: string;
-  region?: string;
-  login?: string;
+  /** Adres przekierowania OAuth — musi być identyczny jak w konsoli dev.ewelink.cc. */
+  redirect_url?: string;
 }
 
 /** Kategoria Tuya (z chmury) -> kafelek panelu. */
@@ -48,9 +49,10 @@ export function wifiRouter(b: Backend): Router {
 
   // --- Sonoff / eWeLink ---
 
+  const publicEwelink = (s: EwelinkSettings) => ({ ...s, app_secret: s.app_secret ? SECRET_MASK : '' });
+
   r.get('/api/sonoff/ewelink/config', (_req, res) => {
-    const s = b.db.getSetting<EwelinkSettings>('ewelink', {});
-    res.json({ success: true, config: { ...s, app_secret: s.app_secret ? SECRET_MASK : '' } });
+    res.json({ success: true, config: publicEwelink(b.db.getSetting<EwelinkSettings>('ewelink', {})) });
   });
 
   r.post('/api/sonoff/ewelink/config', (req, res) => {
@@ -59,56 +61,98 @@ export function wifiRouter(b: Backend): Router {
     const next: EwelinkSettings = {
       app_id: body.app_id?.trim() ?? current.app_id,
       app_secret: body.app_secret && body.app_secret !== SECRET_MASK ? body.app_secret.trim() : current.app_secret,
-      region: body.region?.trim() || current.region || 'eu',
-      login: body.login?.trim() ?? current.login,
+      redirect_url: body.redirect_url?.trim() ?? current.redirect_url,
     };
     b.db.setSetting('ewelink', next);
-    res.json({ success: true, config: { ...next, app_secret: next.app_secret ? SECRET_MASK : '' } });
+    res.json({ success: true, config: publicEwelink(next) });
   });
 
-  /** Jednorazowy import deviceid + devicekey z konta eWeLink. Hasło nie jest zapisywane. */
-  r.post('/api/sonoff/ewelink/import', async (req, res) => {
-    const stored = b.db.getSetting<EwelinkSettings>('ewelink', {});
-    const body = (req.body ?? {}) as EwelinkSettings & { password?: string };
-    const appSecret = body.app_secret && body.app_secret !== SECRET_MASK ? body.app_secret : stored.app_secret;
-    try {
-      const list = await ewelinkImportDevices({
-        appId: body.app_id || stored.app_id || '',
-        appSecret: appSecret || '',
-        login: body.login || stored.login || '',
-        password: body.password || '',
-        region: body.region || stored.region || 'eu',
-      });
-      b.db.setSetting('ewelink', {
-        app_id: body.app_id || stored.app_id,
-        app_secret: appSecret,
-        region: body.region || stored.region || 'eu',
-        login: body.login || stored.login,
-      });
-      for (const d of list) {
-        const devId = sonoffId(d.deviceid);
-        const existing = b.registry.get(devId);
-        b.registry.upsert(devId, {
-          driver: 'sonoff',
-          protocol: 'wifi',
-          friendly_name: existing && !existing.friendly_name.startsWith('Sonoff ') ? existing.friendly_name : d.name,
-          model: d.model || existing?.model || 'eWeLink',
-          vendor: d.brand,
-          category: existing?.category ?? 'plug',
-          sonoff_device_id: d.deviceid,
-          sonoff_api_key: d.devicekey,
-          last_error: null,
-        });
-      }
-      b.sonoff.start(); // ponowne zapytanie mDNS — stan pojawi się od razu
-      res.json({
-        success: true,
-        message: `Zaimportowano klucze ${list.length} urządzeń. Sterowanie odbywa się lokalnie (LAN).`,
-        devices: list.map((d) => ({ deviceId: d.deviceid, name: d.name, model: d.model, online: d.online })),
-      });
-    } catch (err) {
-      res.status(400).json({ success: false, message: err instanceof Error ? err.message : String(err), devices: [] });
+  /** Krok 1 OAuth: adres strony logowania eWeLink. */
+  r.get('/api/sonoff/ewelink/oauth/start', (_req, res) => {
+    const s = b.db.getSetting<EwelinkSettings>('ewelink', {});
+    if (!s.app_id || !s.app_secret || !s.redirect_url) {
+      return void res.status(400).json({ success: false, message: 'Zapisz najpierw AppID, AppSecret i adres przekierowania.' });
     }
+    const state = randomBytes(8).toString('hex');
+    b.db.setSetting('ewelink_oauth_state', state);
+    res.json({ success: true, url: ewelinkOauthUrl({ appId: s.app_id, appSecret: s.app_secret }, s.redirect_url, state) });
+  });
+
+  const importWithCode = async (code: string, region: string): Promise<{ count: number; withKey: number }> => {
+    const s = b.db.getSetting<EwelinkSettings>('ewelink', {});
+    if (!s.app_id || !s.app_secret || !s.redirect_url) throw new Error('Brak konfiguracji aplikacji eWeLink.');
+    const app = { appId: s.app_id, appSecret: s.app_secret };
+    const token = await ewelinkExchangeCode(app, region, code, s.redirect_url);
+    const list = await ewelinkListDevices(app, region, token);
+    importSonoffDevices(list);
+    return { count: list.length, withKey: list.filter((d) => d.devicekey).length };
+  };
+
+  const importSonoffDevices = (list: EwelinkCloudDevice[]) => {
+    for (const d of list) {
+      const devId = sonoffId(d.deviceid);
+      const existing = b.registry.get(devId);
+      b.registry.upsert(devId, {
+        driver: 'sonoff',
+        protocol: 'wifi',
+        friendly_name: existing && !existing.friendly_name.startsWith('Sonoff ') ? existing.friendly_name : d.name,
+        model: d.model || existing?.model || 'eWeLink',
+        vendor: d.brand,
+        category: existing?.category ?? 'plug',
+        sonoff_device_id: d.deviceid,
+        sonoff_api_key: d.devicekey || existing?.sonoff_api_key || null,
+        sonoff_uiid: d.uiid,
+        is_deleted: false,
+        last_error: d.devicekey ? null : 'Chmura nie zwróciła devicekey dla tego urządzenia.',
+      });
+    }
+    b.sonoff.query(); // stan pojawi się po odpowiedziach mDNS
+  };
+
+  /** Krok 2 OAuth: eWeLink przekierowuje tu przeglądarkę z ?code=…&region=… */
+  r.get('/api/sonoff/ewelink/oauth/callback', async (req, res) => {
+    const code = String(req.query['code'] ?? '');
+    const region = String(req.query['region'] ?? 'eu');
+    const state = String(req.query['state'] ?? '');
+    const expected = b.db.getSetting<string>('ewelink_oauth_state', '');
+    const page = (ok: boolean, msg: string) =>
+      res
+        .status(ok ? 200 : 400)
+        .type('html')
+        .send(`<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem"><h2>${ok ? 'Gotowe' : 'Błąd'}</h2><p>${msg.replace(/</g, '&lt;')}</p><p><a style="color:#22d3ee" href="/">Wróć do panelu</a></p></body>`);
+    if (!code) return void page(false, 'Brak parametru code w przekierowaniu.');
+    if (expected && state && state !== expected) return void page(false, 'Nieprawidłowy parametr state — zacznij logowanie od nowa z panelu.');
+    try {
+      const r2 = await importWithCode(code, region);
+      page(true, `Zaimportowano ${r2.count} urządzeń (z kluczem: ${r2.withKey}). Sterowanie odbywa się lokalnie w LAN.`);
+    } catch (err) {
+      page(false, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  /** Gdy przekierowanie nie trafia do panelu: wklejenie code i region z paska adresu. */
+  r.post('/api/sonoff/ewelink/oauth/code', async (req, res) => {
+    let code = String(req.body?.code ?? '').trim();
+    let region = String(req.body?.region ?? '').trim();
+    // Akceptujemy także cały adres URL z przekierowania
+    if (code.includes('code=')) {
+      const u = new URL(code.startsWith('http') ? code : `http://x/?${code.split('?').pop()}`);
+      code = u.searchParams.get('code') ?? '';
+      region = region || u.searchParams.get('region') || '';
+    }
+    if (!code) return void res.status(400).json({ success: false, message: 'Podaj kod (lub cały adres z przekierowania).' });
+    try {
+      const r2 = await importWithCode(code, region || 'eu');
+      res.json({ success: true, message: `Zaimportowano ${r2.count} urządzeń (z kluczem: ${r2.withKey}).` });
+    } catch (err) {
+      res.status(400).json({ success: false, message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** Diagnostyka: co widać w sieci przez mDNS. */
+  r.get('/api/sonoff/diagnostics', (_req, res) => {
+    b.sonoff.query();
+    res.json(b.sonoff.diagnostics());
   });
 
   // --- Ręczne dodanie urządzenia Wi-Fi ---

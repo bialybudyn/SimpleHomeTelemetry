@@ -81,12 +81,23 @@ sudo systemctl restart simplehome
 - Status online/offline najlepiej działa z włączonym `availability` w Zigbee2MQTT (`availability: enabled: true` w `configuration.yaml`).
 
 ### Sonoff Wi-Fi (eWeLink LAN)
-- Gniazdka w tej samej sieci **ogłaszają się same** przez mDNS. Panel nie skanuje sieci.
-- Do odczytu stanu i sterowania potrzebny jest `devicekey` urządzenia. Masz dwie drogi:
-  - **Import z konta eWeLink** (Wi-Fi → Sonoff). Potrzebny jest własny, darmowy AppID i AppSecret z [dev.ewelink.cc](https://dev.ewelink.cc). Hasło nie jest zapisywane.
-  - **Ręcznie**, jeśli znasz `deviceid` i `devicekey`. W trybie DIY klucz nie jest potrzebny.
-- Panel musi być w tej samej sieci L2 co gniazdka, bo mDNS nie przechodzi przez routery. W Proxmox LXC wystarczy zwykły bridge (`vmbr0`).
-- Pomiar mocy zależy od modelu i firmware. Część modeli wysyła go tylko do chmury.
+Protokół jest taki sam jak w integracji [SonoffLAN](https://github.com/AlexxIT/SonoffLAN). S60TPF (UIID 190) obsługuje sterowanie lokalne.
+
+- Gniazdka **ogłaszają się same** przez mDNS (`_ewelink._tcp`). Panel nie skanuje sieci.
+- Do sterowania potrzebny jest `devicekey` każdego urządzenia. Jest dostępny tylko w chmurze eWeLink, więc trzeba go raz pobrać.
+- Import kluczy idzie przez **OAuth 2.0**. Aplikacje z dev.ewelink.cc (rola Standard) nie mogą logować się hasłem — `/v2/user/login` zwraca błąd 407.
+  1. Załóż konto na [dev.ewelink.cc](https://dev.ewelink.cc) i utwórz aplikację.
+  2. W aplikacji ustaw Redirect URL `http://<IP-panelu>:3000/api/sonoff/ewelink/oauth/callback`.
+  3. W panelu otwórz Wi-Fi → Sonoff, wpisz AppID i AppSecret, a potem kliknij „Zaloguj przez eWeLink”.
+  4. Jeśli przekierowanie nie wróci do panelu, wklej adres z paska przeglądarki w pole „Importuj”.
+- Alternatywa: wpisz `deviceid` i `devicekey` ręcznie. W trybie DIY klucz nie jest potrzebny.
+- **Wymagania sieciowe:**
+  - panel i gniazdka w tej samej sieci L2 z działającym multicastem,
+  - bez izolacji klientów Wi-Fi i bez drugiego routera po drodze,
+  - kontener LXC podłączony przez bridge, nie NAT.
+- W aplikacji eWeLink musi być włączone „Sterowanie LAN”, jeśli model ma taką opcję.
+- Diagnostyka: w oknie Wi-Fi → Sonoff widać, które urządzenia panel słyszy przez mDNS i czy klucz pasuje.
+- Moc, napięcie i prąd: S60TPF odsyła je w odpowiedzi na zapytania LAN. Część modeli POW wysyła pomiary tylko do chmury.
 
 ### Tuya Wi-Fi (np. wentylator 7w1)
 - **Import kodem QR** (Wi-Fi → Tuya): kod użytkownika z aplikacji Smart Life (Ja → Ustawienia → Konto i bezpieczeństwo), potem skan QR. Pobierane są Device ID, Local Key i **mapa DP**, czyli który numer DP to prędkość, tryb czy oscylacja.

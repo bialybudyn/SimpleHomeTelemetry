@@ -60,6 +60,9 @@ export interface Device {
   /** devicekey urządzenia (klucz szyfrowania LAN). Nigdy nie jest wysyłany do przeglądarki. */
   sonoff_api_key?: string | null;
   has_sonoff_key?: boolean;
+  /** Urządzenie wielokanałowe (polecenia przez /zeroconf/switches). */
+  sonoff_multi_channel?: boolean;
+  sonoff_uiid?: number;
   sonoff_firmware?: string | null;
 
   last_seen: string | null;

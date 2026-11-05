@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, injec
 import { JsonPipe } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import { Device } from '../../models/telemetry.models';
-import { Telemetry } from '../../services/telemetry';
+import { SonoffDiagnostics, Telemetry } from '../../services/telemetry';
 
 type Brand = 'sonoff' | 'tuya';
 
@@ -34,7 +34,7 @@ type Brand = 'sonoff' | 'tuya';
         <div class="flex gap-2 px-5 pt-4">
           @for (b of brands; track b.id) {
             <button
-              (click)="brand.set(b.id)"
+              (click)="setBrand(b.id)"
               class="px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer"
               [class]="brand() === b.id ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'"
             >
@@ -140,27 +140,64 @@ type Brand = 'sonoff' | 'tuya';
           }
 
           @if (brand() === 'sonoff') {
-            <!-- Import kluczy z eWeLink -->
+            <!-- Diagnostyka mDNS -->
+            <section class="space-y-2 p-4 rounded-2xl bg-slate-950/60 border border-slate-800">
+              <div class="flex items-center justify-between">
+                <h3 class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Diagnostyka sieci (mDNS)</h3>
+                <button (click)="loadDiagnostics()" class="btn-secondary">Odśwież</button>
+              </div>
+              @if (diag(); as dg) {
+                @if (!dg.mdns_running || dg.mdns_error) {
+                  <p class="text-rose-300">Nasłuch mDNS nie działa: {{ dg.mdns_error || 'nie uruchomiony' }}</p>
+                }
+                @if (dg.seen.length === 0) {
+                  <p class="text-amber-300">
+                    Panel nie widzi żadnego urządzenia eWeLink w sieci. Sprawdź: panel i gniazdka w tej samej sieci (bez drugiego routera / izolacji klientów Wi-Fi),
+                    w aplikacji eWeLink włączone „Sterowanie LAN”, kontener LXC podłączony mostkiem (bridge). Ogłoszenia przychodzą co kilkadziesiąt sekund.
+                  </p>
+                }
+                @for (s of dg.seen; track s.deviceid) {
+                  <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                    <span class="text-white">{{ s.deviceid }}</span>
+                    <span class="text-slate-400">{{ s.ip }}</span>
+                    <span class="text-slate-500">{{ s.type }}</span>
+                    <span [class]="s.has_key ? 'text-emerald-300' : 'text-amber-300'">{{ s.has_key ? 'klucz' : 'brak klucza' }}</span>
+                    @if (s.decrypt_ok === false) {
+                      <span class="text-rose-300">zły klucz</span>
+                    } @else if (s.decrypt_ok) {
+                      <span class="text-emerald-300">stan odczytany</span>
+                    }
+                  </div>
+                }
+              } @else {
+                <p class="text-slate-500">Ładowanie…</p>
+              }
+            </section>
+
+            <!-- Import kluczy z eWeLink (OAuth 2.0) -->
             <section class="space-y-3 p-4 rounded-2xl bg-slate-950/60 border border-slate-800">
-              <h3 class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Import kluczy z konta eWeLink</h3>
-              <p class="text-slate-400">
-                Jednorazowo pobiera deviceid i devicekey Twoich urządzeń. Potem sterowanie odbywa się wyłącznie w sieci lokalnej.
-                Potrzebny jest własny, darmowy AppID i AppSecret z <span class="font-mono text-slate-300">dev.ewelink.cc</span>.
-                Hasło nie jest zapisywane.
-              </p>
+              <h3 class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Import kluczy z konta eWeLink (OAuth)</h3>
+              <ol class="list-decimal ml-4 space-y-1 text-slate-400">
+                <li>Załóż darmowe konto na <span class="font-mono text-slate-300">dev.ewelink.cc</span> i utwórz aplikację (rola Standard).</li>
+                <li>W ustawieniach aplikacji wpisz <b>Redirect URL</b> dokładnie taki jak poniżej.</li>
+                <li>Wpisz AppID i AppSecret, kliknij „Zapisz”, potem „Zaloguj przez eWeLink”.</li>
+              </ol>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input class="field font-mono" placeholder="AppID" [value]="ewAppId()" (input)="ewAppId.set(val($event))" />
                 <input class="field font-mono" type="password" placeholder="AppSecret" [value]="ewAppSecret()" (input)="ewAppSecret.set(val($event))" />
-                <input class="field" placeholder="E-mail lub telefon" [value]="ewLogin()" (input)="ewLogin.set(val($event))" />
-                <input class="field" type="password" placeholder="Hasło eWeLink" [value]="ewPassword()" (input)="ewPassword.set(val($event))" />
-                <select class="field" [value]="ewRegion()" (change)="ewRegion.set(val($event))">
-                  <option value="eu">Europa (eu)</option>
-                  <option value="us">Ameryka (us)</option>
-                  <option value="as">Azja (as)</option>
-                  <option value="cn">Chiny (cn)</option>
-                </select>
+                <input class="field font-mono sm:col-span-2" placeholder="Redirect URL" [value]="ewRedirect()" (input)="ewRedirect.set(val($event))" />
               </div>
-              <button (click)="importEwelink()" [disabled]="busy()" class="btn-primary">Importuj klucze</button>
+              <div class="flex flex-wrap gap-2">
+                <button (click)="saveEwelink()" [disabled]="busy()" class="btn-secondary">Zapisz</button>
+                <button (click)="startOauth()" [disabled]="busy()" class="btn-primary">Zaloguj przez eWeLink</button>
+              </div>
+              <p class="text-slate-500">
+                Jeśli po zalogowaniu przeglądarka nie wróci do panelu, skopiuj cały adres z paska (zawiera <span class="font-mono">code=</span> i <span class="font-mono">region=</span>) i wklej tutaj:
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <input class="field font-mono flex-1 min-w-0" placeholder="adres z przekierowania lub sam kod" [value]="ewCode()" (input)="ewCode.set(val($event))" />
+                <button (click)="submitCode()" [disabled]="busy() || !ewCode()" class="btn-secondary">Importuj</button>
+              </div>
             </section>
 
             <!-- Ręczne dodanie -->
@@ -261,9 +298,9 @@ export class DeviceConfigModal implements OnInit {
   // eWeLink
   readonly ewAppId = signal('');
   readonly ewAppSecret = signal('');
-  readonly ewLogin = signal('');
-  readonly ewPassword = signal('');
-  readonly ewRegion = signal('eu');
+  readonly ewRedirect = signal('');
+  readonly ewCode = signal('');
+  readonly diag = signal<SonoffDiagnostics | null>(null);
 
   // dodawanie ręczne
   readonly newName = signal('');
@@ -295,10 +332,15 @@ export class DeviceConfigModal implements OnInit {
     this.telemetry.getEwelinkSettings().then((s) => {
       this.ewAppId.set(s.app_id ?? '');
       this.ewAppSecret.set(s.app_secret ?? '');
-      this.ewLogin.set(s.login ?? '');
-      this.ewRegion.set(s.region || 'eu');
+      this.ewRedirect.set(s.redirect_url || `${window.location.origin}/api/sonoff/ewelink/oauth/callback`);
     });
+    if (this.brand() === 'sonoff') void this.loadDiagnostics();
     this.destroyRef.onDestroy(() => this.cancelQr());
+  }
+
+  setBrand(b: Brand): void {
+    this.brand.set(b);
+    if (b === 'sonoff' && !this.diag()) void this.loadDiagnostics();
   }
 
   val(e: Event): string {
@@ -351,16 +393,36 @@ export class DeviceConfigModal implements OnInit {
     this.done(res.success, res.message);
   }
 
-  async importEwelink(): Promise<void> {
+  async loadDiagnostics(): Promise<void> {
+    this.diag.set(null);
+    // Pierwsze odświeżenie wysyła zapytanie mDNS — odpowiedzi przychodzą po chwili
+    await this.telemetry.getSonoffDiagnostics();
+    await new Promise((r) => setTimeout(r, 2500));
+    this.diag.set(await this.telemetry.getSonoffDiagnostics());
+  }
+
+  async saveEwelink(): Promise<boolean> {
     this.busy.set(true);
-    const res = await this.telemetry.importEwelink({
+    const ok = await this.telemetry.saveEwelinkSettings({
       app_id: this.ewAppId().trim(),
       app_secret: this.ewAppSecret().trim(),
-      login: this.ewLogin().trim(),
-      password: this.ewPassword(),
-      region: this.ewRegion(),
+      redirect_url: this.ewRedirect().trim(),
     });
-    this.ewPassword.set('');
+    this.done(ok, ok ? 'Zapisano ustawienia eWeLink.' : 'Nie udało się zapisać ustawień.');
+    return ok;
+  }
+
+  async startOauth(): Promise<void> {
+    if (!(await this.saveEwelink())) return;
+    const res = await this.telemetry.startEwelinkOauth();
+    if (res.success && res.url) window.location.href = res.url;
+    else this.done(false, res.message || 'Nie udało się rozpocząć logowania.');
+  }
+
+  async submitCode(): Promise<void> {
+    this.busy.set(true);
+    const res = await this.telemetry.submitEwelinkCode(this.ewCode().trim(), '');
+    if (res.success) this.ewCode.set('');
     this.done(res.success, res.message);
   }
 

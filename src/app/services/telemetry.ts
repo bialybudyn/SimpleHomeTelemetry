@@ -20,8 +20,21 @@ import { format24hTime } from '../utils/date-format';
 export interface EwelinkSettings {
   app_id?: string;
   app_secret?: string;
-  region?: string;
-  login?: string;
+  redirect_url?: string;
+}
+
+export interface SonoffDiagnostics {
+  mdns_running: boolean;
+  mdns_error: string | null;
+  seen: {
+    deviceid: string;
+    ip: string;
+    type?: string;
+    encrypt: boolean;
+    last_seen: string;
+    has_key: boolean;
+    decrypt_ok: boolean | null;
+  }[];
 }
 
 export interface WifiDeviceInput {
@@ -283,13 +296,32 @@ export class Telemetry {
       .catch(() => ({}));
   }
 
-  importEwelink(input: EwelinkSettings & { password: string }): Promise<{ success: boolean; message: string }> {
-    return firstValueFrom(this.http.post<{ success: boolean; message: string }>('/api/sonoff/ewelink/import', input))
+  saveEwelinkSettings(settings: EwelinkSettings): Promise<boolean> {
+    return firstValueFrom(this.http.post('/api/sonoff/ewelink/config', settings))
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  /** Adres strony logowania eWeLink (OAuth 2.0). */
+  startEwelinkOauth(): Promise<{ success: boolean; url?: string; message?: string }> {
+    return firstValueFrom(this.http.get<{ success: boolean; url?: string; message?: string }>('/api/sonoff/ewelink/oauth/start')).catch((err) => ({
+      success: false,
+      message: err?.error?.message || 'Błąd serwera.',
+    }));
+  }
+
+  /** Ręczne przekazanie kodu (lub całego adresu) z przekierowania eWeLink. */
+  submitEwelinkCode(code: string, region: string): Promise<{ success: boolean; message: string }> {
+    return firstValueFrom(this.http.post<{ success: boolean; message: string }>('/api/sonoff/ewelink/oauth/code', { code, region }))
       .then((res) => {
         this.fetchDevices();
         return res;
       })
       .catch((err) => ({ success: false, message: err?.error?.message || 'Błąd importu z eWeLink.' }));
+  }
+
+  getSonoffDiagnostics(): Promise<SonoffDiagnostics | null> {
+    return firstValueFrom(this.http.get<SonoffDiagnostics>('/api/sonoff/diagnostics')).catch(() => null);
   }
 
   generateTuyaQr(userCode: string) {
