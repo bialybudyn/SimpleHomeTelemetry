@@ -82,20 +82,7 @@ export class App {
   readonly initialConfigBrand = signal<'sonoff' | 'tuya'>('sonoff');
 
   openDeviceConfigModal(dev?: Device, brand: 'sonoff' | 'tuya' = 'sonoff'): void {
-    if (dev) {
-      const v = (dev.vendor || '').toLowerCase();
-      const m = (dev.model || '').toLowerCase();
-      const isSonoff =
-        Boolean(dev.sonoff_device_id) ||
-        Boolean(dev.sonoff_api_key) ||
-        v.includes('sonoff') ||
-        v.includes('ewelink') ||
-        m.includes('sonoff') ||
-        m.includes('s60');
-      this.initialConfigBrand.set(isSonoff ? 'sonoff' : brand);
-    } else {
-      this.initialConfigBrand.set(brand);
-    }
+    this.initialConfigBrand.set(dev?.driver === 'tuya' ? 'tuya' : dev?.driver === 'sonoff' ? 'sonoff' : brand);
     this.selectedDeviceForConfig.set(dev || null);
     this.showDeviceConfigModal.set(true);
   }

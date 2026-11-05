@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dataPath } from './config';
 
 export interface ImgwSynopStation {
   id_stacji: string;
@@ -355,7 +355,7 @@ export const VOIVODESHIPS_LIST = [
   'Zachodniopomorskie',
 ];
 
-const CACHE_FILE = join(process.cwd(), 'imgw_weather_cache.json');
+const CACHE_FILE = dataPath('imgw_weather_cache.json');
 
 // In-memory cache
 let synopStationsCache: ImgwSynopStation[] = [];
@@ -975,8 +975,10 @@ export function setImgwFavoriteStations(ids: string[]): string[] {
   return favoriteStationIds;
 }
 
-// Initial boot
-loadCacheFromDisk();
-getImgwSynopStations().catch((err) => {
-  console.debug('IMGW initial load error:', err);
-});
+/** Wczytanie cache z dysku i pierwsze pobranie danych (wywoływane przy starcie serwera). */
+export function initImgw(): void {
+  loadCacheFromDisk();
+  getImgwSynopStations().catch((err) => {
+    console.debug('IMGW initial load error:', err);
+  });
+}

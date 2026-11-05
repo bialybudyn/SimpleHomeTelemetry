@@ -183,7 +183,7 @@ export class ServerSettings {
       {
         id: 'backup',
         title: 'Kopia Zapasowa (Backup & Restore)',
-        subtitle: 'Zgrywanie i odtwarzanie floty urządzeń, DongleMAX, poświadczeń i kluczy',
+        subtitle: 'Zapis i odtwarzanie urządzeń, kluczy i ustawień',
         icon: 'settings_backup_restore',
         badge: 'Eksport/Import',
         badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',

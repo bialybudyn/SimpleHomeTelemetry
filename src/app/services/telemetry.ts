@@ -1,31 +1,58 @@
 import { Injectable, signal, computed, inject, PLATFORM_ID, DestroyRef } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import {
+  BackupImportResponse,
   Device,
-  DeviceCategory,
-  DongleMaxConfig,
-  DongleMaxTestResult,
-  GitUpdateResult,
+  DeviceAuditLog,
   HistoryResponse,
   MqttStatus,
   MqttStatusResponse,
-  ServicesInspectionReport,
+  SystemBackupPackage,
   SystemNotification,
   SystemStatus,
-  TelemetryPoint,
   TuyaQrGenerateResponse,
   TuyaQrStatusResponse,
-  TinyTuyaTestResponse,
-  TinyTuyaScanResponse,
-  DeviceAuditLog,
-  DiscoveredNetworkHost,
-  SystemBackupPackage,
-  BackupImportResponse,
 } from '../models/telemetry.models';
 import { format24hTime } from '../utils/date-format';
-import { directBrowserSonoffCommand } from '../utils/browser-sonoff-client';
 
+export interface EwelinkSettings {
+  app_id?: string;
+  app_secret?: string;
+  region?: string;
+  login?: string;
+}
+
+export interface WifiDeviceInput {
+  driver: 'sonoff' | 'tuya';
+  name?: string;
+  device_id: string;
+  device_key?: string;
+  local_key?: string;
+  ip_address?: string;
+  version?: string;
+  category?: string;
+}
+
+export interface DeviceConfigPatch {
+  friendly_name?: string;
+  ip_address?: string;
+  category?: string;
+  local_key?: string;
+  sonoff_device_id?: string;
+  sonoff_device_key?: string;
+  tuya_dev_id?: string;
+  tuya_protocol_version?: string;
+  tuya_dp_map?: string | null;
+}
+
+type ApiResult = { success: boolean; message: string; device?: Device };
+
+/**
+ * Stan panelu po stronie przeglądarki: lista urządzeń, zdarzenia na żywo (WebSocket / SSE) i wywołania API.
+ * Stan urządzeń zmienia się wyłącznie na podstawie danych z serwera (potwierdzonych przez urządzenia).
+ */
 @Injectable({
   providedIn: 'root',
 })
@@ -34,7 +61,6 @@ export class Telemetry {
   private platformId = inject(PLATFORM_ID);
   private destroyRef = inject(DestroyRef);
 
-  // Reaktywne sygnały stanu
   readonly devices = signal<Device[]>([]);
   readonly allDevices = signal<Device[]>([]);
   readonly adminDevicesData = signal<{
@@ -43,7 +69,7 @@ export class Telemetry {
     disconnected: Device[];
     deleted: Device[];
     all: Device[];
-    logs: DeviceAuditLog[];
+    logs?: DeviceAuditLog[];
   } | null>(null);
   readonly deviceAuditLogs = signal<DeviceAuditLog[]>([]);
   readonly isActionProcessing = signal<boolean>(false);
@@ -52,68 +78,32 @@ export class Telemetry {
   readonly pairingRemainingSeconds = signal<number>(0);
   readonly systemStatus = signal<SystemStatus | null>(null);
   readonly lastTransmissionTime = signal<string>('brak danych');
-  readonly activeAlert = signal<{ message: string; type: 'warning' | 'info' } | null>(null);
 
-  // Status brokera Mosquitto MQTT i Zigbee2MQTT
   readonly mqttStatus = signal<MqttStatus | null>(null);
   readonly bridgeState = signal<string>('offline');
   readonly isReconnectingMqtt = signal<boolean>(false);
 
-  // Konfiguracja sieciowa Sonoff Dongle Max
-  readonly dongleMaxConfig = signal<DongleMaxConfig | null>(null);
-  readonly dongleMaxTestResult = signal<DongleMaxTestResult | null>(null);
-  readonly isTestingDongleMax = signal<boolean>(false);
-
-  // Stan parowania Czystego Wi-Fi (Dongle-MAX AP & SmartConfig)
-  readonly isWifiPairing = signal<boolean>(false);
-  readonly wifiPairingRemainingSeconds = signal<number>(0);
-  readonly wifiSsid = signal<string>('');
-  readonly wifiLocalIp = signal<string>('');
-  readonly wifiDiscoveredDevices = signal<{ ip: string; mac?: string; model: string; name: string }[]>([]);
-  readonly dongleMaxAp = signal<{
-    enabled: boolean;
-    ssid: string;
-    ip: string;
-    channel: number;
-    dhcp_range: string;
-  }>({
-    enabled: false,
-    ssid: '',
-    ip: '',
-    channel: 0,
-    dhcp_range: '',
-  });
-  private wifiPairingTimer: ReturnType<typeof setInterval> | null = null;
-
-  // Powiadomienia systemowe (w tym alerty baterii < 15%)
   readonly notifications = signal<SystemNotification[]>([]);
   readonly batteryAlertToast = signal<SystemNotification | null>(null);
 
-  // Inspekcja usług i aktualizacja Git
-  readonly servicesReport = signal<ServicesInspectionReport | null>(null);
-  readonly isInspectingServices = signal<boolean>(false);
-  readonly isUpdatingGit = signal<boolean>(false);
-  readonly gitUpdateResult = signal<GitUpdateResult | null>(null);
-
-  // Progi alarmowe
   readonly isMuted = signal<boolean>(false);
   readonly tempMaxLimit = signal<number>(28.0);
   readonly tempMinLimit = signal<number>(16.0);
-  readonly batteryMinLimit = signal<number>(15); // Próg 15% zgodnie ze specyfikacją
+  readonly batteryMinLimit = signal<number>(15);
 
-  // Czujniki ze stanem baterii poniżej 15%
-  readonly lowBatteryDevices = computed(() => {
-    return this.devices().filter((d) => d.battery !== undefined && d.battery !== null && d.battery <= 15);
-  });
+  readonly isExportingBackup = signal<boolean>(false);
+  readonly isImportingBackup = signal<boolean>(false);
+  readonly lastImportResult = signal<BackupImportResponse | null>(null);
 
-  // Liczba urządzeń z alarmem
+  readonly lowBatteryDevices = computed(() =>
+    this.devices().filter((d) => d.battery !== undefined && d.battery !== null && d.battery <= this.batteryMinLimit()),
+  );
+
   readonly alertCount = computed(() => {
-    const list = this.devices();
     const maxT = this.tempMaxLimit();
     const minT = this.tempMinLimit();
     const minB = this.batteryMinLimit();
-
-    return list.filter(
+    return this.devices().filter(
       (d) =>
         (d.last_temperature !== undefined && d.last_temperature !== null && (d.last_temperature > maxT || d.last_temperature < minT)) ||
         (d.battery !== undefined && d.battery !== null && d.battery <= minB),
@@ -123,248 +113,202 @@ export class Telemetry {
   private pairingTimer: ReturnType<typeof setInterval> | null = null;
   private ws: WebSocket | null = null;
   private sse: EventSource | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pulseResetTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor() {
-    if (isPlatformBrowser(this.platformId)) {
-      this.fetchDevices();
+    if (!isPlatformBrowser(this.platformId)) return;
+    this.fetchDevices();
+    this.fetchSystemStatus();
+    this.fetchMqttStatus();
+    this.fetchNotifications();
+    this.initRealtime();
+
+    // Stan na żywo przychodzi przez WebSocket; okresowo odświeżamy tylko status systemu
+    const statusInterval = setInterval(() => {
       this.fetchSystemStatus();
       this.fetchMqttStatus();
-      this.fetchWifiStatus();
-      this.fetchNotifications();
-      this.loadEwelinkConfig();
-      this.fetchDongleMaxConfig();
-      this.initRealtime();
+    }, 30000);
 
-      // Odświeżanie statusu systemu i powiadomień co 15s
-      const statusInterval = setInterval(() => {
-        this.fetchSystemStatus();
-        this.fetchMqttStatus();
-        this.fetchWifiStatus();
-        this.fetchNotifications();
-        this.fetchDongleMaxConfig();
-      }, 15000);
-
-      this.destroyRef.onDestroy(() => {
-        clearInterval(statusInterval);
-        if (this.pairingTimer) clearInterval(this.pairingTimer);
-        if (this.ws) this.ws.close();
-        if (this.sse) this.sse.close();
-      });
-    }
-  }
-
-  fetchMqttStatus(): void {
-    this.http.get<MqttStatusResponse>('/api/mqtt/status').subscribe({
-      next: (res) => {
-        if (res?.mqtt) {
-          this.mqttStatus.set(res.mqtt);
-        }
-        if (res?.bridge?.state) {
-          this.bridgeState.set(res.bridge.state);
-        }
-      },
-      error: (err) => console.debug('Błąd pobierania statusu MQTT:', err),
+    this.destroyRef.onDestroy(() => {
+      clearInterval(statusInterval);
+      if (this.pairingTimer) clearInterval(this.pairingTimer);
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      this.ws?.close();
+      this.sse?.close();
     });
   }
 
-  reconnectMqtt(customUrl?: string): Promise<boolean> {
-    this.isReconnectingMqtt.set(true);
-    return new Promise((resolve) => {
-      this.http.post('/api/mqtt/reconnect', { url: customUrl }).subscribe({
-        next: () => {
-          setTimeout(() => {
-            this.fetchMqttStatus();
-            this.isReconnectingMqtt.set(false);
-            resolve(true);
-          }, 1500);
-        },
-        error: () => {
-          this.isReconnectingMqtt.set(false);
-          resolve(false);
-        },
-      });
-    });
-  }
-
-  fetchNotifications(): void {
-    this.http.get<{ notifications: SystemNotification[] }>('/api/notifications').subscribe({
-      next: (res) => {
-        if (res?.notifications) {
-          this.notifications.set(res.notifications);
-        }
-      },
-      error: (err) => console.debug('Błąd pobierania powiadomień:', err),
-    });
-  }
-
-  acknowledgeNotification(id: number): void {
-    this.http.post(`/api/notifications/${id}/acknowledge`, {}).subscribe({
-      next: () => {
-        this.notifications.update((list) =>
-          list.map((n) => (n.id === id ? { ...n, acknowledged: true } : n)),
-        );
-      },
-      error: (err) => console.debug('Błąd potwierdzania powiadomienia:', err),
-    });
-  }
-
-  dismissBatteryToast(): void {
-    this.batteryAlertToast.set(null);
-  }
+  // ---------------------------------------------------------------- urządzenia
 
   fetchDevices(): void {
-    this.http.get<{ devices: Device[] }>('/api/devices').subscribe({
+    this.http.get<{ devices: Device[] }>('/api/devices?include_deleted=true').subscribe({
       next: (res) => {
-        if (res?.devices) {
-          this.devices.set(res.devices);
-        }
+        const list = res?.devices ?? [];
+        this.allDevices.set(list);
+        this.devices.set(list.filter((d) => !d.is_deleted));
       },
-      error: (err) => console.warn('Błąd pobierania czujników:', err),
+      error: (err) => console.debug('Błąd pobierania urządzeń:', err),
     });
-    this.fetchAdminDevices();
   }
 
   fetchAdminDevices(): void {
-    this.http.get<{
-      total: number;
-      active: Device[];
-      disconnected: Device[];
-      deleted: Device[];
-      all: Device[];
-      logs: DeviceAuditLog[];
-    }>('/api/admin/devices').subscribe({
-      next: (res) => {
-        if (res) {
+    this.http
+      .get<{ total: number; active: Device[]; disconnected: Device[]; deleted: Device[]; all: Device[]; logs: DeviceAuditLog[] }>('/api/admin/devices')
+      .subscribe({
+        next: (res) => {
           this.adminDevicesData.set(res);
-          this.allDevices.set(res.all || []);
-          if (res.logs) {
-            this.deviceAuditLogs.set(res.logs);
-          }
-        }
-      },
-      error: (err) => console.debug('Błąd pobierania danych urządzeń admina:', err),
-    });
+          this.allDevices.set(res.all ?? []);
+          this.deviceAuditLogs.set(res.logs ?? []);
+        },
+        error: (err) => console.debug('Błąd pobierania danych urządzeń:', err),
+      });
+  }
+
+  private async action(url: string, body: unknown = {}): Promise<boolean> {
+    this.isActionProcessing.set(true);
+    try {
+      await firstValueFrom(this.http.post(url, body));
+      return true;
+    } catch (err) {
+      console.error(`Błąd ${url}:`, err);
+      return false;
+    } finally {
+      this.isActionProcessing.set(false);
+      this.fetchDevices();
+      this.fetchAdminDevices();
+    }
   }
 
   deleteDevice(ieee: string): Promise<boolean> {
-    this.isActionProcessing.set(true);
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/delete`, {}).subscribe({
-        next: () => {
-          this.isActionProcessing.set(false);
-          this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
-          this.fetchAdminDevices();
-          resolve(true);
-        },
-        error: (err) => {
-          this.isActionProcessing.set(false);
-          console.error('Błąd usuwania urządzenia:', err);
-          resolve(false);
-        },
-      });
-    });
+    return this.action(`/api/devices/${encodeURIComponent(ieee)}/delete`);
   }
 
   restoreDevice(ieee: string): Promise<boolean> {
-    this.isActionProcessing.set(true);
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/restore`, {}).subscribe({
-        next: (res) => {
-          this.isActionProcessing.set(false);
-          if (res?.device) {
-            this.devices.update((list) => {
-              const idx = list.findIndex((d) => d.ieee_address === ieee);
-              if (idx >= 0) {
-                const copy = [...list];
-                copy[idx] = res.device;
-                return copy;
-              }
-              return [...list, res.device];
-            });
-          }
-          this.fetchDevices();
-          resolve(true);
-        },
-        error: (err) => {
-          this.isActionProcessing.set(false);
-          console.error('Błąd przywracania urządzenia:', err);
-          resolve(false);
-        },
-      });
-    });
+    return this.action(`/api/devices/${encodeURIComponent(ieee)}/restore`);
   }
 
   permanentDeleteDevice(ieee: string): Promise<boolean> {
-    this.isActionProcessing.set(true);
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string }>(`/api/devices/${encodeURIComponent(ieee)}/permanent-delete`, {}).subscribe({
-        next: () => {
-          this.isActionProcessing.set(false);
-          this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
-          this.allDevices.update((list) => list.filter((d) => d.ieee_address !== ieee));
-          this.fetchAdminDevices();
-          resolve(true);
-        },
-        error: (err) => {
-          this.isActionProcessing.set(false);
-          console.error('Błąd trwałego usuwania urządzenia:', err);
-          resolve(false);
-        },
-      });
-    });
+    return this.action(`/api/devices/${encodeURIComponent(ieee)}/permanent-delete`);
   }
 
   batchDeviceAction(action: 'soft_delete' | 'restore' | 'permanent_delete', ieee_list: string[]): Promise<boolean> {
-    this.isActionProcessing.set(true);
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; processed_count: number; message: string }>('/api/devices/batch', { action, ieee_list }).subscribe({
-        next: () => {
-          this.isActionProcessing.set(false);
-          this.fetchDevices();
-          this.fetchAdminDevices();
-          resolve(true);
-        },
-        error: (err) => {
-          this.isActionProcessing.set(false);
-          console.error('Błąd operacji zbiorczej:', err);
-          resolve(false);
-        },
-      });
+    return this.action('/api/devices/batch', { action, ieee_list });
+  }
+
+  purgeAllDevices(): Promise<boolean> {
+    return this.action('/api/devices/purge-all');
+  }
+
+  resetAllData(): Promise<boolean> {
+    return this.action('/api/reset-data').then((ok) => {
+      if (ok) {
+        this.notifications.set([]);
+        this.batteryAlertToast.set(null);
+      }
+      return ok;
     });
   }
 
-  testDeviceConnection(ieee: string): Promise<{ success: boolean; message: string; device?: Device }> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string; device?: Device }>(`/api/devices/${encodeURIComponent(ieee)}/test-connection`, {}).subscribe({
-        next: (res) => {
-          if (res?.device) {
-            this.devices.update((list) => list.map((d) => (d.ieee_address === ieee ? { ...d, ...res.device } : d)));
-          }
-          this.fetchAdminDevices();
-          resolve(res);
-        },
-        error: (err) => {
-          resolve({ success: false, message: err?.error?.message || 'Błąd połączenia' });
-        },
-      });
-    });
+  /** Odczyt stanu urządzenia na żądanie. */
+  testDeviceConnection(ieee: string): Promise<ApiResult> {
+    return firstValueFrom(this.http.post<ApiResult>(`/api/devices/${encodeURIComponent(ieee)}/refresh`, {})).catch((err) => ({
+      success: false,
+      message: err?.error?.message || 'Brak odpowiedzi serwera.',
+    }));
   }
 
+  /** Odczyt na żądanie wszystkich urządzeń, które to obsługują. */
   syncMqttDevices(): void {
-    this.http.post<{ status: string; message: string }>('/api/mqtt/sync', {}).subscribe({
-      next: () => {
-        setTimeout(() => this.fetchDevices(), 800);
-      },
-      error: (err) => console.debug('Błąd synchronizacji MQTT:', err),
-    });
+    this.http.post('/api/mqtt/sync', {}).subscribe({ error: (err) => console.debug('Błąd synchronizacji:', err) });
   }
+
+  renameDevice(ieee: string, friendly_name: string): Promise<boolean> {
+    return firstValueFrom(this.http.post(`/api/devices/${encodeURIComponent(ieee)}/rename`, { friendly_name }))
+      .then(() => {
+        this.patchLocal(ieee, { friendly_name });
+        return true;
+      })
+      .catch(() => false);
+  }
+
+  fetchDeviceHistory(ieee: string, range = '24h') {
+    return this.http.get<HistoryResponse>(`/api/devices/${encodeURIComponent(ieee)}/history?range=${range}`);
+  }
+
+  /**
+   * Wysyła polecenie do urządzenia. Kafelek zmieni stan dopiero, gdy urządzenie potwierdzi zmianę
+   * (zdarzenie device_updated) — dzięki temu panel nie pokazuje stanu, którego nie ma.
+   */
+  sendDeviceCommand(ieee: string, command: Record<string, unknown>): Promise<boolean> {
+    return firstValueFrom(this.http.post<{ status: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/set`, command))
+      .then((res) => {
+        if (res?.device) this.patchLocal(ieee, res.device);
+        return true;
+      })
+      .catch((err) => {
+        this.patchLocal(ieee, { last_error: err?.error?.detail || 'Polecenie nie zostało wykonane.' });
+        return false;
+      });
+  }
+
+  configureDevice(ieee: string, payload: DeviceConfigPatch): Promise<ApiResult> {
+    return firstValueFrom(this.http.post<ApiResult>(`/api/devices/${encodeURIComponent(ieee)}/configure`, payload))
+      .then((res) => {
+        if (res.device) this.patchLocal(ieee, res.device);
+        return res;
+      })
+      .catch((err) => ({ success: false, message: err?.error?.message || 'Błąd zapisu konfiguracji.' }));
+  }
+
+  /** Szybka zmiana adresu IP urządzenia Wi-Fi. */
+  assignDeviceIp(ieee: string, ip: string): Promise<boolean> {
+    return this.configureDevice(ieee, { ip_address: ip }).then((r) => r.success);
+  }
+
+  // ---------------------------------------------------------------- Wi-Fi (Sonoff, Tuya)
+
+  addWifiDevice(input: WifiDeviceInput): Promise<ApiResult> {
+    return firstValueFrom(this.http.post<ApiResult>('/api/wifi/devices', input))
+      .then((res) => {
+        this.fetchDevices();
+        return res;
+      })
+      .catch((err) => ({ success: false, message: err?.error?.message || 'Nie udało się dodać urządzenia.' }));
+  }
+
+  getEwelinkSettings(): Promise<EwelinkSettings> {
+    return firstValueFrom(this.http.get<{ config: EwelinkSettings }>('/api/sonoff/ewelink/config'))
+      .then((r) => r.config ?? {})
+      .catch(() => ({}));
+  }
+
+  importEwelink(input: EwelinkSettings & { password: string }): Promise<{ success: boolean; message: string }> {
+    return firstValueFrom(this.http.post<{ success: boolean; message: string }>('/api/sonoff/ewelink/import', input))
+      .then((res) => {
+        this.fetchDevices();
+        return res;
+      })
+      .catch((err) => ({ success: false, message: err?.error?.message || 'Błąd importu z eWeLink.' }));
+  }
+
+  generateTuyaQr(userCode: string) {
+    return this.http.post<TuyaQrGenerateResponse>('/api/tuya/qr/generate', { user_code: userCode });
+  }
+
+  checkTuyaQrStatus(token: string, userCode: string) {
+    return this.http.get<TuyaQrStatusResponse>(
+      `/api/tuya/qr/status?token=${encodeURIComponent(token)}&user_code=${encodeURIComponent(userCode)}`,
+    );
+  }
+
+  // ---------------------------------------------------------------- system
 
   fetchSystemStatus(): void {
     this.http.get<SystemStatus>('/api/system/status').subscribe({
       next: (status) => {
         this.systemStatus.set(status);
-        if (status.permit_join_active && status.permit_join_remaining > 0) {
+        if (status.permit_join_active && status.permit_join_remaining > 0 && !this.isPairing()) {
           this.startPairingCountdown(status.permit_join_remaining);
         }
       },
@@ -372,110 +316,33 @@ export class Telemetry {
     });
   }
 
-  triggerPermitJoin(duration = 160): void {
-    this.http.post<{ status: string; duration: number }>('/api/permit-join', { duration }).subscribe({
+  fetchMqttStatus(): void {
+    this.http.get<MqttStatusResponse>('/api/mqtt/status').subscribe({
       next: (res) => {
-        this.startPairingCountdown(res.duration || duration);
+        if (res?.mqtt) this.mqttStatus.set(res.mqtt);
+        if (res?.bridge?.state) this.bridgeState.set(res.bridge.state);
       },
-      error: (err) => {
-        console.error('Błąd permit-join:', err);
-        this.startPairingCountdown(duration);
-      },
+      error: (err) => console.debug('Błąd pobierania statusu MQTT:', err),
     });
   }
 
-  triggerWifiPairing(ssid: string, password = '', duration = 160): void {
-    this.wifiSsid.set(ssid);
-    this.http.post<{ status: string; duration: number; local_ip: string }>('/api/wifi/pair-smartconfig', { ssid, password, duration }).subscribe({
-      next: (res) => {
-        if (res?.local_ip) this.wifiLocalIp.set(res.local_ip);
-        this.startWifiPairingCountdown(res.duration || duration);
-      },
-      error: (err) => {
-        console.error('Błąd parowania Wi-Fi:', err);
-        this.startWifiPairingCountdown(duration);
-      },
-    });
-  }
-
-  startWifiPairingCountdown(seconds: number): void {
-    if (this.wifiPairingTimer) clearInterval(this.wifiPairingTimer);
-    this.isWifiPairing.set(true);
-    this.wifiPairingRemainingSeconds.set(seconds);
-
-    this.wifiPairingTimer = setInterval(() => {
-      const cur = this.wifiPairingRemainingSeconds();
-      if (cur <= 1) {
-        if (this.wifiPairingTimer) clearInterval(this.wifiPairingTimer);
-        this.isWifiPairing.set(false);
-        this.wifiPairingRemainingSeconds.set(0);
-        this.fetchDevices();
-      } else {
-        this.wifiPairingRemainingSeconds.set(cur - 1);
-      }
-    }, 1000);
-  }
-
-  fetchWifiStatus(): void {
-    this.http.get<{
-      active: boolean;
-      remaining_seconds: number;
-      ssid: string;
-      local_ip: string;
-      discovered_devices: { ip: string; mac?: string; model: string; name: string }[];
-      dongle_ap?: { enabled: boolean; ssid: string; ip: string; channel: number; dhcp_range: string };
-    }>('/api/wifi/status').subscribe({
-      next: (res) => {
-        if (res) {
-          if (res.ssid) this.wifiSsid.set(res.ssid);
-          if (res.local_ip) this.wifiLocalIp.set(res.local_ip);
-          if (res.discovered_devices) this.wifiDiscoveredDevices.set(res.discovered_devices);
-          if (res.dongle_ap) this.dongleMaxAp.set(res.dongle_ap);
-          if (res.active && res.remaining_seconds > 0 && !this.isWifiPairing()) {
-            this.startWifiPairingCountdown(res.remaining_seconds);
-          }
-        }
-      },
-      error: (err) => console.debug('Błąd pobierania statusu Wi-Fi:', err),
-    });
-  }
-
-  addWifiDevice(
-    ip_address: string,
-    name?: string,
-    model?: string,
-    category: DeviceCategory = 'plug',
-    vendor?: string,
-    extra?: { local_key?: string; tuya_dev_id?: string; tuya_protocol_version?: string; tuya_product_name?: string },
-  ): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; device: Device }>('/api/wifi/add-device', {
-        ip_address,
-        name,
-        model,
-        category,
-        vendor,
-        ...extra,
-      }).subscribe({
-        next: (res) => {
-          if (res?.device) {
-            this.devices.update((list) => {
-              const idx = list.findIndex((d) => d.ieee_address === res.device.ieee_address);
-              if (idx >= 0) {
-                const copy = [...list];
-                copy[idx] = res.device;
-                return copy;
-              }
-              return [...list, res.device];
-            });
-            this.fetchDevices();
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        },
-        error: () => resolve(false),
+  reconnectMqtt(customUrl?: string): Promise<boolean> {
+    this.isReconnectingMqtt.set(true);
+    return firstValueFrom(this.http.post('/api/mqtt/reconnect', { url: customUrl }))
+      .then(() => true)
+      .catch(() => false)
+      .finally(() => {
+        setTimeout(() => {
+          this.fetchMqttStatus();
+          this.isReconnectingMqtt.set(false);
+        }, 1500);
       });
+  }
+
+  triggerPermitJoin(duration = 120): void {
+    this.http.post<{ status: string; duration: number }>('/api/permit-join', { duration }).subscribe({
+      next: (res) => this.startPairingCountdown(res.duration || duration),
+      error: (err) => console.error('Błąd włączania parowania:', err),
     });
   }
 
@@ -483,7 +350,6 @@ export class Telemetry {
     if (this.pairingTimer) clearInterval(this.pairingTimer);
     this.isPairing.set(true);
     this.pairingRemainingSeconds.set(seconds);
-
     this.pairingTimer = setInterval(() => {
       const cur = this.pairingRemainingSeconds();
       if (cur <= 1) {
@@ -497,417 +363,218 @@ export class Telemetry {
     }, 1000);
   }
 
-  renameDevice(ieee: string, friendly_name: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post(`/api/devices/${encodeURIComponent(ieee)}/rename`, { friendly_name }).subscribe({
-        next: () => {
-          this.devices.update((list) =>
-            list.map((d) => (d.ieee_address === ieee ? { ...d, friendly_name } : d)),
-          );
-          resolve(true);
-        },
-        error: () => resolve(false),
-      });
+  fetchNotifications(): void {
+    this.http.get<{ notifications: SystemNotification[] }>('/api/notifications').subscribe({
+      next: (res) => this.notifications.set(res?.notifications ?? []),
+      error: (err) => console.debug('Błąd pobierania powiadomień:', err),
     });
   }
 
-  fetchDeviceHistory(ieee: string, range = '24h') {
-    return this.http.get<HistoryResponse>(
-      `/api/devices/${encodeURIComponent(ieee)}/history?range=${range}`,
-    );
-  }
-
-  simulatePacket(payload: Partial<TelemetryPoint> & Record<string, unknown>) {
-    return this.http.post('/api/simulate', payload);
-  }
-
-  fetchDongleMaxConfig(): void {
-    this.http.get<{ config: DongleMaxConfig }>('/api/dongle-max/config').subscribe({
-      next: (res) => {
-        if (res?.config) {
-          this.dongleMaxConfig.set(res.config);
-        }
-      },
-      error: (err) => console.debug('Błąd pobierania konfiguracji Dongle Max:', err),
+  acknowledgeNotification(id: number): void {
+    this.http.post(`/api/notifications/${id}/acknowledge`, {}).subscribe({
+      next: () => this.notifications.update((list) => list.map((n) => (n.id === id ? { ...n, acknowledged: true } : n))),
     });
   }
 
-  saveDongleMaxConfig(updated: Partial<DongleMaxConfig>): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ status: string; config: DongleMaxConfig }>('/api/dongle-max/config', updated).subscribe({
-        next: (res) => {
-          if (res?.config) {
-            this.dongleMaxConfig.set(res.config);
-          }
-          this.fetchSystemStatus();
-          resolve(true);
-        },
-        error: () => resolve(false),
-      });
-    });
+  dismissBatteryToast(): void {
+    this.batteryAlertToast.set(null);
   }
 
-  testDongleMaxConnection(host?: string, port?: number): Promise<DongleMaxTestResult> {
-    this.isTestingDongleMax.set(true);
-    this.dongleMaxTestResult.set(null);
-    return new Promise((resolve) => {
-      this.http.post<DongleMaxTestResult>('/api/dongle-max/test-connection', { host, port }).subscribe({
-        next: (res) => {
-          this.isTestingDongleMax.set(false);
-          this.dongleMaxTestResult.set(res);
-          resolve(res);
-        },
-        error: (err) => {
-          this.isTestingDongleMax.set(false);
-          const failResult: DongleMaxTestResult = {
-            success: false,
-            host: host || 'Dongle-M.local',
-            port: port || 6638,
-            message: `Błąd połączenia: ${err.message || 'Nieosiągalny host/port'}`,
-            tested_at: new Date().toISOString(),
-            operating_mode: this.dongleMaxConfig()?.operating_mode || 'coordinator',
-          };
-          this.dongleMaxTestResult.set(failResult);
-          resolve(failResult);
-        },
-      });
-    });
+  // ---------------------------------------------------------------- kopia zapasowa
+
+  getBackupPackage(): Promise<{ success: boolean; data?: SystemBackupPackage; message?: string }> {
+    this.isExportingBackup.set(true);
+    return firstValueFrom(this.http.get<SystemBackupPackage>('/api/backup/export'))
+      .then((data) => ({ success: true, data }))
+      .catch((err) => ({ success: false, message: err?.error?.message || 'Błąd podczas generowania kopii zapasowej.' }))
+      .finally(() => this.isExportingBackup.set(false));
   }
 
-  sendDeviceCommand(ieee: string, command: Record<string, unknown>): Promise<boolean> {
-    return new Promise((resolve) => {
-      // Optymistyczna aktualizacja lokalnego stanu urządzenia
-      this.devices.update((list) =>
-        list.map((d) => (d.ieee_address === ieee ? { ...d, ...command } : d)),
-      );
-
-      const targetDev = this.devices().find((d) => d.ieee_address === ieee);
-
-      // Jeśli to urządzenie Wi-Fi z IP i komendą ON/OFF, równolegle/próbujemy bezpośredniego wywołania z przeglądarki (Direct Client Fetch)
-      if (
-        isPlatformBrowser(this.platformId) &&
-        targetDev &&
-        targetDev.protocol === 'wifi' &&
-        targetDev.ip_address &&
-        command['state'] !== undefined
-      ) {
-        const swState = command['state'] === 'ON' ? 'on' : 'off';
-        directBrowserSonoffCommand({
-          ip: targetDev.ip_address,
-          deviceId: targetDev.sonoff_device_id || undefined,
-          deviceKey: targetDev.sonoff_api_key || targetDev.local_key || undefined,
-          state: swState,
-          timeoutMs: 1800,
-        }).then((lanRes) => {
-          if (lanRes.success) {
-            console.log('[Direct Browser LAN]', lanRes.message);
-          }
-        }).catch(() => {
-          // fallback obsłużony przez serwer API
-        });
-      }
-
-      this.http.post<{ status: string; device: Device }>(`/api/devices/${encodeURIComponent(ieee)}/set`, command).subscribe({
-        next: (res) => {
-          if (res?.device) {
-            this.devices.update((list) =>
-              list.map((d) => (d.ieee_address === ieee ? { ...d, ...res.device } : d)),
-            );
-          }
-          resolve(true);
-        },
-        error: () => resolve(false),
-      });
-    });
+  async triggerBackupDownload(): Promise<boolean> {
+    const res = await this.getBackupPackage();
+    if (!res.success || !res.data || !isPlatformBrowser(this.platformId)) return false;
+    const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `simplehome-backup-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    return true;
   }
 
-  inspectServices(): Promise<ServicesInspectionReport | null> {
-    this.isInspectingServices.set(true);
-    return new Promise((resolve) => {
-      this.http.get<ServicesInspectionReport>('/api/system/inspect-services').subscribe({
-        next: (rep) => {
-          this.servicesReport.set(rep);
-          this.isInspectingServices.set(false);
-          resolve(rep);
-        },
-        error: (err) => {
-          console.error('Błąd inspekcji usług:', err);
-          this.isInspectingServices.set(false);
-          resolve(null);
-        },
-      });
-    });
+  restoreBackupPackage(backupData: SystemBackupPackage, mode: 'replace' | 'merge' = 'replace'): Promise<BackupImportResponse> {
+    this.isImportingBackup.set(true);
+    return firstValueFrom(this.http.post<BackupImportResponse>('/api/backup/import', { backup: backupData, mode }))
+      .catch(
+        (err): BackupImportResponse => ({
+          success: false,
+          message: err?.error?.message || 'Błąd podczas wgrywania kopii zapasowej.',
+          mode,
+          restored_counts: { devices: 0, zigbee: 0, wifi: 0, sonoff: 0, tuya: 0, credentials: 0 },
+          dongle_max_restored: false,
+          ewelink_restored: false,
+          notifications_restored: false,
+          errors: [String(err?.message || err)],
+        }),
+      )
+      .then((res) => {
+        this.lastImportResult.set(res);
+        this.fetchDevices();
+        return res;
+      })
+      .finally(() => this.isImportingBackup.set(false));
   }
 
-  runGitUpdate(repoPath?: string): Promise<GitUpdateResult | null> {
-    this.isUpdatingGit.set(true);
-    return new Promise((resolve) => {
-      this.http.post<GitUpdateResult>('/api/system/git-update', { repo_path: repoPath }).subscribe({
-        next: (res) => {
-          this.gitUpdateResult.set(res);
-          this.isUpdatingGit.set(false);
-          resolve(res);
-        },
-        error: (err) => {
-          console.error('Błąd git pull:', err);
-          const failRes: GitUpdateResult = {
-            success: false,
-            updated: false,
-            message: 'Błąd połączenia z serwerem podczas aktualizacji Git',
-            output: String(err?.message || err),
-          };
-          this.gitUpdateResult.set(failRes);
-          this.isUpdatingGit.set(false);
-          resolve(failRes);
-        },
-      });
-    });
-  }
-
-  resetAllData(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post('/api/devices/reset', {}).subscribe({
-        next: () => {
-          this.devices.set([]);
-          this.notifications.set([]);
-          this.lastTransmissionTime.set('brak danych');
-          this.batteryAlertToast.set(null);
-          resolve(true);
-        },
-        error: () => resolve(false),
-      });
-    });
-  }
+  // ---------------------------------------------------------------- zdarzenia na żywo
 
   private initRealtime(): void {
-    // 1. Próba nawiązania połączenia WebSocket
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => {
-        this.connectionStatus.set('connected');
-      };
-
-      this.ws.onmessage = (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-          this.handleIncomingEvent(data);
-        } catch (err) {
-          console.debug('WS parse error:', err);
-        }
-      };
-
-      this.ws.onclose = () => {
-        this.connectionStatus.set('connecting');
-        this.initSseFallback();
-      };
-
-      this.ws.onerror = () => {
-        this.initSseFallback();
-      };
-    } catch (err) {
-      console.debug('WS setup error:', err);
+      this.ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    } catch {
       this.initSseFallback();
+      return;
     }
+    this.ws.onopen = () => {
+      this.connectionStatus.set('connected');
+      // Po ponownym połączeniu dociągamy stan, który mógł się zmienić w trakcie przerwy
+      this.fetchDevices();
+    };
+    this.ws.onmessage = (evt) => {
+      try {
+        this.handleIncomingEvent(JSON.parse(evt.data));
+      } catch (err) {
+        console.debug('WS parse error:', err);
+      }
+    };
+    this.ws.onclose = () => {
+      this.connectionStatus.set('connecting');
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = setTimeout(() => this.initRealtime(), 5000);
+    };
   }
 
+  /** Tryb deweloperski (ng serve) nie ma WebSocketa — wtedy SSE. */
   private initSseFallback(): void {
     if (this.sse) return;
-    try {
-      this.sse = new EventSource('/api/events');
-      this.sse.onopen = () => {
-        this.connectionStatus.set('connected');
-      };
-      this.sse.onmessage = (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-          this.handleIncomingEvent(data);
-        } catch (err) {
-          console.debug('SSE parse error:', err);
-        }
-      };
-      this.sse.onerror = () => {
-        this.connectionStatus.set('disconnected');
-      };
-    } catch {
-      this.connectionStatus.set('disconnected');
-    }
+    this.sse = new EventSource('/api/events');
+    this.sse.onopen = () => this.connectionStatus.set('connected');
+    this.sse.onmessage = (evt) => {
+      try {
+        this.handleIncomingEvent(JSON.parse(evt.data));
+      } catch (err) {
+        console.debug('SSE parse error:', err);
+      }
+    };
+    this.sse.onerror = () => this.connectionStatus.set('disconnected');
+  }
+
+  private patchLocal(ieee: string, patch: Partial<Device>): void {
+    const apply = (list: Device[]) => list.map((d) => (d.ieee_address === ieee ? { ...d, ...patch } : d));
+    this.devices.update(apply);
+    this.allDevices.update(apply);
+  }
+
+  private upsertLocal(dev: Device): void {
+    const upsert = (list: Device[]) => {
+      const idx = list.findIndex((d) => d.ieee_address === dev.ieee_address);
+      if (idx < 0) return [...list, dev];
+      const copy = [...list];
+      copy[idx] = { ...copy[idx], ...dev };
+      return copy;
+    };
+    this.allDevices.update(upsert);
+    if (dev.is_deleted) this.devices.update((list) => list.filter((d) => d.ieee_address !== dev.ieee_address));
+    else this.devices.update(upsert);
   }
 
   private handleIncomingEvent(event: Record<string, unknown>): void {
-    const type = event['type'] as string;
-
-    if (type === 'telemetry') {
-      const ieee = event['device_ieee'] as string;
-      const data = event['data'] as Partial<TelemetryPoint>;
-      if (ieee && data) {
-        this.updateDeviceFromTelemetry(ieee, data);
+    switch (event['type']) {
+      case 'telemetry': {
+        const ieee = event['device_ieee'] as string;
+        if (ieee) this.pulse(ieee);
+        break;
       }
-    } else if (type === 'battery_alert') {
-      const item: SystemNotification = {
-        id: Date.now(),
-        device_ieee: (event['device_ieee'] as string) || '',
-        device_name: (event['friendly_name'] as string) || (event['device_ieee'] as string) || 'Czujnik',
-        type: 'battery_low',
-        level: 'critical',
-        message: (event['message'] as string) || `Niski poziom baterii (${event['battery']}%)!`,
-        battery: (event['battery'] as number) || 0,
-        timestamp: (event['timestamp'] as string) || new Date().toISOString(),
-        acknowledged: false,
-      };
-      this.notifications.update((list) => [item, ...list.filter((n) => n.device_ieee !== item.device_ieee || n.type !== 'battery_low')]);
-      this.batteryAlertToast.set(item);
-    } else if (type === 'device_alarm') {
-      this.playAlarmAudio();
-      const item: SystemNotification = {
-        id: Date.now(),
-        device_ieee: (event['device_ieee'] as string) || '',
-        device_name: (event['friendly_name'] as string) || 'Urządzenie',
-        type: (event['alarm_type'] as string) || 'alarm',
-        level: 'critical',
-        message: (event['message'] as string) || 'Zdarzenie alarmowe!',
-        battery: 100,
-        timestamp: (event['timestamp'] as string) || new Date().toISOString(),
-        acknowledged: false,
-      };
-      this.notifications.update((list) => [item, ...list]);
-    } else if (type === 'permit_join') {
-      const dur = (event['duration'] as number) || 60;
-      this.startPairingCountdown(dur);
-    } else if (type === 'device_renamed') {
-      const ieee = event['device_ieee'] as string;
-      const name = event['friendly_name'] as string;
-      if (ieee && name) {
-        this.devices.update((list) =>
-          list.map((d) => (d.ieee_address === ieee ? { ...d, friendly_name: name } : d)),
-        );
+      case 'device_updated': {
+        const dev = event['device'] as Device;
+        if (dev?.ieee_address) this.upsertLocal(dev);
+        break;
       }
-    } else if (type === 'mqtt_status') {
-      const status = event['data'] as MqttStatus;
-      if (status) {
-        this.mqttStatus.set(status);
-      }
-    } else if (type === 'bridge_state') {
-      const state = event['state'] as string;
-      if (state) {
-        this.bridgeState.set(state);
-      }
-    } else if (type === 'device_deleted') {
-      const ieee = event['ieee_address'] as string;
-      if (ieee) {
-        this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
-        this.fetchAdminDevices();
-      }
-    } else if (type === 'device_permanently_deleted') {
-      const ieee = event['ieee_address'] as string;
-      if (ieee) {
-        this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
-        this.allDevices.update((list) => list.filter((d) => d.ieee_address !== ieee));
-        this.fetchAdminDevices();
-      }
-    } else if (type === 'device_updated') {
-      const dev = event['device'] as Device;
-      if (dev && dev.ieee_address) {
-        if (dev.is_deleted) {
-          this.devices.update((list) => list.filter((d) => d.ieee_address !== dev.ieee_address));
-        } else {
-          this.devices.update((list) => {
-            const idx = list.findIndex((d) => d.ieee_address === dev.ieee_address);
-            if (idx >= 0) {
-              const copy = [...list];
-              copy[idx] = { ...copy[idx], ...dev };
-              return copy;
-            }
-            return [...list, dev];
-          });
+      case 'devices_updated': {
+        const list = event['devices'] as Device[];
+        if (Array.isArray(list)) {
+          this.allDevices.set(list);
+          this.devices.set(list.filter((d) => !d.is_deleted));
         }
-        this.allDevices.update((list) => {
-          const idx = list.findIndex((d) => d.ieee_address === dev.ieee_address);
-          if (idx >= 0) {
-            const copy = [...list];
-            copy[idx] = { ...copy[idx], ...dev };
-            return copy;
-          }
-          return [...list, dev];
-        });
+        break;
       }
-    } else if (type === 'devices_updated') {
-      const devList = event['devices'] as Device[];
-      if (Array.isArray(devList)) {
-        this.devices.set(devList.filter((d) => !d.is_deleted));
-        this.allDevices.set(devList);
+      case 'device_deleted':
+      case 'device_permanently_deleted': {
+        const ieee = event['ieee_address'] as string;
+        this.devices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+        if (event['type'] === 'device_permanently_deleted') {
+          this.allDevices.update((list) => list.filter((d) => d.ieee_address !== ieee));
+        }
+        break;
       }
-    } else if (type === 'dongle_max_config_updated') {
-      const cfg = event['config'] as DongleMaxConfig;
-      if (cfg) {
-        this.dongleMaxConfig.set(cfg);
-        this.fetchSystemStatus();
+      case 'device_renamed': {
+        const ieee = event['device_ieee'] as string;
+        const name = event['friendly_name'] as string;
+        if (ieee && name) this.patchLocal(ieee, { friendly_name: name });
+        break;
       }
-    } else if (type === 'data_reset') {
-      this.devices.set([]);
-      this.notifications.set([]);
-      this.lastTransmissionTime.set('brak danych');
-      this.batteryAlertToast.set(null);
+      case 'battery_alert': {
+        const item: SystemNotification = {
+          id: Date.now(),
+          device_ieee: String(event['device_ieee'] ?? ''),
+          device_name: String(event['friendly_name'] ?? ''),
+          type: 'battery_low',
+          level: 'warning',
+          message: String(event['message'] ?? ''),
+          battery: Number(event['battery'] ?? 0),
+          timestamp: String(event['timestamp'] ?? new Date().toISOString()),
+          acknowledged: false,
+        };
+        this.batteryAlertToast.set(item);
+        this.fetchNotifications();
+        break;
+      }
+      case 'device_alarm':
+        this.playAlarmAudio();
+        this.fetchNotifications();
+        break;
+      case 'permit_join':
+        this.startPairingCountdown(Number(event['duration'] ?? 60));
+        break;
+      case 'mqtt_status':
+        if (event['data']) this.mqttStatus.set(event['data'] as MqttStatus);
+        break;
+      case 'bridge_state':
+        if (event['state']) this.bridgeState.set(String(event['state']));
+        break;
+      case 'data_reset':
+        this.notifications.set([]);
+        this.batteryAlertToast.set(null);
+        break;
     }
   }
 
-  private updateDeviceFromTelemetry(ieee: string, data: Partial<TelemetryPoint>): void {
+  /** Krótkie podświetlenie kafelka po nadejściu nowych danych. */
+  private pulse(ieee: string): void {
     this.lastTransmissionTime.set(format24hTime(new Date(), true));
-
-    // Wyzwolenie efektu pulsu na karcie
-    this.devices.update((list) => {
-      let found = false;
-      const updatedList = list.map((d) => {
-        if (d.ieee_address === ieee) {
-          found = true;
-          return {
-            ...d,
-            last_temperature: data.temperature !== undefined ? data.temperature : d.last_temperature,
-            last_humidity: data.humidity !== undefined ? data.humidity : d.last_humidity,
-            battery: data.battery !== undefined ? data.battery : d.battery,
-            linkquality: data.linkquality !== undefined ? data.linkquality : d.linkquality,
-            power: data.power !== undefined ? data.power : d.power,
-            energy: data.energy !== undefined ? data.energy : d.energy,
-            current_heating_setpoint: data.setpoint !== undefined ? data.setpoint : d.current_heating_setpoint,
-            state: data.state !== undefined ? data.state : d.state,
-            last_seen: data.timestamp ?? new Date().toISOString(),
-            isRecentlyUpdated: true,
-          };
-        }
-        return d;
-      });
-
-      if (!found) {
-        // Nowy czujnik dodany w locie - brak syntetyzowania nieznanych wartości!
-        updatedList.push({
-          ieee_address: ieee,
-          friendly_name: `Czujnik ${ieee.slice(-4)}`,
-          model: 'Zigbee Sensor',
-          last_seen: data.timestamp ?? new Date().toISOString(),
-          battery: data.battery !== undefined && data.battery !== null ? data.battery : null,
-          last_temperature: data.temperature !== undefined && data.temperature !== null ? data.temperature : null,
-          last_humidity: data.humidity !== undefined && data.humidity !== null ? data.humidity : null,
-          linkquality: data.linkquality !== undefined && data.linkquality !== null ? data.linkquality : null,
-          isRecentlyUpdated: true,
-        });
-      }
-
-      return updatedList;
-    });
-
-    // Wycofaj flagę pulsu po 1.2 sekundy
-    if (this.pulseResetTimeouts.has(ieee)) {
-      clearTimeout(this.pulseResetTimeouts.get(ieee));
-    }
-    const timer = setTimeout(() => {
-      this.devices.update((list) =>
-        list.map((d) => (d.ieee_address === ieee ? { ...d, isRecentlyUpdated: false } : d)),
-      );
-      this.pulseResetTimeouts.delete(ieee);
-    }, 1200);
-    this.pulseResetTimeouts.set(ieee, timer);
+    this.patchLocal(ieee, { isRecentlyUpdated: true });
+    const prev = this.pulseResetTimeouts.get(ieee);
+    if (prev) clearTimeout(prev);
+    this.pulseResetTimeouts.set(
+      ieee,
+      setTimeout(() => {
+        this.patchLocal(ieee, { isRecentlyUpdated: false });
+        this.pulseResetTimeouts.delete(ieee);
+      }, 1200),
+    );
   }
 
   /**
@@ -994,571 +661,4 @@ export class Telemetry {
       console.debug('Failed to play alarm audio:', err);
     }
   }
-
-  // ==========================================
-  // METODY DLA TUYA LOCAL KEY (SKANOWANIE KODU QR)
-  // ==========================================
-
-  generateTuyaQr(userCode: string) {
-    return this.http.post<TuyaQrGenerateResponse>('/api/tuya/qr/generate', { user_code: userCode });
-  }
-
-  checkTuyaQrStatus(token: string, userCode: string) {
-    return this.http.get<TuyaQrStatusResponse>(
-      `/api/tuya/qr/status?token=${encodeURIComponent(token)}&user_code=${encodeURIComponent(userCode)}`
-    );
-  }
-
-  bindTuyaDevice(payload: {
-    ieee_address: string;
-    local_key: string;
-    tuya_dev_id?: string;
-    ip_address?: string;
-    product_name?: string;
-    protocol_version?: string;
-  }) {
-    return this.http.post<{ success: boolean; device: Device; message?: string }>(
-      '/api/tuya/device/bind',
-      payload
-    );
-  }
-
-  testTuyaLocal(payload: {
-    ip_address: string;
-    local_key: string;
-    tuya_dev_id?: string;
-    protocol_version?: string;
-  }) {
-    return this.http.post<{ success: boolean; message: string }>('/api/tuya/device/test', payload);
-  }
-
-  // ==========================================
-  // METODY DLA TINYTUYA (ZARZĄDZANIE WI-FI / LOCAL KEY / STATUS / SCAN)
-  // ==========================================
-
-  testTinyTuya(payload: {
-    ip: string;
-    local_key: string;
-    dev_id: string;
-    version?: string;
-  }) {
-    return this.http.post<TinyTuyaTestResponse>('/api/tinytuya/device/test', payload);
-  }
-
-  scanTinyTuya() {
-    return this.http.post<TinyTuyaScanResponse>('/api/tinytuya/scan', {});
-  }
-
-  getTinyTuyaDeviceStatus(payload: {
-    ip: string;
-    local_key: string;
-    dev_id: string;
-    version?: string;
-    category?: DeviceCategory;
-  }) {
-    return this.http.post<{
-      success: boolean;
-      device_data?: Record<string, unknown>;
-      raw_dps?: Record<string, unknown>;
-      message?: string;
-      error?: string;
-    }>('/api/tinytuya/device/status', payload);
-  }
-
-  sendTinyTuyaDirectCommand(payload: {
-    ip: string;
-    local_key: string;
-    dev_id: string;
-    version?: string;
-    category?: DeviceCategory;
-    command?: Record<string, unknown>;
-    dps?: Record<string, unknown>;
-  }) {
-    return this.http.post<{
-      success: boolean;
-      message?: string;
-      error?: string;
-      device_data?: Record<string, unknown>;
-    }>('/api/tinytuya/device/set', payload);
-  }
-
-  saveDeviceTuyaConfig(ieee_address: string, config: {
-    local_key: string;
-    tuya_dev_id?: string;
-    tuya_protocol_version?: string;
-    ip_address?: string;
-    category?: DeviceCategory;
-    friendly_name?: string;
-  }) {
-    return this.http.post<{ success: boolean; message: string; device?: Device }>(
-      '/api/tinytuya/device/config',
-      { ieee_address, ...config }
-    );
-  }
-
-  // ==========================================
-  // METODY DLA SONOFF SMARTPLUG S60TFP WI-FI (eWeLink LAN)
-  // ==========================================
-
-  testSonoffDevice(payload: { ip: string; device_id?: string; api_key?: string }) {
-    return this.http.post<{ success: boolean; message: string; deviceInfo?: Record<string, unknown> }>(
-      '/api/sonoff/device/test',
-      payload
-    );
-  }
-
-  scanSonoffLan() {
-    return this.http.post<{
-      success: boolean;
-      discovered: Array<{ ip: string; deviceId?: string; model: string; switch?: string }>;
-      message: string;
-    }>('/api/sonoff/scan', {});
-  }
-
-  addSonoffDevice(payload: { ip_address: string; name?: string; device_id?: string; api_key?: string }): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string; device: Device }>('/api/sonoff/device/add', payload).subscribe({
-        next: (res) => {
-          if (res?.device) {
-            this.devices.update((list) => {
-              const idx = list.findIndex((d) => d.ieee_address === res.device.ieee_address);
-              if (idx >= 0) {
-                const copy = [...list];
-                copy[idx] = res.device;
-                return copy;
-              }
-              return [...list, res.device];
-            });
-            this.fetchDevices();
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        },
-        error: () => resolve(false),
-      });
-    });
-  }
-
-  purgeAllDevices(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string }>('/api/devices/purge-all', {}).subscribe({
-        next: (res) => {
-          if (res?.success) {
-            this.devices.set([]);
-            this.fetchDevices();
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        },
-        error: () => resolve(false),
-      });
-    });
-  }
-
-  // Ręczna konfiguracja parametrów urządzenia (adres IP, Device ID, klucze)
-  configureDevice(
-    ieee: string,
-    payload: {
-      ip_address?: string;
-      friendly_name?: string;
-      sonoff_device_id?: string;
-      sonoff_api_key?: string;
-      local_key?: string;
-      tuya_dev_id?: string;
-      vendor?: string;
-      model?: string;
-      device_id?: string;
-    }
-  ): Promise<{ success: boolean; message: string; device?: Device }> {
-    return new Promise((resolve) => {
-      this.http
-        .post<{ success: boolean; message: string; device?: Device }>(`/api/devices/${encodeURIComponent(ieee)}/configure`, payload)
-        .subscribe({
-          next: (res) => {
-            if (res.device) {
-              this.devices.update((list) => {
-                const idx = list.findIndex((d) => d.ieee_address === res.device!.ieee_address);
-                if (idx >= 0) {
-                  const copy = [...list];
-                  copy[idx] = res.device!;
-                  return copy;
-                }
-                return [...list, res.device!];
-              });
-              this.fetchDevices();
-            }
-            resolve(res);
-          },
-          error: (err) => {
-            resolve({
-              success: false,
-              message: err?.error?.message || 'Błąd zapisu parametrów urządzenia',
-            });
-          },
-        });
-    });
-  }
-
-  // Szybkie przypisanie adresu IP do wybranego urządzenia
-  assignDeviceIp(ieee: string, ip: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http
-        .post<{ success: boolean; message: string; device?: Device }>(`/api/devices/${encodeURIComponent(ieee)}/assign-ip`, {
-          ip_address: ip,
-        })
-        .subscribe({
-          next: (res) => {
-            if (res.device) {
-              this.devices.update((list) => {
-                const idx = list.findIndex((d) => d.ieee_address === res.device!.ieee_address);
-                if (idx >= 0) {
-                  const copy = [...list];
-                  copy[idx] = res.device!;
-                  return copy;
-                }
-                return list;
-              });
-              this.fetchDevices();
-              resolve(true);
-            } else {
-              resolve(false);
-            }
-          },
-          error: () => resolve(false),
-        });
-    });
-  }
-
-  // Pobranie konfiguracji podsieci skanowania
-  getNetworkScanConfig(): Promise<{ scan_subnets: string }> {
-    return new Promise((resolve) => {
-      this.http.get<{ scan_subnets: string }>('/api/network/scan-config').subscribe({
-        next: (res) => resolve(res || { scan_subnets: '192.168.1.0/24, 192.168.0.0/24' }),
-        error: () => resolve({ scan_subnets: '192.168.1.0/24, 192.168.0.0/24' }),
-      });
-    });
-  }
-
-  // Zapis konfiguracji podsieci skanowania
-  saveNetworkScanConfig(subnets: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http
-        .post<{ success: boolean; scan_subnets: string }>('/api/network/scan-config', { scan_subnets: subnets })
-        .subscribe({
-          next: (res) => resolve(res.success),
-          error: () => resolve(false),
-        });
-    });
-  }
-
-  readonly isScanningOuiNetwork = signal<boolean>(false);
-  readonly ouiScanResults = signal<DiscoveredNetworkHost[]>([]);
-  readonly ouiScanMessage = signal<string>('');
-
-  // Zaawansowane skanowanie podsieci z bazą OUI i detekcją Sonoff LAN
-  scanNetworkWithOui(subnets?: string): Promise<{ success: boolean; hosts: DiscoveredNetworkHost[]; message: string }> {
-    this.isScanningOuiNetwork.set(true);
-    this.ouiScanMessage.set('Skanowanie podsieci, pobieranie danych z bazy OUI oraz sprawdzanie portu Sonoff 8081...');
-    return new Promise((resolve) => {
-      this.http
-        .post<{ success: boolean; hosts: DiscoveredNetworkHost[]; message: string }>('/api/network/scan-oui', {
-          subnets,
-        })
-        .subscribe({
-          next: (res) => {
-            this.isScanningOuiNetwork.set(false);
-            this.ouiScanResults.set(res.hosts || []);
-            this.ouiScanMessage.set(res.message);
-            this.fetchDevices();
-            resolve(res);
-          },
-          error: (err) => {
-            this.isScanningOuiNetwork.set(false);
-            const msg = err?.error?.message || 'Błąd skanowania podsieci OUI.';
-            this.ouiScanMessage.set(msg);
-            resolve({ success: false, hosts: [], message: msg });
-          },
-        });
-    });
-  }
-
-  readonly isAutoDiscovering = signal<boolean>(false);
-  readonly dongleMaxDiscoveredDevices = signal<Array<{
-    ip: string;
-    deviceId?: string;
-    model: string;
-    switch?: string;
-    rssi?: number;
-    power?: number;
-    voltage?: number;
-    current?: number;
-    isAlreadyAdded: boolean;
-  }>>([]);
-
-  readonly ewelinkConfig = signal<{
-    email?: string;
-    phoneNumber?: string;
-    password?: string;
-    region?: string;
-    connected?: boolean;
-    lastSync?: string;
-    devices?: Array<{
-      deviceId: string;
-      apiKey: string;
-      deviceKey?: string;
-      name: string;
-      model: string;
-      switch?: string;
-      online: boolean;
-      ip?: string;
-    }>;
-  }>({ region: 'eu', connected: false });
-
-  loadEwelinkConfig(): void {
-    this.http.get<{ success: boolean; config: unknown }>('/api/sonoff/ewelink/config').subscribe({
-      next: (res) => {
-        if (res && res.config) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          this.ewelinkConfig.set(res.config as any);
-        }
-      },
-      error: () => {},
-    });
-  }
-
-  loginEwelink(
-    emailOrPhone: string,
-    password: string,
-    region = 'eu',
-    customAppId?: string,
-    customAppSecret?: string,
-  ): Promise<{ success: boolean; message: string; devicesCount: number; devices?: any[] }> {
-    return new Promise((resolve) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.http.post<{ success: boolean; message: string; devices: any[] }>('/api/sonoff/ewelink/login', {
-        email_or_phone: emailOrPhone,
-        password,
-        region,
-        custom_app_id: customAppId || undefined,
-        custom_app_secret: customAppSecret || undefined,
-      }).subscribe({
-        next: (res) => {
-          this.fetchDevices();
-          this.loadEwelinkConfig();
-          resolve({
-            success: res?.success || false,
-            message: res?.message || 'Zalogowano pomyślnie do eWeLink!',
-            devicesCount: res?.devices?.length || 0,
-            devices: res?.devices || [],
-          });
-        },
-        error: (err) => {
-          resolve({
-            success: false,
-            message: err?.error?.message || 'Błąd logowania do eWeLink.',
-            devicesCount: 0,
-            devices: [],
-          });
-        },
-      });
-    });
-  }
-
-  saveEwelinkConfig(patch: { app_id?: string; app_secret?: string; region?: string; email_or_phone?: string }): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; config: unknown }>('/api/sonoff/ewelink/config', patch).subscribe({
-        next: (res) => {
-          this.loadEwelinkConfig();
-          resolve(res?.success || false);
-        },
-        error: () => resolve(false),
-      });
-    });
-  }
-
-  controlEwelinkDevice(deviceId: string, state: 'on' | 'off'): Promise<{ success: boolean; message: string }> {
-    return new Promise((resolve) => {
-      this.http.post<{ success: boolean; message: string }>('/api/sonoff/ewelink/control', {
-        device_id: deviceId,
-        state,
-      }).subscribe({
-        next: (res) => {
-          this.fetchDevices();
-          resolve(res);
-        },
-        error: (err) => {
-          resolve({
-            success: false,
-            message: err?.error?.message || 'Błąd sterowania eWeLink.',
-          });
-        },
-      });
-    });
-  }
-
-  autoDiscoverDongleMaxSubnet(subnet?: string): Promise<{
-    success: boolean;
-    message: string;
-    discoveredCount: number;
-    allDetected: Array<{
-      ip: string;
-      deviceId?: string;
-      model: string;
-      switch?: string;
-      rssi?: number;
-      power?: number;
-      voltage?: number;
-      current?: number;
-      isAlreadyAdded: boolean;
-    }>;
-  }> {
-    this.isAutoDiscovering.set(true);
-    return new Promise((resolve) => {
-      this.http
-        .post<{
-          success: boolean;
-          message: string;
-          discovered: Device[];
-          allDetected?: Array<{
-            ip: string;
-            deviceId?: string;
-            model: string;
-            switch?: string;
-            rssi?: number;
-            power?: number;
-            voltage?: number;
-            current?: number;
-            isAlreadyAdded: boolean;
-          }>;
-        }>('/api/dongle-max/auto-discover', { subnet })
-        .subscribe({
-          next: (res) => {
-            this.isAutoDiscovering.set(false);
-            if (res?.allDetected) {
-              this.dongleMaxDiscoveredDevices.set(res.allDetected);
-            }
-            this.fetchDevices();
-            resolve({
-              success: res?.success || false,
-              message: res?.message || 'Ukończono skanowanie podsieci.',
-              discoveredCount: res?.discovered?.length || 0,
-              allDetected: res?.allDetected || [],
-            });
-          },
-          error: (err) => {
-            this.isAutoDiscovering.set(false);
-            resolve({
-              success: false,
-              message: `Błąd podczas auto-odkrywania: ${err.message || 'Brak odpowiedzi'}`,
-              discoveredCount: 0,
-              allDetected: [],
-            });
-          },
-        });
-    });
-  }
-
-  // =========================================================================
-  // SYSTEM BACKUP & RESTORE (Kopia Zapasowa Floty, DongleMAX, Kluczy i Konfiguracji)
-  // =========================================================================
-  readonly isExportingBackup = signal<boolean>(false);
-  readonly isImportingBackup = signal<boolean>(false);
-  readonly lastImportResult = signal<BackupImportResponse | null>(null);
-
-  // Pobranie obiektu pełnej kopii zapasowej z serwera
-  getBackupPackage(): Promise<{ success: boolean; data?: SystemBackupPackage; message?: string }> {
-    this.isExportingBackup.set(true);
-    return new Promise((resolve) => {
-      this.http.get<SystemBackupPackage>('/api/backup/export').subscribe({
-        next: (data) => {
-          this.isExportingBackup.set(false);
-          resolve({ success: true, data });
-        },
-        error: (err) => {
-          this.isExportingBackup.set(false);
-          resolve({
-            success: false,
-            message: err?.error?.message || 'Błąd podczas generowania kopii zapasowej.',
-          });
-        },
-      });
-    });
-  }
-
-  // Bezpośrednie pobranie pliku .json kopii zapasowej do przeglądarki użytkownika
-  async triggerBackupDownload(): Promise<boolean> {
-    const res = await this.getBackupPackage();
-    if (res.success && res.data) {
-      if (!isPlatformBrowser(this.platformId)) return true;
-      try {
-        const jsonStr = JSON.stringify(res.data, null, 2);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        a.href = url;
-        a.download = `iot-telemetry-backup-${ts}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        return true;
-      } catch (err) {
-        console.error('Błąd pobierania pliku backupu:', err);
-        return false;
-      }
-    }
-    return false;
-  }
-
-  // Wgranie i odtworzenie kopii zapasowej na serwerze (nowa instancja lub scalenie)
-  restoreBackupPackage(
-    backupData: SystemBackupPackage,
-    mode: 'replace' | 'merge' = 'replace'
-  ): Promise<BackupImportResponse> {
-    this.isImportingBackup.set(true);
-    return new Promise((resolve) => {
-      this.http
-        .post<BackupImportResponse>('/api/backup/import', {
-          backup: backupData,
-          mode,
-        })
-        .subscribe({
-          next: (res) => {
-            this.isImportingBackup.set(false);
-            this.lastImportResult.set(res);
-            this.fetchDevices();
-            this.fetchDongleMaxConfig();
-            this.loadEwelinkConfig();
-            resolve(res);
-          },
-          error: (err) => {
-            this.isImportingBackup.set(false);
-            const errRes: BackupImportResponse = {
-              success: false,
-              message: err?.error?.message || 'Błąd połączenia podczas wgrywania kopii zapasowej.',
-              mode,
-              restored_counts: {
-                devices: 0,
-                zigbee: 0,
-                wifi: 0,
-                sonoff: 0,
-                tuya: 0,
-                credentials: 0,
-              },
-              dongle_max_restored: false,
-              ewelink_restored: false,
-              notifications_restored: false,
-              errors: [err?.message || 'Błąd serwera'],
-            };
-            this.lastImportResult.set(errRes);
-            resolve(errRes);
-          },
-        });
-    });
-  }
 }
-
-

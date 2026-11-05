@@ -110,14 +110,14 @@ import { Telemetry } from '../../services/telemetry';
                 </button>
               }
             } @else if (isTuyaDevice() || category() === 'fan' || category() === 'smoke') {
-              @if (device().local_key) {
+              @if (device().has_local_key) {
                 <button
                   (click)="openDeviceConfig($event, 'tuya')"
                   class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer"
-                  title="Sterowanie lokalne TinyTuya aktywne w sieci LAN (Local Key skonfigurowany)"
+                  title="Sterowanie lokalne Tuya (Local Key skonfigurowany)"
                 >
                   <mat-icon class="text-[11px] !w-3 !h-3 text-emerald-400">vpn_key</mat-icon>
-                  <span>TinyTuya: ••••{{ localKeyLast4() }}</span>
+                  <span>Tuya LAN: klucz OK</span>
                 </button>
               } @else {
                 <button
@@ -202,7 +202,7 @@ import { Telemetry } from '../../services/telemetry';
               }
             </div>
           </div>
-          @if (isWifiDevice() || device().local_key) {
+          @if (isWifiDevice() || device().has_local_key) {
             <button
               (click)="onTestConnection($event)"
               class="px-2 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 text-[10px] font-bold border border-rose-500/40 shrink-0 transition-colors cursor-pointer"
@@ -723,15 +723,15 @@ import { Telemetry } from '../../services/telemetry';
             <div class="flex items-center gap-1.5 min-w-0">
               <mat-icon
                 class="text-sm !w-4 !h-4"
-                [class.text-emerald-400]="device().local_key"
-                [class.text-amber-400]="!device().local_key"
+                [class.text-emerald-400]="device().has_local_key"
+                [class.text-amber-400]="!device().has_local_key"
               >
-                {{ device().local_key ? 'verified_user' : 'vpn_key_alert' }}
+                {{ device().has_local_key ? 'verified_user' : 'vpn_key_alert' }}
               </mat-icon>
               <div class="truncate">
-                @if (device().local_key) {
+                @if (device().has_local_key) {
                   <span class="text-emerald-300 font-semibold">Tuya Local:</span>
-                  <span class="text-slate-300 ml-1">Klucz aktywny (••••{{ localKeyLast4() }})</span>
+                  <span class="text-slate-300 ml-1">klucz zapisany</span>
                 } @else {
                   <span class="text-amber-400 font-semibold">Brak Local Key</span>
                   <span class="text-slate-400 ml-1 hidden sm:inline">(wymagany w sieci)</span>
@@ -742,18 +742,18 @@ import { Telemetry } from '../../services/telemetry';
             <button
               (click)="openDeviceConfig($event, 'tuya')"
               class="px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-all cursor-pointer shrink-0 shadow-sm"
-              [class.bg-emerald-500/15]="device().local_key"
-              [class.border-emerald-500/30]="device().local_key"
-              [class.text-emerald-300]="device().local_key"
-              [class.hover:bg-emerald-500/25]="device().local_key"
-              [class.bg-amber-500/20]="!device().local_key"
-              [class.border-amber-500/50]="!device().local_key"
-              [class.text-amber-300]="!device().local_key"
-              [class.hover:bg-amber-500/30]="!device().local_key"
+              [class.bg-emerald-500/15]="device().has_local_key"
+              [class.border-emerald-500/30]="device().has_local_key"
+              [class.text-emerald-300]="device().has_local_key"
+              [class.hover:bg-emerald-500/25]="device().has_local_key"
+              [class.bg-amber-500/20]="!device().has_local_key"
+              [class.border-amber-500/50]="!device().has_local_key"
+              [class.text-amber-300]="!device().has_local_key"
+              [class.hover:bg-amber-500/30]="!device().has_local_key"
               title="Pobierz lub zaktualizuj Local Key przez skanowanie kodu QR"
             >
               <mat-icon class="text-xs !w-3.5 !h-3.5">qr_code_scanner</mat-icon>
-              <span>{{ device().local_key ? 'Klucz QR' : 'Pobierz QR' }}</span>
+              <span>{{ device().has_local_key ? 'Klucz QR' : 'Pobierz QR' }}</span>
             </button>
           </div>
         </div>
@@ -1412,6 +1412,27 @@ import { Telemetry } from '../../services/telemetry';
         </div>
       }
 
+      <!-- Wszystkie atrybuty zgłaszane przez urządzenie (także te bez dedykowanego widoku) -->
+      @if (rawEntries().length > 0) {
+        <div class="mb-3">
+          <button
+            (click)="toggleRaw($event)"
+            class="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300 cursor-pointer"
+          >
+            <mat-icon class="text-xs !w-3.5 !h-3.5">{{ showRaw() ? 'expand_less' : 'expand_more' }}</mat-icon>
+            <span>Wszystkie atrybuty ({{ rawEntries().length }})</span>
+          </button>
+          @if (showRaw()) {
+            <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-mono">
+              @for (e of rawEntries(); track e.key) {
+                <span class="text-slate-500 truncate" [title]="e.key">{{ e.key }}</span>
+                <span class="text-slate-300 truncate text-right" [title]="e.value">{{ e.value }}</span>
+              }
+            </div>
+          }
+        </div>
+      }
+
       <!-- Stopka kafelka: Znacznik czasu oraz jakość sygnału (LQI) -->
       <div class="flex items-center justify-between text-[11px] text-slate-400 pt-3 border-t border-slate-800/60">
         <div class="flex items-center gap-1.5" [title]="formattedAbsoluteTime()">
@@ -1450,60 +1471,35 @@ export class DeviceCard {
   readonly configRequested = output<{ device: Device; brand: 'sonoff' | 'tuya' }>();
 
   readonly showAdvanced = signal<boolean>(false);
+  readonly showRaw = signal<boolean>(false);
+
+  /** Pełny ostatni stan z urządzenia, posortowany alfabetycznie (wartości złożone jako JSON). */
+  readonly rawEntries = computed(() =>
+    Object.entries(this.device().raw_state ?? {})
+      .filter(([, v]) => v !== null && v !== undefined)
+      .map(([key, v]) => ({ key, value: typeof v === 'object' ? JSON.stringify(v) : String(v) }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
+  );
+
+  toggleRaw(event: MouseEvent): void {
+    event.stopPropagation();
+    this.showRaw.update((v) => !v);
+  }
   readonly showSchedule = signal<boolean>(false);
 
-  readonly isSonoffDevice = computed<boolean>(() => {
-    const d = this.device();
-    const v = (d.vendor || '').toLowerCase();
-    const m = (d.model || '').toLowerCase();
-    const fn = (d.friendly_name || '').toLowerCase();
-    return (
-      Boolean(d.sonoff_device_id) ||
-      Boolean(d.sonoff_api_key) ||
-      v.includes('sonoff') ||
-      v.includes('ewelink') ||
-      v.includes('coolkit') ||
-      m.includes('sonoff') ||
-      m.includes('s60') ||
-      m.includes('s26') ||
-      m.includes('s31') ||
-      m.includes('s40') ||
-      m.includes('basic') ||
-      m.includes('minir') ||
-      m.includes('esp32') ||
-      fn.includes('sonoff')
-    );
-  });
+  /** Sonoff Wi-Fi (eWeLink LAN). Urządzenia Sonoff Zigbee obsługuje Zigbee2MQTT. */
+  readonly isSonoffDevice = computed<boolean>(() => this.device().driver === 'sonoff');
 
-  readonly isTuyaDevice = computed<boolean>(() => {
-    const d = this.device();
-    const v = (d.vendor || '').toLowerCase();
-    const m = (d.model || '').toLowerCase();
-    return (
-      Boolean(d.local_key) ||
-      Boolean(d.tuya_dev_id) ||
-      v.includes('tuya') ||
-      m.includes('tuya') ||
-      m.includes('ts011f') ||
-      m.includes('ts0601')
-    );
-  });
+  readonly isTuyaDevice = computed<boolean>(() => this.device().driver === 'tuya');
 
   openDeviceConfig(event: MouseEvent, brand?: 'sonoff' | 'tuya'): void {
     event.stopPropagation();
     const b = brand || (this.isSonoffDevice() ? 'sonoff' : 'tuya');
     this.configRequested.emit({ device: this.device(), brand: b });
-    this.tuyaQrRequested.emit(this.device());
   }
 
-  readonly isDeviceOffline = computed(() => {
-    const d = this.device();
-    if (d.connection_status === 'offline') return true;
-    if (!d.last_seen) return true;
-    const ms = new Date(d.last_seen).getTime();
-    if (isNaN(ms)) return true;
-    return (Date.now() - ms) > 60 * 60 * 1000;
-  });
+  /** Dostępność wylicza serwer (availability Z2M, mDNS Sonoff, połączenie Tuya). */
+  readonly isDeviceOffline = computed(() => this.device().connection_status === 'offline' || !this.device().last_seen);
 
   onDeleteClick(event: MouseEvent): void {
     event.stopPropagation();
@@ -1513,15 +1509,9 @@ export class DeviceCard {
   onTestConnection(event: MouseEvent): void {
     event.stopPropagation();
     this.telemetry.testDeviceConnection(this.device().ieee_address).then((res) => {
-      alert(`Wynik testu połączenia z ${this.device().friendly_name}:\n\n${res.message}`);
+      alert(`Odczyt stanu: ${this.device().friendly_name}\n\n${res.message}`);
     });
   }
-
-  readonly localKeyLast4 = computed(() => {
-    const k = this.device().local_key;
-    if (!k) return '';
-    return k.length > 4 ? k.slice(-4) : k;
-  });
 
   openTuyaQr(event: MouseEvent): void {
     event.stopPropagation();
@@ -1617,15 +1607,7 @@ export class DeviceCard {
     });
   }
 
-  readonly isWifiDevice = computed<boolean>(() => {
-    const d = this.device();
-    if (d.protocol === 'wifi') return true;
-    if (d.ieee_address?.startsWith('wifi_')) return true;
-    const v = (d.vendor || '').toLowerCase();
-    const m = (d.model || '').toLowerCase();
-    const f = (d.friendly_name || '').toLowerCase();
-    return v.includes('wi-fi') || v.includes('wifi') || m.includes('wi-fi') || m.includes('wifi') || f.includes('(wi-fi)') || f.includes('wifi');
-  });
+  readonly isWifiDevice = computed<boolean>(() => this.device().protocol === 'wifi');
 
   readonly deviceIpAddress = computed<string | null>(() => {
     const d = this.device();

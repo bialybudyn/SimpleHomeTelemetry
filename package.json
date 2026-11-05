@@ -26,6 +26,7 @@
     "d3": "^7.9.0",
     "express": "^4.21.2",
     "mqtt": "^5.10.1",
+    "multicast-dns": "^7.2.5",
     "nodemailer": "^6.9.16",
     "qrcode": "^1.5.4",
     "rxjs": "^7.8.2",
@@ -37,15 +38,17 @@
     "@angular/build": "^21.0.0",
     "@angular/cli": "^21.0.0",
     "@angular/compiler-cli": "^21.0.0",
+    "@tailwindcss/postcss": "^4.0.0",
     "@types/d3": "^7.4.3",
     "@types/express": "^5.0.0",
+    "@types/multicast-dns": "^7.2.4",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^6.4.17",
     "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.5.13",
-    "@tailwindcss/postcss": "^4.0.0",
     "tailwindcss": "^4.0.0",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=22.13"

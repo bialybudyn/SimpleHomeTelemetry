@@ -53,16 +53,7 @@
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": false,
-              "externalDependencies": [
-                "express",
-                "mqtt",
-                "nodemailer",
-                "ws",
-                "tuyapi",
-                "qrcode",
-                "ewelink-api"
-              ]
+              "sourceMap": false
             }
           },
           "defaultConfiguration": "production"
@@ -83,9 +74,6 @@
             }
           },
           "defaultConfiguration": "development"
-        },
-        "test": {
-          "builder": "@angular/build:unit-test"
         }
       }
     }

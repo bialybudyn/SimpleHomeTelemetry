@@ -59,10 +59,10 @@ interface TopologyLink extends d3.SimulationLinkDatum<TopologyNode> {
             <span>Interaktywny Graf Topologii Sieci D3.js</span>
           </div>
           <h3 class="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            Topologia Hybrydowa: Sonoff Dongle Max + Zigbee Mesh & Wi-Fi
+            Topologia: Zigbee & Wi-Fi
           </h3>
           <p class="text-xs text-slate-400">
-            Centralny punkt: <strong class="text-cyan-300 font-mono">Sonoff Dongle Max (EFR32MG24)</strong> • Podział na strefę Zigbee 3.0 oraz Wi-Fi LAN
+            Centralny punkt: <strong class="text-cyan-300 font-mono">koordynator Zigbee</strong> • Podział na strefę Zigbee 3.0 oraz Wi-Fi LAN
           </p>
         </div>
 
@@ -117,7 +117,7 @@ interface TopologyLink extends d3.SimulationLinkDatum<TopologyNode> {
             <span class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
             <span class="font-bold">Strefa 1: Sieć Zigbee 3.0 Mesh</span>
           </div>
-          <span class="text-slate-400 text-[11px]">Koordynator EFR32MG24</span>
+          <span class="text-slate-400 text-[11px]">Zigbee2MQTT</span>
         </div>
 
         <div class="p-3 rounded-xl bg-indigo-950/20 border border-indigo-800/40 flex items-center justify-between">
@@ -125,7 +125,7 @@ interface TopologyLink extends d3.SimulationLinkDatum<TopologyNode> {
             <span class="w-3 h-3 rounded-full bg-indigo-400 animate-pulse"></span>
             <span class="font-bold">Strefa 2: Sieć Wi-Fi / IP LAN</span>
           </div>
-          <span class="text-slate-400 text-[11px]">Czyste Wi-Fi SmartConfig</span>
+          <span class="text-slate-400 text-[11px]">Sonoff / Tuya LAN</span>
         </div>
       </div>
 
@@ -283,7 +283,7 @@ export class TopologyGraph implements OnInit, OnDestroy {
     // Definicja cieni i gradientów
     const defs = svg.append('defs');
 
-    // Gradient dla Koordynatora Sonoff Dongle Max
+    // Gradient dla koordynatora Zigbee
     const coordGrad = defs.append('radialGradient').attr('id', 'coordGrad');
     coordGrad.append('stop').attr('offset', '0%').attr('stop-color', '#06b6d4');
     coordGrad.append('stop').attr('offset', '100%').attr('stop-color', '#0284c7');
@@ -341,18 +341,15 @@ export class TopologyGraph implements OnInit, OnDestroy {
       .attr('font-size', '11px')
       .attr('font-family', 'monospace')
       .attr('font-weight', 'bold')
-      .text('STREFA WI-FI LAN (SMARTCONFIG)');
+      .text('STREFA WI-FI LAN');
 
     // Budowa węzłów i połączeń
-    const cfg = this.telemetry.dongleMaxConfig();
-    const coordAddress = cfg?.connection_mode === 'network_tcp'
-      ? (cfg?.host ? `tcp://${cfg.host}:${cfg?.port || 6638}` : 'Dongle-MAX (TCP)')
-      : (cfg?.serial_port || 'USB Dongle');
+    const coordAddress = this.telemetry.mqttStatus()?.coordinator_type || 'Koordynator Zigbee';
 
     const coordinatorNode: TopologyNode = {
       id: 'sonoff-dongle-max',
-      name: 'Sonoff Dongle Max',
-      model: 'EFR32MG24 Coordinator',
+      name: 'Koordynator',
+      model: 'Zigbee',
       type: 'coordinator',
       address: coordAddress,
       isCoordinator: true,
@@ -363,7 +360,7 @@ export class TopologyGraph implements OnInit, OnDestroy {
     };
 
     const deviceNodes: TopologyNode[] = this.telemetry.devices().map((d) => {
-      const isWifi = d.ieee_address.startsWith('wifi_') || d.model.toLowerCase().includes('gow') || d.model.toLowerCase().includes('wifi');
+      const isWifi = d.protocol === 'wifi';
       return {
         id: d.ieee_address,
         name: d.friendly_name || d.model,

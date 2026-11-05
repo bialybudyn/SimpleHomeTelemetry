@@ -1,12 +1,14 @@
 /**
- * Moduł integracji Tuya Sharing SDK oraz sterowania lokalnego TuyAPI.
- * Umożliwia pobieranie kluczy Tuya Local Key poprzez skanowanie kodu QR
- * w aplikacji Tuya Smart / Smart Life (bez konta dewelopera Tuya IoT).
+ * Import urządzeń z chmury Tuya przez logowanie kodem QR w aplikacji Smart Life / Tuya Smart
+ * (ten sam mechanizm "Device Sharing", z którego korzysta integracja Tuya w Home Assistant).
+ * Pobiera Device ID, Local Key oraz mapę DP każdego urządzenia — dalsze sterowanie jest lokalne.
  */
 
 import * as https from 'https';
 import * as crypto from 'crypto';
 import QRCode from 'qrcode';
+import { dpMapFromCloud } from './tuya-protocol';
+import type { TuyaDpSpec } from '../../app/models/telemetry.models';
 
 const URL_PATH = 'apigw.iotbing.com';
 const CONF_CLIENT_ID = 'HA_3y9q4ak7g4ephrvke';
@@ -22,6 +24,7 @@ export interface TuyaDeviceExtracted {
   product_id?: string;
   ip?: string;
   online?: boolean;
+  dp_map?: Record<string, TuyaDpSpec>;
 }
 
 export interface PendingQrSession {
@@ -221,7 +224,6 @@ export async function checkTuyaQrStatus(
   message: string;
   username?: string;
   devices?: TuyaDeviceExtracted[];
-  raw_auth?: Record<string, unknown>;
 }> {
   const session = pendingSessions.get(token);
   const activeUserCode = userCode || session?.user_code;
@@ -275,7 +277,6 @@ export async function checkTuyaQrStatus(
       message: `Pomyślnie zalogowano konto Tuya (${authResult.username || 'Użytkownik'})! Wykryto urządzeń: ${extractedDevices.length}`,
       username: authResult.username,
       devices: extractedDevices,
-      raw_auth: authResult,
     };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -349,6 +350,22 @@ async function customerApiRequest(
 }
 
 /**
+ * Mapa DP urządzenia (dpId -> kod funkcji, typ, zakres/skala) — dzięki niej wiadomo np.,
+ * który DP wentylatora to prędkość, a który oscylacja.
+ */
+async function fetchDpMap(authResult: Record<string, unknown>, deviceId: string): Promise<Record<string, TuyaDpSpec> | undefined> {
+  try {
+    const resp = await customerApiRequest(authResult, `/v1.0/m/life/devices/${encodeURIComponent(deviceId)}/status`);
+    const result = resp?.['result'] as Record<string, unknown> | undefined;
+    const relations = result?.['dpStatusRelationDTOS'];
+    if (Array.isArray(relations)) return dpMapFromCloud(relations as Array<Record<string, unknown>>);
+  } catch (err) {
+    console.warn(`[TUYA] Nie udało się pobrać mapy DP dla ${deviceId}:`, err);
+  }
+  return undefined;
+}
+
+/**
  * Pobranie urządzeń i wyciągnięcie Local Key z zarejestrowanych domów w Tuya
  */
 async function fetchTuyaDevices(
@@ -377,11 +394,12 @@ async function fetchTuyaDevices(
           id: String(d['id']),
           name: String(d['name'] || d['product_name'] || 'Urządzenie Tuya'),
           local_key: String(d['local_key'] || ''),
-          category: String(d['category'] || 'fan'),
+          category: String(d['category'] || ''),
           product_name: String(d['product_name'] || ''),
           product_id: d['product_id'] ? String(d['product_id']) : undefined,
-          ip: d['ip'] ? String(d['ip']) : undefined,
+          // Chmura zwraca publiczny adres IP — lokalny zostanie ustalony z rozgłoszeń UDP urządzenia
           online: Boolean(d['online']),
+          dp_map: await fetchDpMap(authResult, String(d['id'])),
         });
       }
     }
@@ -390,127 +408,4 @@ async function fetchTuyaDevices(
   }
 
   return devicesList;
-}
-
-/**
- * Wykonanie rzeczywistego polecenia sterującego przez TuyAPI na lokalnej sieci Wi-Fi
- */
-export async function sendTuyaLocalCommand(
-  ipAddress: string,
-  localKey: string,
-  devId: string,
-  cmd: Record<string, unknown>,
-  protocolVersion = '3.3',
-): Promise<{ success: boolean; message: string }> {
-  if (!ipAddress || !localKey || !devId) {
-    return {
-      success: false,
-      message: 'Brak wymaganego adresu IP, klucza Local Key lub ID urządzenia',
-    };
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const TuyAPI = require('tuyapi');
-  const tuyaDevice = new TuyAPI({
-    id: devId,
-    key: localKey,
-    ip: ipAddress,
-    version: protocolVersion || '3.3',
-    issueGetOnConnect: false,
-  });
-
-  // Mapowanie komend do standardowych kodów DPS Tuya (Wentylator / Gniazdko / Przekaźnik)
-  const dps: Record<string, unknown> = {};
-
-  if (cmd['state'] !== undefined) {
-    dps['1'] = cmd['state'] === 'ON' || cmd['state'] === true;
-  }
-  if (cmd['fan_speed'] !== undefined) {
-    dps['3'] = Number(cmd['fan_speed']);
-  }
-  if (cmd['fan_mode'] !== undefined) {
-    dps['2'] = String(cmd['fan_mode']);
-  }
-  if (cmd['fan_oscillation'] !== undefined) {
-    dps['8'] = Boolean(cmd['fan_oscillation']);
-  }
-  if (cmd['fan_timer'] !== undefined) {
-    dps['5'] = Number(cmd['fan_timer']);
-  }
-  if (cmd['fan_ionizer'] !== undefined) {
-    dps['101'] = Boolean(cmd['fan_ionizer']);
-  }
-  if (cmd['fan_humidifier'] !== undefined) {
-    dps['102'] = Boolean(cmd['fan_humidifier']);
-  }
-  if (cmd['fan_uv'] !== undefined) {
-    dps['103'] = Boolean(cmd['fan_uv']);
-  }
-
-  return new Promise((resolve) => {
-    let completed = false;
-
-    const timeout = setTimeout(() => {
-      if (!completed) {
-        completed = true;
-        try {
-          tuyaDevice.disconnect();
-        } catch (e) {
-          console.debug('TuyAPI timeout disconnect error:', e);
-        }
-        resolve({
-          success: false,
-          message: `Przekroczono limit czasu (3s) połączenia z urządzeniem Tuya ${ipAddress}:6668. Upewnij się, że wentylator jest włączony w sieci.`,
-        });
-      }
-    }, 3500);
-
-    // Jeśli mamy adres IP urządzenia, łączymy się bezpośrednio po gnieździe TCP 6668,
-    // a jeśli bezpośrednie połączenie zgłosi błąd, próbujemy odnalezienia w podsieci przez find()
-    const connectAction = ipAddress
-      ? tuyaDevice.connect().catch((directErr: unknown) => {
-          console.debug('TuyAPI direct connect failed, trying find():', directErr);
-          return tuyaDevice.find({ timeout: 2 }).then(() => tuyaDevice.connect());
-        })
-      : tuyaDevice.find({ timeout: 2 }).then(() => tuyaDevice.connect());
-
-    connectAction
-      .then(() => {
-        if (Object.keys(dps).length > 0) {
-          return tuyaDevice.set({ multiple: true, data: dps });
-        }
-        return true;
-      })
-      .then(() => {
-        if (!completed) {
-          completed = true;
-          clearTimeout(timeout);
-          try {
-            tuyaDevice.disconnect();
-          } catch (e) {
-            console.debug('TuyAPI success disconnect error:', e);
-          }
-          resolve({
-            success: true,
-            message: `Wysłano pomyślnie instrukcję Tuya Local do urządzenia ${ipAddress}!`,
-          });
-        }
-      })
-      .catch((err: unknown) => {
-        if (!completed) {
-          completed = true;
-          clearTimeout(timeout);
-          try {
-            tuyaDevice.disconnect();
-          } catch (e) {
-            console.debug('TuyAPI catch disconnect error:', e);
-          }
-          const msg = err instanceof Error ? err.message : String(err);
-          resolve({
-            success: false,
-            message: `Błąd komunikacji Tuya Local (${msg})`,
-          });
-        }
-      });
-  });
 }

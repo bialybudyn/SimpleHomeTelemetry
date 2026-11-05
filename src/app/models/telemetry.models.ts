@@ -1,5 +1,33 @@
 export type DeviceCategory = 'climate' | 'fan' | 'plug' | 'switch' | 'sensor' | 'smoke' | 'contact' | 'occupancy' | 'water_leak';
 
+export type DeviceDriver = 'zigbee2mqtt' | 'sonoff' | 'tuya';
+
+/** Pojedyncza cecha z listy "exposes" Zigbee2MQTT (spłaszczona). */
+export interface Z2mExpose {
+  type: string;
+  name?: string;
+  property?: string;
+  label?: string;
+  description?: string;
+  access?: number;
+  unit?: string;
+  value_on?: unknown;
+  value_off?: unknown;
+  value_min?: number;
+  value_max?: number;
+  value_step?: number;
+  values?: unknown[];
+  endpoint?: string;
+  features?: Z2mExpose[];
+}
+
+/** Opis punktu danych (DP) urządzenia Tuya pobrany z chmury lub zdefiniowany ręcznie. */
+export interface TuyaDpSpec {
+  code: string;
+  type?: 'Boolean' | 'Integer' | 'Enum' | 'String' | 'Json' | 'Raw' | string;
+  values?: unknown;
+}
+
 export interface Device {
   ieee_address: string;
   friendly_name: string;
@@ -7,16 +35,31 @@ export interface Device {
   category?: DeviceCategory;
   vendor?: string;
   protocol?: 'zigbee' | 'wifi';
+  driver?: DeviceDriver;
   ip_address?: string;
+  /** Pełny ostatni stan zgłoszony przez urządzenie (payload Z2M, parametry Sonoff, DP Tuya). */
+  raw_state?: Record<string, unknown>;
+  /** Lista możliwości urządzenia z Zigbee2MQTT. */
+  exposes?: Z2mExpose[];
+  /** Dostępność zgłaszana przez sterownik (availability Z2M, połączenie LAN). */
+  available?: boolean | null;
+  description?: string | null;
+
+  // Tuya (lokalny protokół 3.1-3.5)
   local_key?: string | null;
+  has_local_key?: boolean;
   tuya_dev_id?: string | null;
   tuya_product_name?: string | null;
   tuya_protocol_version?: string | null;
+  /** Mapa DP id -> kod funkcji Tuya (np. "1" -> {code: "switch"}). */
+  tuya_dp_map?: Record<string, TuyaDpSpec> | null;
   dongle_gateway_ip?: string | null;
 
-  // SONOFF S60TFP / S60 Wi-Fi Smart Plug & eWeLink LAN
+  // SONOFF eWeLink LAN (deviceid + devicekey urządzenia)
   sonoff_device_id?: string | null;
+  /** devicekey urządzenia (klucz szyfrowania LAN). Nigdy nie jest wysyłany do przeglądarki. */
   sonoff_api_key?: string | null;
+  has_sonoff_key?: boolean;
   sonoff_firmware?: string | null;
 
   last_seen: string | null;
@@ -24,6 +67,8 @@ export interface Device {
   first_seen?: string | null;
   is_deleted?: boolean | null;
   deleted_at?: string | null;
+  /** Ukryte automatycznie, bo urządzenie zniknęło z Zigbee2MQTT. */
+  deleted_by_bridge?: boolean;
   connection_status?: 'online' | 'offline' | 'error' | 'untested' | null;
   last_error?: string | null;
   battery: number | null;
@@ -136,6 +181,8 @@ export interface TelemetryPoint {
   contact?: boolean | null;
   occupancy?: boolean | null;
   water_leak?: boolean | null;
+  /** Wszystkie wartości liczbowe w tym punkcie (także atrybuty spoza powyższej listy). */
+  values?: Record<string, number>;
   timestamp: string;
 }
 
@@ -447,7 +494,7 @@ export interface SystemBackupMetadata {
 export interface SystemBackupPackage {
   metadata: SystemBackupMetadata;
   devices: Device[];
-  dongle_max: DongleMaxConfig;
+  dongle_max?: DongleMaxConfig;
   ewelink?: {
     email?: string;
     password?: string;

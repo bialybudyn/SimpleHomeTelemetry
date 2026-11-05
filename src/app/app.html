@@ -10,9 +10,6 @@
       <div>
         <div class="flex items-center gap-2">
           <span class="text-base font-bold tracking-tight text-white">SimpleHomeTelemetry</span>
-          <span class="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700/60">
-            EFR32MG24
-          </span>
         </div>
       </div>
     </div>
@@ -134,7 +131,7 @@
       <button
         (click)="openDeviceConfigModal()"
         class="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm transition-all cursor-pointer"
-        title="Panel Konfiguracja urządzenia: Zarządzanie Sonoff LAN, adresy IP, baza OUI i klucze Tuya"
+        title="Konfiguracja urządzeń Wi-Fi Sonoff i Tuya"
       >
         <mat-icon class="text-sm !w-4 !h-4 text-cyan-400">tune</mat-icon>
         <span class="hidden md:inline font-bold">Konfiguracja (Sonoff/Tuya)</span>
@@ -172,52 +169,18 @@
         </span>
       </button>
 
-      <!-- Przycisk Parowania Wi-Fi (Dongle-MAX AP & SmartConfig) -->
+      <!-- Urządzenia Wi-Fi (Sonoff / Tuya) -->
       <button
         (click)="openWifiModal()"
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-900/30 transition-all cursor-pointer"
-        title="Parowanie urządzeń Wi-Fi za pomocą Access Pointa Dongle-MAX oraz SmartConfig"
+        title="Dodawanie i konfiguracja urządzeń Wi-Fi Sonoff i Tuya"
       >
-        <mat-icon
-          class="text-sm !w-4 !h-4"
-          [class.animate-spin]="telemetry.isWifiPairing()"
-        >
-          {{ telemetry.isWifiPairing() ? 'refresh' : 'wifi_find' }}
-        </mat-icon>
-        <span class="font-bold tracking-wide">
-          @if (telemetry.isWifiPairing()) {
-            Wi-Fi ({{ telemetry.wifiPairingRemainingSeconds() }}s)
-          } @else {
-            Parowanie Wi-Fi
-          }
-        </span>
+        <mat-icon class="text-sm !w-4 !h-4">wifi</mat-icon>
+        <span class="font-bold tracking-wide">Wi-Fi</span>
       </button>
     </div>
 
   </div>
-
-  <!-- Pasek aktywnego parowania Wi-Fi (Dongle-MAX AP & SmartConfig) -->
-  @if (telemetry.isWifiPairing()) {
-    <div class="mt-3 max-w-7xl mx-auto p-3.5 rounded-xl bg-indigo-950 border border-indigo-700 text-indigo-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in shadow-lg shadow-indigo-950/50">
-      <div class="flex items-center gap-3">
-        <mat-icon class="text-indigo-400 text-lg animate-spin !w-5 !h-5 shrink-0">wifi_find</mat-icon>
-        <div>
-          <div class="font-bold text-white flex items-center gap-2">
-            <span>Parowanie urządzeń Wi-Fi aktywne (Dongle-MAX AP & SmartConfig)</span>
-            <span class="px-2 py-0.5 rounded bg-indigo-900 text-indigo-300 font-mono text-[10px]">{{ telemetry.wifiSsid() }}</span>
-          </div>
-          <p class="text-[11px] text-indigo-300">
-            Przytrzymaj przycisk parowania na urządzeniu Wi-Fi (gniazdko, przełącznik, wentylator, sensor) przez 5s, aż dioda zacznie migać. Koordynator Dongle-MAX nasłuchuje na Access Poincie i automatycznie rejestruje urządzenie!
-          </p>
-        </div>
-      </div>
-      <div class="flex items-center gap-3 shrink-0">
-        <span class="font-mono text-sm font-bold text-indigo-400 bg-indigo-900/60 px-3 py-1 rounded-lg border border-indigo-800">
-          {{ telemetry.wifiPairingRemainingSeconds() }}s
-        </span>
-      </div>
-    </div>
-  }
 
   <!-- Pasek aktywnego parowania (odliczanie 60s) -->
   @if (telemetry.isPairing()) {
@@ -225,9 +188,9 @@
       <div class="flex items-center gap-3">
         <mat-icon class="text-cyan-400 text-lg animate-spin !w-5 !h-5 shrink-0">wifi_tethering</mat-icon>
         <div>
-          <span class="font-bold text-white">Tryb parowania aktywny (Zigbee permit-join włączony na koordynatorze Sonoff Dongle-M):</span>
+          <span class="font-bold text-white">Tryb parowania Zigbee aktywny (permit join):</span>
           <p class="text-cyan-300/80 text-[11px] mt-0.5">
-            Przytrzymaj przycisk parowania na czujniku przez 5 sekund, aż dioda LED zamiga. Urządzenie zostanie automatycznie zarejestrowane w bazie SQLite.
+            Przytrzymaj przycisk parowania na urządzeniu, aż dioda zacznie migać. Nowe urządzenie pojawi się na pulpicie po zakończeniu parowania w Zigbee2MQTT.
           </p>
         </div>
       </div>
@@ -392,7 +355,7 @@
 
   <!-- ZAKŁADKA 1: PULPIT NA ŻYWO (DASHBOARD) -->
   @if (activeTab() === 'dashboard') {
-    <!-- PASEK STANU USŁUG W TLE (Mosquitto + Zigbee2MQTT + Dongle-M) -->
+    <!-- PASEK STANU USŁUG (Mosquitto + Zigbee2MQTT) -->
     <div class="mb-6 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
       <!-- 1. Mosquitto MQTT -->
       <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
@@ -433,24 +396,24 @@
         </div>
       </div>
 
-      <!-- 3. Koordynator Sonoff Dongle Max -->
+      <!-- 3. Koordynator Zigbee -->
       <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
         <mat-icon class="text-cyan-400 text-base !w-4 !h-4 shrink-0">router</mat-icon>
         <div class="truncate">
-          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Koordynator Dongle-M</div>
+          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Koordynator Zigbee</div>
           <div class="text-cyan-300 truncate font-semibold">
-            {{ telemetry.dongleMaxConfig()?.connection_mode === 'network_tcp' ? (telemetry.dongleMaxConfig()?.host ? 'tcp://' + telemetry.dongleMaxConfig()?.host + ':' + (telemetry.dongleMaxConfig()?.port || 6638) : 'Dongle-MAX TCP') : (telemetry.dongleMaxConfig()?.serial_port || '/dev/ttyACM0') }}
+            {{ telemetry.mqttStatus()?.coordinator_type || 'nieznany' }}{{ telemetry.mqttStatus()?.channel ? ' · kanał ' + telemetry.mqttStatus()?.channel : '' }}
           </div>
         </div>
       </div>
 
-      <!-- 4. Pomiary & Baza SQLite -->
+      <!-- 4. Urządzenia -->
       <div class="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
         <mat-icon class="text-indigo-400 text-base !w-4 !h-4 shrink-0">storage</mat-icon>
         <div class="truncate">
-          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Baza SQLite & Telemetria</div>
+          <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Urządzenia</div>
           <div class="text-slate-200 truncate font-semibold">
-            <span>{{ telemetry.devices().length }} czujników</span> · <span class="text-slate-400">WAL Mode</span>
+            <span>{{ telemetry.devices().length }} na pulpicie</span>
           </div>
         </div>
       </div>
@@ -716,7 +679,7 @@
                   <h4 class="text-xs font-bold text-white">Włącz tryb parowania</h4>
                 </div>
                 <p class="text-[11px] text-slate-400 leading-relaxed">
-                  Kliknij przycisk <strong class="text-slate-200">"Włącz parowanie (160s)"</strong>. Koordynator Sonoff Dongle Max otworzy sieć radiową dla nowych urządzeń.
+                  Kliknij przycisk <strong class="text-slate-200">"Zigbee"</strong> w nagłówku. Zigbee2MQTT otworzy sieć dla nowych urządzeń.
                 </p>
               </div>
 
@@ -793,28 +756,14 @@
             <h2 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
               <mat-icon class="text-indigo-400 !w-5 !h-5 text-xl">wifi</mat-icon>
               <span>Pulpit Urządzeń Wi-Fi</span>
-              <span class="px-2 py-0.5 text-xs rounded-full bg-indigo-950/80 border border-indigo-800 text-indigo-300 font-normal">
-                Dongle-MAX AP
-              </span>
             </h2>
             <p class="text-xs text-slate-400 mt-0.5">
-              Urządzenia sparowane przez wbudowany Access Point Dongle-MAX oraz sieć LAN (przeciągaj kafelki Drag & Drop).
+              Gniazdka i urządzenia Sonoff oraz Tuya sterowane lokalnie w sieci LAN (przeciągaj kafelki Drag & Drop).
             </p>
           </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 text-xs font-mono">
-          <div class="text-slate-400">
-            <span>Dongle-MAX AP:</span>
-            <span class="text-indigo-400 ml-1 font-semibold">
-              @if (telemetry.dongleMaxAp().enabled && telemetry.dongleMaxAp().ssid) {
-                {{ telemetry.dongleMaxAp().ssid }}
-              } @else {
-                LAN / AP w gotowości
-              }
-            </span>
-          </div>
-          <div class="text-slate-500">·</div>
           <div class="text-slate-400">
             <span>Urządzenia Wi-Fi:</span>
             <span class="text-white font-bold ml-1">{{ allWifiDevices().length }}</span>
@@ -822,7 +771,7 @@
           <button
             (click)="openDeviceConfigModal(undefined, 'sonoff')"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/40 text-cyan-200 border border-cyan-500/40 font-semibold shadow-sm transition-all cursor-pointer"
-            title="Panel Konfiguracja urządzenia: Zarządzanie Sonoff LAN, adresy IP, baza OUI i klucze Tuya"
+            title="Konfiguracja urządzeń Wi-Fi Sonoff i Tuya"
           >
             <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">tune</mat-icon>
             <span>Konfiguracja Wi-Fi (Sonoff/Tuya)</span>
@@ -1011,52 +960,13 @@
               <div class="space-y-1">
                 <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
                   <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                  <span>
-                    @if (telemetry.dongleMaxAp().enabled && telemetry.dongleMaxAp().ssid) {
-                      Access Point Dongle-MAX: {{ telemetry.dongleMaxAp().ssid }}
-                    } @else {
-                      Parowanie przez Access Point Dongle-MAX / SmartConfig / LAN
-                    }
-                  </span>
+                  <span>Sonoff (eWeLink LAN) · Tuya (lokalnie)</span>
                 </div>
                 <h3 class="text-lg font-bold text-white tracking-tight">
                   Pulpit Urządzeń Wi-Fi
                 </h3>
                 <p class="text-xs text-slate-400 leading-relaxed">
-                  Brak sparowanych urządzeń Wi-Fi. Użyj przycisku «Paruj Wi-Fi», aby dodać urządzenie przez wbudowany Access Point Dongle-MAX, SmartConfig lub bezpośrednio po adresie IP w sieci lokalnej.
-                </p>
-              </div>
-            </div>
-
-            <!-- 3-krokowa instrukcja uniwersalnego parowania Wi-Fi -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
-              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
-                <div class="flex items-center gap-2">
-                  <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">1</span>
-                  <h4 class="text-xs font-bold text-white">Tryb parowania AP</h4>
-                </div>
-                <p class="text-[11px] text-slate-400 leading-relaxed">
-                  Przytrzymaj przycisk parowania na urządzeniu Wi-Fi przez <strong class="text-slate-200">5 sekund</strong>, aż wskaźnik LED zacznie migać.
-                </p>
-              </div>
-
-              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
-                <div class="flex items-center gap-2">
-                  <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">2</span>
-                  <h4 class="text-xs font-bold text-white">Access Point Dongle-MAX</h4>
-                </div>
-                <p class="text-[11px] text-slate-400 leading-relaxed">
-                  Urządzenie łączy się z Access Pointem Dongle-MAX lub odbiera parametry sieci przez pakiet SmartConfig.
-                </p>
-              </div>
-
-              <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2">
-                <div class="flex items-center gap-2">
-                  <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">3</span>
-                  <h4 class="text-xs font-bold text-white">Steruj z Pulpitu Wi-Fi</h4>
-                </div>
-                <p class="text-[11px] text-slate-400 leading-relaxed">
-                  Urządzenie pojawi się na kafelku — możesz sterować zasilaniem, prędkością czy monitorować zużycie energii.
+                  Brak urządzeń Wi-Fi. Gniazdka Sonoff w sieci pojawią się same (mDNS) — do sterowania potrzebny jest ich devicekey (import z eWeLink). Urządzenia Tuya dodasz kodem QR z aplikacji Smart Life albo ręcznie (Device ID + Local Key).
                 </p>
               </div>
             </div>
@@ -1066,8 +976,8 @@
                 (click)="openWifiModal()"
                 class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-950/40 transition-all cursor-pointer"
               >
-                <mat-icon class="text-base !w-4 !h-4">wifi_find</mat-icon>
-                <span>Otwórz Parowanie Wi-Fi (Dongle-MAX AP)</span>
+                <mat-icon class="text-base !w-4 !h-4">wifi</mat-icon>
+                <span>Dodaj urządzenia Wi-Fi</span>
               </button>
             </div>
           </div>
@@ -1075,18 +985,6 @@
       }
     </div>
 
-    <!-- Informacja o sprzęcie na dole ekranu -->
-    <div class="mt-12 p-4 rounded-xl bg-slate-900/40 border border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400 font-mono">
-      <div class="flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span>Sprzęt: ITEAD Sonoff Zigbee 3.0 Dongle Max (EFR32MG24 + ESP32-D0WD)</span>
-      </div>
-      <div class="flex items-center gap-4 text-[11px]">
-        <span>Połączenie: Sieć TCP (port 6638) / USB (/dev/ttyACM0)</span>
-        <span>Baza: SQLite (WAL Mode)</span>
-        <span>API: REST + WebSocket + SSE</span>
-      </div>
-    </div>
   }
 
   <!-- ZAKŁADKA 2: SCENY I AUTOMATYZACJA WORKFLOW -->

@@ -31,7 +31,7 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
               </span>
             </h2>
             <p class="text-xs text-slate-400 max-w-3xl leading-relaxed">
-              Zrzucaj i odtwarzaj kompletny stan systemu: flotę urządzeń Zigbee i Wi-Fi, parametry koordynatora Sonoff Dongle Max (Dongle-M), poświadczenia eWeLink Cloud oraz wszelkie klucze szyfrujące (Local Key, Device Key, API Key i adresy IP).
+              Zapisz i odtwórz urządzenia Zigbee i Wi-Fi, ich klucze (Tuya Local Key, Sonoff devicekey), adresy IP oraz ustawienia powiadomień. Historia pomiarów nie wchodzi do kopii. Plik zawiera klucze — przechowuj go bezpiecznie.
             </p>
           </div>
 
@@ -82,19 +82,6 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
             <span class="text-emerald-400 font-bold text-sm">{{ credentialsCount() }}</span>
           </div>
 
-          <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
-            <span class="text-slate-500 text-[10px] block">Dongle Max (Tryb)</span>
-            <span class="text-amber-400 font-bold text-sm truncate" [title]="telemetry.dongleMaxConfig()?.host || 'Dongle-M.local'">
-              {{ telemetry.dongleMaxConfig()?.connection_mode === 'network_tcp' ? 'TCP 6638' : 'USB' }}
-            </span>
-          </div>
-
-          <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
-            <span class="text-slate-500 text-[10px] block">Konto eWeLink</span>
-            <span class="text-slate-300 font-bold text-sm">
-              {{ telemetry.ewelinkConfig().connected ? 'Połączone' : 'Lokalne' }}
-            </span>
-          </div>
         </div>
       </div>
 
@@ -141,17 +128,10 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0"></span>
                   <div>
                     <strong class="text-white">Wszystkie poświadczenia i klucze szyfrujące:</strong>
-                    <span class="text-slate-400 ml-1">Klucze Tuya Local Key, klucze Sonoff API Key / DeviceKey, Device ID oraz tokeny eWeLink.</span>
+                    <span class="text-slate-400 ml-1">Klucze Tuya Local Key, klucze Sonoff devicekey, Device ID oraz AppID/AppSecret eWeLink.</span>
                   </div>
                 </li>
 
-                <li class="flex items-start gap-2 text-slate-300">
-                  <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0"></span>
-                  <div>
-                    <strong class="text-white">Koordynator Sonoff Dongle Max (Dongle-M):</strong>
-                    <span class="text-slate-400 ml-1">Konfiguracja połączenia sieciowego TCP (host, port 6638), tryb punktu dostępowego SoftAP oraz podsieci skanera OUI.</span>
-                  </div>
-                </li>
 
                 <li class="flex items-start gap-2 text-slate-300">
                   <span class="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0"></span>
@@ -207,7 +187,7 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
                 </div>
                 <div>
                   <h3 class="text-sm font-bold text-white tracking-wide">2. Przywróć Kopię Zapasową (Import)</h3>
-                  <p class="text-[11px] text-slate-400">Odtwórz urządzenia i DongleMAX na nowej instancji serwera</p>
+                  <p class="text-[11px] text-slate-400">Odtwórz urządzenia na nowej instancji serwera</p>
                 </div>
               </div>
               <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
@@ -277,9 +257,6 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
                   </div>
                   <div class="text-slate-400">
                     Liczba urządzeń: <span class="text-cyan-400 font-bold">{{ pkg.devices.length }}</span>
-                  </div>
-                  <div class="text-slate-400">
-                    Dongle Max: <span class="text-emerald-400">{{ pkg.dongle_max.host }}:{{ pkg.dongle_max.port }}</span>
                   </div>
                   <div class="text-slate-400">
                     Konta z kluczami: <span class="text-amber-400">{{ pkg.metadata.counts.credentials_count }}</span>
@@ -398,8 +375,8 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
                 <span class="text-indigo-300 font-bold">{{ report.restored_counts.wifi }}</span>
               </div>
               <div class="p-2 rounded-lg bg-slate-950/60">
-                <span class="text-slate-400 text-[10px] block">Dongle Max & Klucze:</span>
-                <span class="text-emerald-300 font-bold">{{ report.dongle_max_restored ? 'Odtworzono ✓' : 'Brak' }}</span>
+                <span class="text-slate-400 text-[10px] block">Z kluczami:</span>
+                <span class="text-emerald-300 font-bold">{{ report.restored_counts.credentials }}</span>
               </div>
             </div>
           }
@@ -541,8 +518,8 @@ export class BackupManager {
         }
 
         const devList = Array.isArray(parsed.devices) ? parsed.devices : [];
-        if (devList.length === 0 && !parsed.dongle_max) {
-          throw new Error('Plik nie zawiera sekcji "devices" ani "dongle_max". Czy to na pewno plik kopii zapasowej tego systemu?');
+        if (devList.length === 0) {
+          throw new Error('Plik nie zawiera sekcji "devices". Czy to na pewno plik kopii zapasowej tego systemu?');
         }
 
         this.parsedBackup.set(parsed as SystemBackupPackage);
@@ -565,7 +542,7 @@ export class BackupManager {
     const count = backup.devices?.length || 0;
 
     const confirmMsg = mode === 'replace'
-      ? `Czy na pewno chcesz zastąpić WSZYSTKIE obecne urządzenia i konfigurację DongleMAX danymi z kopii zapasowej (${count} urządzeń)?\n\nOperacja jest przeznaczona dla nowej instancji serwera.`
+      ? `Czy na pewno chcesz zastąpić WSZYSTKIE obecne urządzenia danymi z kopii zapasowej (${count} urządzeń)?\n\nOperacja jest przeznaczona dla nowej instancji serwera.`
       : `Czy chcesz scalić ${count} urządzeń z pliku kopii zapasowej z obecną bazą?`;
 
     if (!confirm(confirmMsg)) return;
