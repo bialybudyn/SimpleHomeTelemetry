@@ -29,18 +29,6 @@
         <span class="font-bold">Pulpit na żywo</span>
       </button>
 
-      <button
-        (click)="setTab('scenes')"
-        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'scenes'"
-        [class.text-white]="activeTab() === 'scenes'"
-        [class.shadow-sm]="activeTab() === 'scenes'"
-        [class.text-slate-400]="activeTab() !== 'scenes'"
-        [class.hover:text-white]="activeTab() !== 'scenes'"
-      >
-        <mat-icon class="text-sm !w-4 !h-4">account_tree</mat-icon>
-        <span class="font-bold">Sceny & Automatyzacja</span>
-      </button>
 
       <button
         (click)="setTab('analytics')"
@@ -660,13 +648,13 @@
               <div class="space-y-1">
                 <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Usługi w tle aktywne i gotowe do odbioru</span>
+                  <span>Brak urządzeń na pulpicie</span>
                 </div>
                 <h3 class="text-lg font-bold text-white tracking-tight">
                   Oczekiwanie na urządzenia Sonoff & Tuya
                 </h3>
                 <p class="text-xs text-slate-400 leading-relaxed">
-                  Broker Mosquitto oraz demon Zigbee2MQTT działają w tle. Obsługujemy przekaźniki na szynę DIN <strong class="text-white">BASIC-ZB1GSP (32A)</strong>, głowice <strong class="text-white">TRVZB / Gen 2</strong>, inteligentne gniazdka <strong class="text-white">S26R2ZB</strong>, wyłączniki <strong class="text-white">ZBMINIR2</strong> oraz sensory Tuya.
+                  Panel pokaże tu urządzenia zgłoszone przez Zigbee2MQTT oraz dodane urządzenia Wi-Fi (Sonoff, Tuya). Stan połączenia z brokerem MQTT widać w ustawieniach.
                 </p>
               </div>
             </div>
@@ -987,10 +975,6 @@
 
   }
 
-  <!-- ZAKŁADKA 2: SCENY I AUTOMATYZACJA WORKFLOW -->
-  @if (activeTab() === 'scenes') {
-    <app-scenes-builder />
-  }
 
   <!-- ZAKŁADKA 3: ANALITYKA (CHART.JS) -->
   @if (activeTab() === 'analytics') {

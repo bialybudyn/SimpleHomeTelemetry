@@ -194,7 +194,7 @@ import { Telemetry } from '../../services/telemetry';
           <div class="flex items-start gap-1.5 min-w-0">
             <mat-icon class="text-xs !w-4 !h-4 text-rose-400 shrink-0 mt-0.5">cloud_off</mat-icon>
             <div class="min-w-0">
-              <span class="font-bold text-rose-300 block">Brak połączenia z urządzeniem (Offline)</span>
+              <span class="font-bold text-rose-300 block">{{ isDeviceOffline() ? 'Brak połączenia z urządzeniem (Offline)' : missingSonoffKey() ? 'Urządzenie w sieci, brak klucza' : 'Problem z urządzeniem' }}</span>
               @if (device().last_error) {
                 <span class="text-[11px] text-slate-300 font-mono block truncate" [title]="device().last_error">{{ device().last_error }}</span>
               } @else {
@@ -767,13 +767,14 @@ import { Telemetry } from '../../services/telemetry';
             <div>
               <div class="text-[11px] font-medium text-slate-400">Status gniazdka 16A</div>
               <div class="text-base font-bold font-mono tracking-tight mt-0.5" [class.text-emerald-400]="isStateOn()" [class.text-slate-500]="!isStateOn()">
-                {{ isStateOn() ? 'WŁĄCZONE (ON)' : 'WYŁĄCZONE (OFF)' }}
+                {{ isStateUnknown() ? 'STAN NIEZNANY' : isStateOn() ? 'WŁĄCZONE (ON)' : 'WYŁĄCZONE (OFF)' }}
               </div>
             </div>
 
             <button
               (click)="togglePowerState($event)"
-              class="px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+              [disabled]="missingSonoffKey() || toggleCooldown()"
+              class="px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               [class.bg-emerald-600]="isStateOn()"
               [class.hover:bg-emerald-500]="isStateOn()"
               [class.text-white]="isStateOn()"
@@ -792,7 +793,7 @@ import { Telemetry } from '../../services/telemetry';
           <div class="grid grid-cols-3 gap-2 text-xs font-mono">
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
               <div class="text-slate-400 text-[10px]">Moc</div>
-              <div class="text-white font-bold text-sm mt-0.5">{{ device().power !== undefined && device().power !== null ? device().power + ' W' : '0 W' }}</div>
+              <div class="text-white font-bold text-sm mt-0.5">{{ device().power !== undefined && device().power !== null ? device().power + ' W' : '—' }}</div>
             </div>
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
               <div class="text-slate-400 text-[10px]">Napięcie</div>
@@ -800,7 +801,7 @@ import { Telemetry } from '../../services/telemetry';
             </div>
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
               <div class="text-slate-400 text-[10px]">Energia</div>
-              <div class="text-emerald-300 font-bold text-sm mt-0.5">{{ device().energy !== undefined && device().energy !== null ? device().energy + ' kWh' : '0 kWh' }}</div>
+              <div class="text-emerald-300 font-bold text-sm mt-0.5">{{ device().energy !== undefined && device().energy !== null ? device().energy + ' kWh' : '—' }}</div>
             </div>
           </div>
         </div>
@@ -1499,7 +1500,16 @@ export class DeviceCard {
   }
 
   /** Dostępność wylicza serwer (availability Z2M, mDNS Sonoff, połączenie Tuya). */
-  readonly isDeviceOffline = computed(() => this.device().connection_status === 'offline' || !this.device().last_seen);
+  readonly isDeviceOffline = computed(() => {
+    const d = this.device();
+    if (d.connection_status === 'offline') return true;
+    // Urządzenie zgłoszone jako dostępne (np. ogłoszenie mDNS Sonoff) nie jest offline, nawet bez odczytu stanu
+    if (d.connection_status === 'online' || d.available === true) return false;
+    return !d.last_seen;
+  });
+
+  /** Sonoff widoczny w sieci, ale bez devicekey: stanu nie da się odczytać ani zmienić. */
+  readonly missingSonoffKey = computed(() => this.device().driver === 'sonoff' && !this.device().has_sonoff_key);
 
   onDeleteClick(event: MouseEvent): void {
     event.stopPropagation();
@@ -1651,7 +1661,7 @@ export class DeviceCard {
 
   readonly formattedVoltage = computed<string>(() => {
     const v = this.device().voltage;
-    if (v === undefined || v === null) return '230 V';
+    if (v === undefined || v === null) return '—';
     if (v > 1000) return (v / 100).toFixed(1) + ' V';
     if (v > 500) return (v / 10).toFixed(1) + ' V';
     return v + ' V';
@@ -1728,6 +1738,11 @@ export class DeviceCard {
     }
   });
 
+  readonly isStateUnknown = computed(() => {
+    const s = this.device().state;
+    return s === undefined || s === null || s === '';
+  });
+
   readonly isStateOn = computed(() => {
     const s = this.device().state;
     return s === 'ON' || s === 'true' || s === '1';
@@ -1735,7 +1750,7 @@ export class DeviceCard {
 
   readonly setpointTemp = computed(() => {
     const s = this.device().current_heating_setpoint;
-    return s !== undefined && s !== null ? s.toFixed(1) : '21.0';
+    return s !== undefined && s !== null ? s.toFixed(1) : '—';
   });
 
   readonly measuredTemp = computed(() => {
@@ -1819,8 +1834,14 @@ export class DeviceCard {
     this.renameRequested.emit(this.device());
   }
 
+  /** Krótka blokada przycisku po kliknięciu — gniazdka Wi-Fi (ESP) zawieszają się przy serii szybkich poleceń. */
+  readonly toggleCooldown = signal<boolean>(false);
+
   togglePowerState(event: MouseEvent): void {
     event.stopPropagation();
+    if (this.toggleCooldown()) return;
+    this.toggleCooldown.set(true);
+    setTimeout(() => this.toggleCooldown.set(false), 2000);
     const nextState = this.isStateOn() ? 'OFF' : 'ON';
     this.commandRequested.emit({
       device: this.device(),
@@ -1830,7 +1851,9 @@ export class DeviceCard {
 
   adjustSetpoint(delta: number, event: MouseEvent): void {
     event.stopPropagation();
-    const current = this.device().current_heating_setpoint ?? 21.0;
+    const current = this.device().current_heating_setpoint;
+    // Bez odczytanej nastawy nie zgadujemy punktu wyjścia
+    if (current === undefined || current === null) return;
     const next = Math.min(30, Math.max(5, parseFloat((current + delta).toFixed(1))));
     this.commandRequested.emit({
       device: this.device(),

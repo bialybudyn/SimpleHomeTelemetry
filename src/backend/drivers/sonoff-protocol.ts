@@ -47,6 +47,9 @@ export function paramsFromTxt(txt: Record<string, string>, deviceKey?: string | 
   return JSON.parse(data) as Record<string, unknown>;
 }
 
+/** Modele, które moc/napięcie/prąd zawsze podają w setnych częściach. */
+const CENTI_UIIDS = new Set([190]);
+
 function num(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
@@ -57,7 +60,7 @@ function num(v: unknown): number | undefined {
  * Normalizuje parametry eWeLink do nazw atrybutów używanych w panelu (jak w Zigbee2MQTT).
  * Wartości pomiarowe bywają w setnych częściach (np. POWR3/S60: voltage 23012 = 230.12 V).
  */
-export function normalizeSonoffParams(params: Record<string, unknown>): Record<string, unknown> {
+export function normalizeSonoffParams(params: Record<string, unknown>, uiid?: number): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (typeof params['switch'] === 'string') out['state'] = params['switch'] === 'on' ? 'ON' : 'OFF';
   if (Array.isArray(params['switches'])) {
@@ -76,14 +79,16 @@ export function normalizeSonoffParams(params: Record<string, unknown>): Record<s
   let power = num(params['power']);
   let voltage = num(params['voltage']);
   let current = num(params['current']);
-  const centi = voltage !== undefined && voltage > 1000;
+  // UIID 190 (S60TPF, POWR3) zawsze podaje setne części; dla pozostałych rozpoznajemy po wielkości napięcia
+  const centi = CENTI_UIIDS.has(uiid ?? -1) || (voltage !== undefined && voltage > 1000);
   if (centi) {
-    voltage = voltage! / 100;
+    if (voltage !== undefined) voltage /= 100;
     if (power !== undefined) power /= 100;
     if (current !== undefined) current /= 100;
   }
   if (power !== undefined) out['power'] = power;
-  if (voltage !== undefined) out['voltage'] = voltage;
+  // Wyłączone gniazdko raportuje 0 V (pomiar jest za przekaźnikiem) — to brak pomiaru, nie napięcie sieci
+  if (voltage !== undefined) out['voltage'] = voltage === 0 ? null : voltage;
   if (current !== undefined) out['current'] = current;
 
   const temp = num(params['currentTemperature'] ?? params['temperature']);
@@ -108,7 +113,8 @@ export function buildSonoffRequests(command: Record<string, unknown>, multiChann
     if (multiChannel) switches.push({ outlet: 0, switch: onOff(command['state']) });
     else reqs.push({ cmd: 'switch', params: { switch: onOff(command['state']) } });
   }
-  if (switches.length > 0) reqs.push({ cmd: 'switches', params: { switches } });
+  // operSide: 1 — bez tego pola S60TPF (UIID 190, firmware 1.2.0) odrzuca /zeroconf/switches błędem 400
+  if (switches.length > 0) reqs.push({ cmd: 'switches', params: { switches, operSide: 1 } });
 
   const pob = command['power_on_behavior'];
   if (typeof pob === 'string') reqs.push({ cmd: 'startup', params: { startup: pob === 'previous' ? 'stay' : pob } });

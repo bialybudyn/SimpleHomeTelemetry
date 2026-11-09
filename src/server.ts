@@ -76,6 +76,12 @@ if (isMainModule(import.meta.url) && backend) {
   backend.start();
   initImgw();
 
+  // Np. EADDRINUSE: kończymy proces, żeby systemd pokazał błąd i ponowił start,
+  // zamiast zostawić żywy proces bez serwera HTTP (Angular SSR łapie uncaughtException).
+  server.on('error', (err) => {
+    console.error(`[HTTP] Nie można uruchomić serwera na ${config.host}:${config.port}:`, err.message);
+    process.exit(1);
+  });
   server.listen(config.port, config.host, () => {
     console.log(`[HTTP] Panel SimpleHome działa na http://${config.host}:${config.port} (dane: ${config.dataDir})`);
   });

@@ -236,7 +236,8 @@ chmod 640 "$ENV_FILE"
 # 6. Usługa systemd
 # ------------------------------------------------------------------------------
 # Wyłączenie starej wersji panelu (iot-telemetry.service z /opt/zigbee-telemetry-panel)
-if systemctl list-unit-files 2>/dev/null | grep -q '^iot-telemetry.service'; then
+# (bez "| grep -q": przy set -o pipefail grep kończy się wcześniej, systemctl dostaje SIGPIPE i warunek wychodzi fałszywy)
+if [ -n "$(systemctl list-unit-files iot-telemetry.service --no-legend 2>/dev/null)" ]; then
   c_warn "Wyłączam starą usługę iot-telemetry (stary panel). Katalog /opt/zigbee-telemetry-panel możesz usunąć ręcznie."
   systemctl disable --now iot-telemetry.service >/dev/null 2>&1 || true
 fi

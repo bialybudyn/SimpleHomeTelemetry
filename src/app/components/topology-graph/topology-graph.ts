@@ -56,13 +56,13 @@ interface TopologyLink extends d3.SimulationLinkDatum<TopologyNode> {
         <div class="space-y-1">
           <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-cyan-500/10 to-indigo-500/10 text-cyan-300 border border-cyan-500/20">
             <mat-icon class="text-sm !w-4 !h-4">hub</mat-icon>
-            <span>Interaktywny Graf Topologii Sieci D3.js</span>
+            <span>Mapa urządzeń</span>
           </div>
           <h3 class="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            Topologia: Zigbee & Wi-Fi
+            Urządzenia: Zigbee & Wi-Fi
           </h3>
           <p class="text-xs text-slate-400">
-            Centralny punkt: <strong class="text-cyan-300 font-mono">koordynator Zigbee</strong> • Podział na strefę Zigbee 3.0 oraz Wi-Fi LAN
+            Centralny punkt: <strong class="text-cyan-300 font-mono">koordynator Zigbee</strong> • Podział na strefę Zigbee 3.0 oraz Wi-Fi LAN • Linie nie pokazują rzeczywistych tras w sieci mesh, tylko przynależność do koordynatora
           </p>
         </div>
 
@@ -431,7 +431,7 @@ export class TopologyGraph implements OnInit, OnDestroy {
       .attr('font-size', '9px')
       .attr('font-family', 'monospace')
       .attr('text-anchor', 'middle')
-      .text((d: TopologyLink) => (d.type === 'wifi' ? (d.ip?.replace('wifi_', '').replace(/_/g, '.') || 'Wi-Fi') : `LQI ${d.lqi || 255}`));
+      .text((d: TopologyLink) => (d.type === 'wifi' ? (d.ip?.replace('wifi_', '').replace(/_/g, '.') || 'Wi-Fi') : (d.lqi !== undefined && d.lqi !== null ? `LQI ${d.lqi}` : 'LQI —')));
 
     // Rysowanie węzłów (Nodes)
     const nodeGroup = g.append('g').attr('class', 'nodes');

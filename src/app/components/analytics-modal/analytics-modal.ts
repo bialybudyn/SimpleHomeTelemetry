@@ -127,7 +127,7 @@ import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-f
                   <div>
                     <div class="text-xs text-rose-300 font-bold">Sonoff TRVZB / TRVZB Gen 2 — Nastawa Termostatu</div>
                     <div class="text-xs text-slate-400 font-mono">
-                      Aktualna nastawa: <strong class="text-white">{{ device()?.current_heating_setpoint || 21.0 }}°C</strong> • Stan zaworu: <span class="text-orange-400 font-semibold">{{ device()?.running_state === 'heat' ? 'Grzeje' : 'Czuwanie' }}</span> • Tryb: <span class="uppercase text-cyan-300">{{ device()?.system_mode || 'heat' }}</span>
+                      Aktualna nastawa: <strong class="text-white">{{ device()?.current_heating_setpoint ?? '—' }}°C</strong> • Stan zaworu: <span class="text-orange-400 font-semibold">{{ device()?.running_state === 'heat' ? 'Grzeje' : 'Czuwanie' }}</span> • Tryb: <span class="uppercase text-cyan-300">{{ device()?.system_mode ?? '—' }}</span>
                     </div>
                   </div>
                 </div>
@@ -145,7 +145,7 @@ import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-f
                   <div>
                     <div class="text-xs text-emerald-300 font-bold">Monitor Energii Elektrycznej 230V</div>
                     <div class="text-xs text-slate-400 font-mono">
-                      Moc chwilowa: <strong class="text-white">{{ device()?.power || 0 }} W</strong> • Napięcie: <strong class="text-cyan-300">{{ device()?.voltage || 230 }} V</strong> • Łączne zużycie: <strong class="text-emerald-300">{{ device()?.energy || 0 }} kWh</strong>
+                      Moc chwilowa: <strong class="text-white">{{ device()?.power ?? '—' }} W</strong> • Napięcie: <strong class="text-cyan-300">{{ device()?.voltage ?? '—' }} V</strong> • Łączne zużycie: <strong class="text-emerald-300">{{ device()?.energy ?? '—' }} kWh</strong>
                     </div>
                   </div>
                 </div>

@@ -27,6 +27,16 @@ export interface Z2mOptions {
 
 /** Bit dostępu SET w Zigbee2MQTT. */
 const ACCESS_SET = 0b010;
+/** Tyle po starcie mostka / połączeniu z brokerem trwa rozsyłanie zapamiętanego stanu. */
+const CACHED_STATE_WINDOW_MS = 30_000;
+/** Wiadomość z last_seen starszym niż tyle to powtórka starego stanu. */
+const FRESH_MAX_AGE_MS = 120_000;
+
+/** last_seen z Zigbee2MQTT: ISO 8601 albo epoch (ms). */
+function parseLastSeen(value: unknown): string | null {
+  const ms = typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null;
+}
 
 /**
  * Sterownik Zigbee2MQTT.
@@ -40,6 +50,8 @@ export class Zigbee2MqttDriver implements Driver {
   private client: MqttClient | null = null;
   private nameToId = new Map<string, string>();
   private permitJoinEnd = 0;
+  /** Do tej chwili stan urządzeń traktujemy jako zapamiętany przez mostek, a nie świeży pomiar. */
+  private cachedStateUntil = 0;
 
   readonly status: MqttStatus = {
     connected: false,
@@ -77,6 +89,8 @@ export class Zigbee2MqttDriver implements Driver {
     this.client = client;
 
     client.on('connect', () => {
+      // Po połączeniu broker oddaje wiadomości zachowane (retained) — to też stary stan
+      this.cachedStateUntil = Date.now() + CACHED_STATE_WINDOW_MS;
       this.status.connected = true;
       this.status.last_error = null;
       client.subscribe(`${topic}/#`, (err) => {
@@ -136,9 +150,18 @@ export class Zigbee2MqttDriver implements Driver {
     if (!id) return;
 
     if (resolved.rest === '') {
-      const state = parseJson(text);
-      if (state && typeof state === 'object' && !Array.isArray(state)) {
-        this.registry.applyState(id, state as Record<string, unknown>);
+      const parsed = parseJson(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const state = { ...(parsed as Record<string, unknown>) };
+        // Czas ostatniego kontaktu wg Zigbee2MQTT (wymaga advanced.last_seen w jego konfiguracji)
+        const seenAt = parseLastSeen(state['last_seen']);
+        delete state['last_seen'];
+        // Zigbee2MQTT przy starcie rozsyła zapamiętany stan wszystkich urządzeń — to nie jest nowy pomiar.
+        const cached = seenAt
+          ? Date.now() - Date.parse(seenAt) > FRESH_MAX_AGE_MS
+          : Date.now() < this.cachedStateUntil;
+        this.renameBatteryVoltage(id, state);
+        this.registry.applyState(id, state, { cached, seenAt: seenAt ?? undefined });
       }
     } else if (resolved.rest === 'availability') {
       const parsed = parseJson(text);
@@ -148,11 +171,29 @@ export class Zigbee2MqttDriver implements Driver {
     // <name>/set, <name>/get i inne podtematy to polecenia, nie stan — ignorujemy
   }
 
+  /**
+   * W czujnikach bateryjnych Zigbee2MQTT podaje `voltage` w mV (napięcie baterii), a w gniazdkach w V (sieć).
+   * Rozdzielamy je, żeby historia i wykresy nie mieszały 3000 mV z 230 V.
+   */
+  private renameBatteryVoltage(id: string, state: Record<string, unknown>): void {
+    if (state['voltage'] === undefined) return;
+    const dev = this.registry.get(id);
+    const expose = flattenExposes(dev?.exposes).find((f) => f.property === 'voltage');
+    if (dev && expose?.unit === 'mV') {
+      state['battery_voltage'] = state['voltage'];
+      delete state['voltage'];
+      // Sprzątanie po starszych wersjach, które zapisywały mV w polu napięcia sieci
+      if (dev.raw_state) delete dev.raw_state['voltage'];
+      delete dev.voltage;
+    }
+  }
+
   private handleBridge(sub: string, text: string): void {
     switch (sub) {
       case 'state': {
         const parsed = parseJson(text);
         const state = parsed && typeof parsed === 'object' ? String((parsed as Record<string, unknown>)['state']) : text.trim();
+        if (state === 'online') this.cachedStateUntil = Date.now() + CACHED_STATE_WINDOW_MS;
         this.status.bridge_state = state;
         this.events.broadcast({ type: 'bridge_state', state });
         this.emitStatus();

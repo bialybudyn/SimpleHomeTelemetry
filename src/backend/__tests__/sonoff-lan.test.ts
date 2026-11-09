@@ -75,14 +75,63 @@ describe('Sonoff eWeLink LAN — emulowane gniazdko', () => {
     expect(b.registry.get(id)?.power).toBe(12.5);
     expect(b.registry.get(id)?.voltage).toBe(230.12);
 
+    // Odczyt stanu idzie przez zapytanie mDNS (S60TPF odrzuca /zeroconf/getState błędem 400)
+    const requestsBefore = plug.requests.length;
+    const encOn = encryptParams({ switch: 'on', voltage: 23050, power: 0, current: 0 }, KEY);
+    const txtOn = [`id=${DEVICEID}`, 'type=plug', 'encrypt=true', `iv=${encOn.iv}`, `data1=${encOn.data}`, 'seq=2'];
+    (b.sonoff as unknown as { mdns: unknown }).mdns = {
+      query: () =>
+        setTimeout(() =>
+          b.sonoff.handleResponse({ answers: [{ type: 'TXT', name: `eWeLink_${DEVICEID}._ewelink._tcp.local`, data: txtOn.map((t) => Buffer.from(t)) }] }, '127.0.0.1'),
+        ),
+      destroy: () => undefined,
+    };
     const refreshed = await b.sonoff.refresh(b.registry.get(id)!);
     expect(refreshed.success).toBe(true);
-    expect(plug.requests.at(-1)?.path).toBe('/zeroconf/getState');
+    expect(plug.requests.length).toBe(requestsBefore); // żadnego zapytania HTTP
+    expect(b.registry.get(id)?.voltage).toBe(230.5); // seq=2 jak wcześniej, ale stan i tak przetworzony
 
     b.registry.upsert(id, { sonoff_api_key: 'zly-klucz' });
     const bad = await b.sonoff.sendCommand(b.registry.get(id)!, { state: 'OFF' });
     expect(bad.success).toBe(false);
     expect(bad.message).toMatch(/401/);
+  });
+});
+
+describe('Sonoff — ochrona gniazdka przed serią poleceń', () => {
+  let b: Backend;
+  let plug: ReturnType<typeof fakePlug>;
+  afterEach(() => {
+    plug?.server.close();
+    b?.stop();
+    b?.db.close();
+  });
+
+  it('przy szybkim klikaniu wysyła tylko ostatnie polecenie', async () => {
+    plug = fakePlug();
+    await new Promise<void>((r) => plug.server.listen(0, '127.0.0.1', r));
+    const port = (plug.server.address() as AddressInfo).port;
+    b = createBackend(':memory:');
+    const id = sonoffId(DEVICEID);
+    b.registry.upsert(id, { driver: 'sonoff', protocol: 'wifi', friendly_name: 'Test', sonoff_device_id: DEVICEID, sonoff_api_key: KEY, ip_address: `127.0.0.1:${port}` });
+
+    const results = await Promise.all(['ON', 'OFF', 'ON'].map((state) => b.sonoff.sendCommand(b.registry.get(id)!, { state })));
+    expect(results.every((r) => r.success)).toBe(true);
+    expect(results[0].message).toMatch(/Pominięto/);
+    expect(results[1].message).toMatch(/Pominięto/);
+    expect(plug.requests.map((r) => r.params['switch'])).toEqual(['on']);
+    expect(b.registry.get(id)?.state).toBe('ON');
+  });
+
+  it('po braku odpowiedzi wstrzymuje kolejne polecenia', async () => {
+    b = createBackend(':memory:');
+    const id = sonoffId(DEVICEID);
+    // Port 9 (discard) na 127.0.0.1 zwykle odrzuca połączenie od razu — symulujemy timeout ręcznie
+    b.registry.upsert(id, { driver: 'sonoff', protocol: 'wifi', friendly_name: 'Test', sonoff_device_id: DEVICEID, sonoff_api_key: KEY, ip_address: '127.0.0.1:9' });
+    (b.sonoff as unknown as { cooldownUntil: Map<string, number> }).cooldownUntil.set(id, Date.now() + 10_000);
+    const res = await b.sonoff.sendCommand(b.registry.get(id)!, { state: 'ON' });
+    expect(res.success).toBe(false);
+    expect(res.message).toMatch(/spróbuj za \d+ s/);
   });
 });
 

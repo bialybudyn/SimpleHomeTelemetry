@@ -74,7 +74,7 @@ describe('Sonoff eWeLink LAN', () => {
       state_l2: 'OFF',
     });
     expect(buildSonoffRequests({ state: 'ON' }, false)).toEqual([{ cmd: 'switch', params: { switch: 'on' } }]);
-    expect(buildSonoffRequests({ state: 'OFF' }, true)).toEqual([{ cmd: 'switches', params: { switches: [{ outlet: 0, switch: 'off' }] } }]);
+    expect(buildSonoffRequests({ state: 'OFF' }, true)).toEqual([{ cmd: 'switches', params: { switches: [{ outlet: 0, switch: 'off' }], operSide: 1 } }]);
     expect(buildSonoffRequests({ power_on_behavior: 'previous' }, false)).toEqual([{ cmd: 'startup', params: { startup: 'stay' } }]);
   });
 });

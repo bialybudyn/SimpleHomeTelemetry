@@ -105,12 +105,20 @@ export class DeviceRegistry {
   }
 
   /** Przyjmuje znormalizowany stan zgłoszony przez urządzenie. */
-  applyState(id: string, state: Record<string, unknown>): Device | undefined {
+  applyState(id: string, state: Record<string, unknown>, opts: { cached?: boolean; seenAt?: string } = {}): Device | undefined {
     const dev = this.devices.get(id);
     if (!dev) return undefined;
     dev.raw_state = { ...(dev.raw_state ?? {}), ...state };
     applyFlatFields(dev, state);
-    dev.last_seen = new Date().toISOString();
+    if (opts.cached) {
+      // Stan z pamięci mostka (np. rozsyłany przy starcie Zigbee2MQTT), a nie nowy pomiar:
+      // uzupełnia wartości na kafelku, ale nie odświeża "ostatnio widziane", historii ani alarmów.
+      if (opts.seenAt) dev.last_seen = opts.seenAt;
+      this.markDirty(id);
+      this.emitDevice(dev);
+      return dev;
+    }
+    dev.last_seen = opts.seenAt ?? new Date().toISOString();
     if (dev.available !== false) dev.connection_status = 'online';
     dev.last_error = null;
     this.markDirty(id);

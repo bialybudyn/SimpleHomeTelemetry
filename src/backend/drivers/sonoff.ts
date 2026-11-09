@@ -10,10 +10,20 @@ const QUERY_INTERVAL_MS = 120_000;
 /** Bez ogłoszeń przez tyle czasu urządzenie uznajemy za niedostępne. */
 const OFFLINE_AFTER_MS = 6 * 60_000;
 const HTTP_TIMEOUT_MS = 5000;
-/** Odstęp między zapytaniami do jednego urządzenia (zalecenie z dokumentacji Sonoff DIY: ≥ 200 ms). */
-const REQUEST_GAP_MS = 250;
+/**
+ * Odstęp między zapytaniami do jednego urządzenia. Dokumentacja Sonoff DIY mówi o ≥ 200 ms,
+ * ale S60TPF przy kilku poleceniach w ciągu kilkunastu sekund wyłącza serwer LAN na ~2–3 min.
+ */
+const REQUEST_GAP_MS = 1500;
+/** Po braku odpowiedzi nie wysyłamy kolejnych poleceń przez ten czas (nie dokładamy połączeń zawieszonemu ESP). */
+const COOLDOWN_AFTER_TIMEOUT_MS = 30_000;
+/** Ile czekamy na odpowiedź mDNS przy ręcznym odczycie stanu. */
+const REFRESH_TIMEOUT_MS = 5000;
 
-export const sonoffId = (deviceid: string) => `sonoff_${deviceid}`;
+/** Wynik polecenia pominiętego, bo w kolejce czekało nowsze. */
+const SKIPPED = Symbol('skipped');
+
+export const sonoffId =(deviceid: string) => `sonoff_${deviceid}`;
 
 export interface SonoffSeen {
   deviceid: string;
@@ -43,6 +53,11 @@ export class SonoffDriver implements Driver {
   private lastTxtSeq = new Map<string, string>();
   private queues = new Map<string, Promise<unknown>>();
   private seen = new Map<string, SonoffSeen>();
+  /** Oczekujący na ogłoszenie mDNS danego urządzenia (ręczny odczyt stanu). */
+  private refreshWaiters = new Map<string, Set<() => void>>();
+  /** Numer ostatniego polecenia na urządzenie: starsze polecenia czekające w kolejce są pomijane. */
+  private commandGen = new Map<string, number>();
+  private cooldownUntil = new Map<string, number>();
   mdnsError: string | null = null;
 
   constructor(private readonly registry: DeviceRegistry) {}
@@ -134,6 +149,12 @@ export class SonoffDriver implements Driver {
       decrypt_ok: this.seen.get(deviceid)?.decrypt_ok ?? null,
     };
     this.seen.set(deviceid, seenEntry);
+    const waiters = this.refreshWaiters.get(deviceid);
+    if (waiters) {
+      this.refreshWaiters.delete(deviceid);
+      // Po przetworzeniu stanu poniżej (applyState jest synchroniczne)
+      queueMicrotask(() => waiters.forEach((w) => w()));
+    }
 
     // Ten sam numer sekwencji = ten sam stan (odpowiedź na nasze zapytanie okresowe)
     const seq = txt['seq'];
@@ -160,7 +181,7 @@ export class SonoffDriver implements Driver {
     if (Array.isArray(params['switches']) && !params['switch']) {
       this.registry.upsert(id, { sonoff_multi_channel: true }, { silent: true });
     }
-    this.registry.applyState(id, normalizeSonoffParams(params));
+    this.registry.applyState(id, normalizeSonoffParams(params, this.registry.get(id)?.sonoff_uiid));
   }
 
   private checkOffline(): void {
@@ -179,21 +200,49 @@ export class SonoffDriver implements Driver {
     const requests = buildSonoffRequests(command, Boolean(dev.sonoff_multi_channel));
     if (requests.length === 0) return { success: false, message: 'To polecenie nie jest obsługiwane przez Sonoff LAN.' };
 
+    const id = dev.ieee_address;
+    const wait = (this.cooldownUntil.get(id) ?? 0) - Date.now();
+    if (wait > 0) {
+      return { success: false, message: `Gniazdko chwilowo nie odpowiada w sieci LAN — spróbuj za ${Math.ceil(wait / 1000)} s.` };
+    }
+    const gen = (this.commandGen.get(id) ?? 0) + 1;
+    this.commandGen.set(id, gen);
+
     for (const r of requests) {
-      const res = await this.post(dev, r.cmd, r.params);
+      // Szybkie klikanie: wysyłamy tylko najnowsze polecenie, pośrednie pomijamy
+      const res = await this.post(dev, r.cmd, r.params, () => this.commandGen.get(id) !== gen);
+      if (res === SKIPPED) return { success: true, message: 'Pominięto — w kolejce jest nowsze polecenie.' };
       if (!res.success) return res;
     }
     return { success: true, message: 'Polecenie przyjęte przez urządzenie.' };
   }
 
-  /** Odczyt stanu: POST /zeroconf/getState (urządzenie odpowiada zaszyfrowanym stanem). */
+  /**
+   * Odczyt stanu przez mDNS: jedno zapytanie multicast, urządzenie odpowiada rekordem TXT ze stanem.
+   * Nie używamy /zeroconf/getState — S60TPF (UIID 190, firmware 1.2.0) zwraca na nie błąd 400.
+   */
   async refresh(dev: Device): Promise<CommandResult> {
-    const check = this.precheck(dev);
-    if (check) {
-      this.query();
-      return check;
-    }
-    return this.post(dev, 'getState', {});
+    if (!dev.sonoff_device_id) return { success: false, message: 'Brak deviceid urządzenia.' };
+    if (!this.mdns) return { success: false, message: `mDNS nie działa${this.mdnsError ? `: ${this.mdnsError}` : ''}.` };
+    const announced = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.refreshWaiters.get(dev.sonoff_device_id!)?.delete(done);
+        resolve(false);
+      }, REFRESH_TIMEOUT_MS);
+      const done = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const set = this.refreshWaiters.get(dev.sonoff_device_id!) ?? new Set();
+      set.add(done);
+      this.refreshWaiters.set(dev.sonoff_device_id!, set);
+    });
+    // Wymuszamy przetworzenie odpowiedzi, nawet jeśli numer sekwencji się nie zmienił
+    this.lastTxtSeq.delete(dev.ieee_address);
+    this.query();
+    return (await announced)
+      ? { success: true, message: 'Stan odczytany z urządzenia.' }
+      : { success: false, message: `Urządzenie nie odpowiedziało na zapytanie mDNS w ciągu ${REFRESH_TIMEOUT_MS / 1000} s.` };
   }
 
   private precheck(dev: Device): CommandResult | null {
@@ -203,18 +252,26 @@ export class SonoffDriver implements Driver {
   }
 
   /** Zapytania do jednego urządzenia wykonywane po kolei (bez równoległych połączeń). */
-  private post(dev: Device, cmd: string, params: Record<string, unknown>): Promise<CommandResult> {
+  private post(dev: Device, cmd: string, params: Record<string, unknown>, isStale: () => boolean = () => false): Promise<CommandResult | typeof SKIPPED> {
     const key = dev.ieee_address;
     const prev = this.queues.get(key) ?? Promise.resolve();
-    const next = prev
+    const run = prev
       .catch(() => undefined)
-      .then(() => this.doPost(dev, cmd, params))
-      .finally(() => new Promise((r) => setTimeout(r, REQUEST_GAP_MS)));
-    this.queues.set(key, next);
-    return next;
+      .then(async () => {
+        if (isStale()) return SKIPPED; // pominięte — nic nie wysłano
+        const res = await this.doPost(dev, cmd, params);
+        if (res.timedOut) this.cooldownUntil.set(key, Date.now() + COOLDOWN_AFTER_TIMEOUT_MS);
+        return res;
+      });
+    // Odstęp wstrzymuje tylko następne zapytanie w kolejce, nie odpowiedź dla wywołującego
+    this.queues.set(
+      key,
+      run.then((res) => (res === SKIPPED ? undefined : new Promise((r) => setTimeout(r, REQUEST_GAP_MS)))),
+    );
+    return run;
   }
 
-  private async doPost(dev: Device, cmd: string, params: Record<string, unknown>): Promise<CommandResult> {
+  private async doPost(dev: Device, cmd: string, params: Record<string, unknown>): Promise<CommandResult & { timedOut?: boolean }> {
     const body: Record<string, unknown> = {
       sequence: String(Date.now()),
       deviceid: dev.sonoff_device_id,
@@ -234,7 +291,11 @@ export class SonoffDriver implements Driver {
       json = await httpPostJson(host, Number(portStr) || 8081, `/zeroconf/${cmd}`, body);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, message: `Brak odpowiedzi z ${dev.ip_address}:8081 (${msg}). Sprawdź, czy w aplikacji eWeLink włączone jest „Sterowanie LAN”.` };
+      return {
+        success: false,
+        timedOut: true,
+        message: `Brak odpowiedzi z ${dev.ip_address}:8081 (${msg}). Gniazdko mogło chwilowo zablokować serwer LAN — kolejne polecenia za ${COOLDOWN_AFTER_TIMEOUT_MS / 1000} s.`,
+      };
     }
 
     const error = Number(json['error'] ?? 0);
