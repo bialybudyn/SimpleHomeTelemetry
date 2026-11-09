@@ -118,7 +118,9 @@ export class Zigbee2MqttDriver implements Driver {
   }
 
   reconfigure(options: Partial<Z2mOptions>): void {
-    this.options = { ...this.options, ...options };
+    // Puste wartości nie nadpisują działającej konfiguracji
+    const defined = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined && v !== ''));
+    this.options = { ...this.options, ...defined };
     this.status.url = this.options.url;
     this.status.topic_prefix = this.options.topic;
     this.start();

@@ -72,7 +72,11 @@ export function systemRouter(b: Backend): Router {
       if (result?.success) sent++;
       await new Promise((r) => setTimeout(r, 150));
     }
-    res.json({ status: 'ok', message: `Wysłano zapytania o stan do ${sent} urządzeń.` });
+    const skipped = devices.length - sent;
+    res.json({
+      status: 'ok',
+      message: `Stan odczytano z ${sent} urządzeń.` + (skipped > 0 ? ` ${skipped} nie obsługuje odczytu na żądanie lub nie odpowiedziało.` : ''),
+    });
   });
 
   // --- powiadomienia ---
@@ -186,10 +190,15 @@ export function systemRouter(b: Backend): Router {
     }
     if (backup.ewelink) b.db.setSetting('ewelink', backup.ewelink);
     if (backup.notifications) b.notifier.updateConfig(backup.notifications);
-    if (backup.mqtt) b.db.setSetting('mqtt', backup.mqtt);
+    if (backup.mqtt) {
+      b.db.setSetting('mqtt', backup.mqtt);
+      // Odtworzone ustawienia brokera działają od razu, a nie dopiero po restarcie usługi
+      b.z2m.reconfigure({ url: backup.mqtt.url || undefined, topic: backup.mqtt.topic || undefined });
+    }
     b.registry.flush();
     b.tuya.stop();
     b.tuya.start();
+    b.sonoff.query(); // stan gniazdek Sonoff wróci z odpowiedzi mDNS
     b.registry.emitAll();
     const all = b.registry.all();
     res.json({

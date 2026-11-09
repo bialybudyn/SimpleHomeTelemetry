@@ -581,11 +581,11 @@ import { Telemetry } from '../../services/telemetry';
 
               <!-- 9. Dane techniczne z silnika i napięć -->
               <div class="p-2.5 rounded-lg bg-slate-950/50 border border-slate-800 text-[9px] font-mono grid grid-cols-2 gap-x-3 gap-y-1.5 text-slate-400 pt-3 border-t border-slate-800/40">
-                <div>Kroki kalibr. (Idle): <span class="text-slate-200 font-semibold">{{ device().idle_steps ?? '211' }}</span></div>
-                <div>Kroki zamkn. (Closing): <span class="text-slate-200 font-semibold">{{ device().closing_steps ?? '432' }}</span></div>
-                <div>Napięcie otw. (Limit): <span class="text-slate-200 font-semibold">{{ device().valve_opening_limit_voltage ?? '1654' }}mV</span></div>
-                <div>Napięcie zamk. (Limit): <span class="text-slate-200 font-semibold">{{ device().valve_closing_limit_voltage ?? '2597' }}mV</span></div>
-                <div class="col-span-2">Napięcie silnika (Running): <span class="text-slate-200 font-semibold">{{ device().valve_motor_running_voltage ?? '1127' }}mV</span></div>
+                <div>Kroki kalibr. (Idle): <span class="text-slate-200 font-semibold">{{ device().idle_steps ?? '—' }}</span></div>
+                <div>Kroki zamkn. (Closing): <span class="text-slate-200 font-semibold">{{ device().closing_steps ?? '—' }}</span></div>
+                <div>Napięcie otw. (Limit): <span class="text-slate-200 font-semibold">{{ device().valve_opening_limit_voltage ?? '—' }}mV</span></div>
+                <div>Napięcie zamk. (Limit): <span class="text-slate-200 font-semibold">{{ device().valve_closing_limit_voltage ?? '—' }}mV</span></div>
+                <div class="col-span-2">Napięcie silnika (Running): <span class="text-slate-200 font-semibold">{{ device().valve_motor_running_voltage ?? '—' }}mV</span></div>
               </div>
 
             </div>
@@ -605,7 +605,7 @@ import { Telemetry } from '../../services/telemetry';
               </div>
               <div class="flex items-baseline gap-1 mt-0.5">
                 <span class="text-2xl font-bold font-mono text-white tabular-nums tracking-tight">
-                  {{ isStateOn() ? (device().fan_speed ?? 1) : 'OFF' }}
+                  {{ isStateOn() ? (device().fan_speed ?? '—') : 'OFF' }}
                 </span>
                 @if (isStateOn()) {
                   <span class="text-xs font-mono text-cyan-400">/ 12</span>
@@ -710,11 +710,11 @@ import { Telemetry } from '../../services/telemetry';
           <div class="grid grid-cols-2 gap-2 text-xs font-mono">
             <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
               <span class="text-slate-400 text-[11px]">Moc pobierana:</span>
-              <span class="text-emerald-400 font-bold">{{ device().power ?? 45 }} W</span>
+              <span class="text-emerald-400 font-bold">{{ device().power ?? '—' }} W</span>
             </div>
             <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
               <span class="text-slate-400 text-[11px]">Tryb:</span>
-              <span class="text-cyan-300 font-bold capitalize">{{ device().fan_mode ?? 'normal' }}</span>
+              <span class="text-cyan-300 font-bold capitalize">{{ device().fan_mode ?? '—' }}</span>
             </div>
           </div>
 
@@ -1071,36 +1071,15 @@ import { Telemetry } from '../../services/telemetry';
               </div>
             </div>
 
-            <!-- Przyciski akcji: Test / Wyciszenie -->
-            <div class="flex items-center gap-1.5">
-              @if (isSmokeAlarm()) {
-                <button
-                  (click)="silenceSmokeAlarm($event)"
-                  class="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-md transition-all cursor-pointer"
-                  title="Wycisz syrenę alarmu dymu (silence)"
-                >
-                  <mat-icon class="text-xs !w-3.5 !h-3.5">volume_off</mat-icon>
-                  <span>Wycisz</span>
-                </button>
-              }
-              <button
-                (click)="testSmokeAlarm($event)"
-                class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-mono flex items-center gap-1 border border-slate-700 transition-all cursor-pointer"
-                title="Przeprowadź autotest czujki dymu przez TinyTuya"
-              >
-                <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">notifications_active</mat-icon>
-                <span>Autotest</span>
-              </button>
-            </div>
           </div>
 
           <!-- Pomiary czujki dymu: Poziom baterii i sabotaż (tamper) -->
           <div class="grid grid-cols-2 gap-2 text-xs font-mono">
             <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
               <span class="text-slate-400 text-[11px]">Bateria:</span>
-              <span class="font-bold flex items-center gap-1" [class.text-emerald-400]="(device().battery ?? 100) > 20" [class.text-red-400]="(device().battery ?? 100) <= 20">
+              <span class="font-bold flex items-center gap-1" [class.text-emerald-400]="device().battery !== null && device().battery !== undefined && device().battery! > 20" [class.text-red-400]="device().battery !== null && device().battery !== undefined && device().battery! <= 20">
                 <mat-icon class="text-xs !w-3.5 !h-3.5">battery_std</mat-icon>
-                {{ device().battery ?? 100 }}%
+                {{ device().battery ?? '—' }}%
               </span>
             </div>
             <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
@@ -1294,7 +1273,7 @@ import { Telemetry } from '../../services/telemetry';
             <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-3 pt-2 mt-2">
               <div class="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 border-b border-slate-800 pb-1.5">
                 <mat-icon class="text-xs !w-3.5 !h-3.5">tune</mat-icon>
-                <span>Konfiguracja Przekaźnika DIN (BASIC-ZB1GSP)</span>
+                <span>Konfiguracja przekaźnika</span>
               </div>
 
               <!-- Power-On Behavior -->
@@ -1557,22 +1536,6 @@ export class DeviceCard {
     return !!(d.smoke_alarm || d.smoke_status === 'alarm');
   });
 
-  silenceSmokeAlarm(event: MouseEvent): void {
-    event.stopPropagation();
-    this.commandRequested.emit({
-      device: this.device(),
-      command: { smoke_mute: true, silence: true },
-    });
-  }
-
-  testSmokeAlarm(event: MouseEvent): void {
-    event.stopPropagation();
-    this.commandRequested.emit({
-      device: this.device(),
-      command: { smoke_test: true },
-    });
-  }
-
   toggleAlarmState(feature: string, event: MouseEvent): void {
     event.stopPropagation();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1606,7 +1569,7 @@ export class DeviceCard {
   getWeeklySchedule(dayKey: string): string {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dev = this.device() as any;
-    return dev[`weekly_schedule_${dayKey}`] ?? '00:00/20.0';
+    return dev[`weekly_schedule_${dayKey}`] ?? '';
   }
 
   setAdvancedAttr(attr: string, value: unknown): void {

@@ -225,15 +225,44 @@ export class Telemetry {
 
   /** Odczyt stanu urządzenia na żądanie. */
   testDeviceConnection(ieee: string): Promise<ApiResult> {
-    return firstValueFrom(this.http.post<ApiResult>(`/api/devices/${encodeURIComponent(ieee)}/refresh`, {})).catch((err) => ({
-      success: false,
-      message: err?.error?.message || 'Brak odpowiedzi serwera.',
-    }));
+    return firstValueFrom(this.http.post<ApiResult>(`/api/devices/${encodeURIComponent(ieee)}/refresh`, {}))
+      .then((res) => {
+        // Udany odczyt usuwa z kafelka komunikat o wcześniejszym błędzie polecenia
+        if (res.success) this.patchLocal(ieee, { ...(res.device ?? {}), last_error: null });
+        return res;
+      })
+      .catch((err) => ({
+        success: false,
+        message: err?.error?.message || 'Brak odpowiedzi serwera.',
+      }));
   }
 
   /** Odczyt na żądanie wszystkich urządzeń, które to obsługują. */
   syncMqttDevices(): void {
-    this.http.post('/api/mqtt/sync', {}).subscribe({ error: (err) => console.debug('Błąd synchronizacji:', err) });
+    if (this.isSyncing()) return;
+    this.isSyncing.set(true);
+    this.showActionMessage('Odczytuję stan urządzeń… (czujniki bateryjne nie odpowiadają na żądanie — wysyłają dane same)', true, 60_000);
+    this.http.post<{ message?: string }>('/api/mqtt/sync', {}).subscribe({
+      next: (res) => {
+        this.isSyncing.set(false);
+        this.showActionMessage(res?.message || 'Wysłano zapytania o stan.', true);
+      },
+      error: (err) => {
+        this.isSyncing.set(false);
+        this.showActionMessage(err?.error?.detail || err?.error?.message || 'Nie udało się odczytać stanu urządzeń.', false);
+      },
+    });
+  }
+
+  /** Krótki komunikat o wyniku akcji z paska narzędzi (synchronizacja, parowanie). */
+  readonly actionMessage = signal<{ text: string; ok: boolean } | null>(null);
+  readonly isSyncing = signal<boolean>(false);
+  private actionMessageTimer: ReturnType<typeof setTimeout> | null = null;
+
+  showActionMessage(text: string, ok: boolean, ms = 8000): void {
+    if (this.actionMessageTimer) clearTimeout(this.actionMessageTimer);
+    this.actionMessage.set({ text, ok });
+    this.actionMessageTimer = setTimeout(() => this.actionMessage.set(null), ms);
   }
 
   renameDevice(ieee: string, friendly_name: string): Promise<boolean> {
@@ -374,7 +403,7 @@ export class Telemetry {
   triggerPermitJoin(duration = 120): void {
     this.http.post<{ status: string; duration: number }>('/api/permit-join', { duration }).subscribe({
       next: (res) => this.startPairingCountdown(res.duration || duration),
-      error: (err) => console.error('Błąd włączania parowania:', err),
+      error: (err) => this.showActionMessage(`Nie udało się włączyć parowania: ${err?.error?.detail || 'brak odpowiedzi serwera'}`, false),
     });
   }
 

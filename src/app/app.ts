@@ -106,6 +106,7 @@ export class App {
       const cat = d.category || this.inferCategory(d);
       return (
         cat === 'sensor' &&
+        d.connection_status !== 'offline' &&
         d.last_temperature !== null &&
         d.last_temperature !== undefined &&
         !isNaN(Number(d.last_temperature))
@@ -127,6 +128,7 @@ export class App {
       const cat = d.category || this.inferCategory(d);
       return (
         cat === 'sensor' &&
+        d.connection_status !== 'offline' &&
         d.last_temperature !== null &&
         d.last_temperature !== undefined &&
         !isNaN(Number(d.last_temperature))
@@ -205,7 +207,7 @@ export class App {
       if (filter === 'climate') return cat === 'climate';
       if (filter === 'plug') return cat === 'plug';
       if (filter === 'switch') return cat === 'switch';
-      if (filter === 'sensor') return cat === 'sensor' || cat === 'contact' || cat === 'occupancy' || cat === 'water_leak';
+      if (filter === 'sensor') return cat === 'sensor' || cat === 'contact' || cat === 'occupancy' || cat === 'water_leak' || cat === 'smoke';
       return true;
     });
   });
@@ -226,7 +228,7 @@ export class App {
   readonly zigbeeSensorCount = computed(() => {
     return this.allZigbeeDevices().filter((d) => {
       const c = d.category || this.inferCategory(d);
-      return c === 'sensor' || c === 'contact' || c === 'occupancy' || c === 'water_leak';
+      return c === 'sensor' || c === 'contact' || c === 'occupancy' || c === 'water_leak' || c === 'smoke';
     }).length;
   });
 
@@ -267,7 +269,7 @@ export class App {
       if (filter === 'switch') return cat === 'switch';
       if (filter === 'fan') return cat === 'fan';
       if (filter === 'climate') return cat === 'climate';
-      if (filter === 'sensor') return cat === 'sensor' || cat === 'contact' || cat === 'occupancy' || cat === 'water_leak';
+      if (filter === 'sensor') return cat === 'sensor' || cat === 'contact' || cat === 'occupancy' || cat === 'water_leak' || cat === 'smoke';
       return true;
     });
   });
@@ -291,7 +293,7 @@ export class App {
   readonly wifiSensorCount = computed(() => {
     return this.allWifiDevices().filter((d) => {
       const c = d.category || this.inferCategory(d);
-      return c === 'sensor' || c === 'contact' || c === 'occupancy' || c === 'water_leak';
+      return c === 'sensor' || c === 'contact' || c === 'occupancy' || c === 'water_leak' || c === 'smoke';
     }).length;
   });
 
