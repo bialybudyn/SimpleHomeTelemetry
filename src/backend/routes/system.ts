@@ -75,7 +75,7 @@ export function systemRouter(b: Backend): Router {
     const skipped = devices.length - sent;
     res.json({
       status: 'ok',
-      message: `Stan odczytano z ${sent} urządzeń.` + (skipped > 0 ? ` ${skipped} nie obsługuje odczytu na żądanie lub nie odpowiedziało.` : ''),
+      message: `Wysłano zapytanie o stan do ${sent} urządzeń — odpowiedzi pojawią się na kafelkach.` + (skipped > 0 ? ` ${skipped} nie obsługuje odczytu na żądanie lub nie odpowiedziało.` : ''),
     });
   });
 
