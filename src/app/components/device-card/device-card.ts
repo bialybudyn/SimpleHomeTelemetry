@@ -103,7 +103,7 @@ import { Telemetry } from '../../services/telemetry';
                 <button
                   (click)="openDeviceConfig($event, 'sonoff')"
                   class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 transition-colors cursor-pointer animate-pulse"
-                  title="Brak adresu IP! Kliknij aby wpisać ręcznie lub przeskanować podsieć z bazą OUI"
+                  title="Brak adresu IP. Gniazdko zgłasza go samo przez mDNS; kliknij, aby wpisać adres ręcznie"
                 >
                   <mat-icon class="text-[11px] !w-3 !h-3 text-amber-400">warning</mat-icon>
                   <span>Sonoff: Brak IP (Konfiguruj)</span>
@@ -123,7 +123,7 @@ import { Telemetry } from '../../services/telemetry';
                 <button
                   (click)="openDeviceConfig($event, 'tuya')"
                   class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer"
-                  title="Kliknij aby pobrać klucz Tuya Local Key przez kod QR lub skonfigurować TinyTuya"
+                  title="Kliknij, aby pobrać klucz Tuya Local Key kodem QR albo wpisać go ręcznie"
                 >
                   <mat-icon class="text-[11px] !w-3 !h-3 text-amber-400">qr_code_scanner</mat-icon>
                   <span>Pobierz Local Key (Tuya)</span>

@@ -38,7 +38,7 @@ type SortDirection = 'asc' | 'desc';
           <button
             (click)="purgeAllDevices()"
             class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 text-rose-300 text-xs font-semibold border border-rose-800/80 transition-all cursor-pointer"
-            title="Usuń przykładowe oraz zarejestrowane urządzenia i wyczyść historię"
+            title="Usuń wszystkie urządzenia z bazy panelu razem z historią i kluczami Wi-Fi. Urządzenia Zigbee wrócą z listy Zigbee2MQTT (bez historii)"
           >
             <mat-icon class="text-sm !w-4 !h-4 text-rose-400">delete_sweep</mat-icon>
             <span>Wyczyść rejestr urządzeń</span>
@@ -53,7 +53,7 @@ type SortDirection = 'asc' | 'desc';
             <span>Odśwież</span>
           </button>
           <button
-            (click)="showLogsModal.set(!showLogsModal())"
+            (click)="toggleLogs()"
             class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
             title="Wyświetl dziennik zdarzeń backendu"
           >
@@ -86,7 +86,7 @@ type SortDirection = 'asc' | 'desc';
             {{ activeDevicesCount() }}
           </div>
           <p class="text-[11px] text-slate-400 mt-1">
-            Wysyłają dane w sieci, w pełni sprawne
+            Na pulpicie, w kontakcie z panelem
           </p>
         </button>
 
@@ -111,7 +111,7 @@ type SortDirection = 'asc' | 'desc';
             {{ disconnectedDevicesCount() }}
           </div>
           <p class="text-[11px] text-slate-400 mt-1">
-            Brak pakietów w ostatnim czasie lub błąd LAN
+            Zgłoszone jako niedostępne lub od dawna bez danych
           </p>
         </button>
 
@@ -415,14 +415,14 @@ type SortDirection = 'asc' | 'desc';
 
                     <!-- Protokół / Klucz Local Key / Adres IP -->
                     <td class="py-3 px-3 whitespace-nowrap font-mono text-[11px]">
-                      @if (dev.protocol === 'wifi' || dev.ip_address || dev.sonoff_device_id || dev.local_key) {
+                      @if (dev.protocol === 'wifi' || dev.ip_address || dev.sonoff_device_id || dev.tuya_dev_id) {
                         @if (editingIpIeee() === dev.ieee_address) {
                           <div class="flex items-center gap-1">
                             <input
                               type="text"
                               [value]="editingIpValue()"
                               (input)="editingIpValue.set($any($event.target).value)"
-                              placeholder="np. 192.168.1.150"
+                              placeholder="puste = automatycznie"
                               class="w-32 bg-slate-950 border border-cyan-500 rounded px-1.5 py-0.5 text-xs text-white font-mono focus:outline-none"
                             />
                             <button
@@ -455,14 +455,12 @@ type SortDirection = 'asc' | 'desc';
                             </button>
                           </div>
                         }
-                        @if (dev.local_key) {
-                          <span class="text-[10px] text-emerald-400 block" [title]="'Pełny klucz: ' + dev.local_key">
-                            Local Key: ••••{{ dev.local_key.slice(-4) }}
+                        @if (dev.driver === 'sonoff' || dev.sonoff_device_id) {
+                          <span class="text-[10px] block" [class.text-cyan-400]="dev.has_sonoff_key" [class.text-amber-500]="!dev.has_sonoff_key">
+                            Sonoff: {{ dev.sonoff_device_id }} · {{ dev.has_sonoff_key ? 'klucz zapisany' : 'brak devicekey' }}
                           </span>
-                        } @else if (dev.sonoff_device_id) {
-                          <span class="text-[10px] text-cyan-400 block" [title]="'Sonoff ID: ' + dev.sonoff_device_id">
-                            Sonoff: {{ dev.sonoff_device_id }}
-                          </span>
+                        } @else if (dev.has_local_key) {
+                          <span class="text-[10px] text-emerald-400 block">Local Key zapisany</span>
                         } @else {
                           <span class="text-[10px] text-amber-500 block">Brak Local Key</span>
                         }
@@ -500,7 +498,7 @@ type SortDirection = 'asc' | 'desc';
                           <button
                             (click)="confirmSoftDelete(dev)"
                             class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-600/15 hover:bg-amber-600/25 text-amber-300 border border-amber-500/30 font-semibold text-xs transition-colors cursor-pointer"
-                            title="Usuń z Pulpitu na żywo (zachowuje całą historię w razie ponownego połączenia)"
+                            title="Ukryj z Pulpitu na żywo (urządzenie zostaje sparowane, historia zbiera się dalej)"
                           >
                             <mat-icon class="text-xs !w-3.5 !h-3.5">visibility_off</mat-icon>
                             <span>Usuń z pulpitu</span>
@@ -554,9 +552,24 @@ type SortDirection = 'asc' | 'desc';
               </p>
               <ul class="list-disc list-inside space-y-1 text-slate-300 pl-1">
                 <li>Wszystkie historyczne dane pomiarowe (temperatura, wilgotność, prąd, moc, stan)</li>
-                <li>Wpisy z bazy danych serwera (telemetry_cache.json i devices_cache.json)</li>
-                <li>Rejestracja w oprogramowaniu Zigbee2MQTT / sterownikach Wi-Fi</li>
+                <li>Wpis urządzenia w bazie panelu wraz z zapisanymi kluczami i ustawieniami alarmów</li>
               </ul>
+              @if (permanentTargetDevice()?.driver === 'zigbee2mqtt') {
+                <label class="flex items-start gap-2 pt-1 text-slate-200 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    [checked]="removeFromNetwork()"
+                    (change)="removeFromNetwork.set($any($event.target).checked)"
+                    class="mt-0.5 w-4 h-4 rounded border-slate-700 bg-slate-950 cursor-pointer"
+                  />
+                  <span>
+                    <strong>Usuń także z sieci Zigbee (Zigbee2MQTT)</strong> — bez tego urządzenie pozostaje sparowane i wróci na listę przy najbliższej synchronizacji.
+                    Urządzenie, które nie odpowiada (np. rozładowana bateria), Zigbee2MQTT może odmówić usunięcia — wtedy usuń je w Zigbee2MQTT z opcją „force”.
+                  </span>
+                </label>
+              } @else if (permanentTargetDevice()?.driver === 'sonoff') {
+                <p class="text-slate-300">Gniazdko Sonoff nadal ogłasza się w sieci, więc pojawi się ponownie (bez klucza), dopóki jest włączone do prądu.</p>
+              }
             </div>
 
             <div class="flex items-center justify-end gap-3 pt-2">
@@ -598,7 +611,7 @@ type SortDirection = 'asc' | 'desc';
                 Czy na pewno chcesz <strong>trwale usunąć {{ selectedIeeeList().size }} zaznaczonych urządzeń</strong> wraz z całą ich historią telemetrii?
               </p>
               <p class="text-slate-300">
-                Wszystkie punkty historii wykresów, powiązania i konfiguracje zostaną bezpowrotnie usunięte z dysku i pamięci serwera.
+                Historia wykresów, klucze i ustawienia tych urządzeń zostaną bezpowrotnie usunięte z bazy panelu. Urządzenia Zigbee nie są przy tym usuwane z Zigbee2MQTT — dopóki są tam sparowane, wrócą na listę (bez historii). Aby usunąć je także z sieci, użyj „Trwałe usunięcie” przy pojedynczym urządzeniu.
               </p>
             </div>
 
@@ -716,8 +729,10 @@ export class DevicesManager {
 
   async saveEditIp(dev: Device): Promise<void> {
     const ip = this.editingIpValue().trim();
-    if (ip) {
-      await this.telemetry.assignDeviceIp(dev.ieee_address, ip);
+    // Puste pole usuwa ręcznie wpisany adres (urządzenie zostanie odnalezione automatycznie)
+    if (ip !== (dev.ip_address || '')) {
+      const ok = await this.telemetry.assignDeviceIp(dev.ieee_address, ip);
+      if (!ok) this.telemetry.showActionMessage('Nie udało się zapisać adresu IP.', false);
     }
     this.cancelEditIp();
   }
@@ -792,13 +807,8 @@ export class DevicesManager {
   });
 
   isOnline(d: Device): boolean {
-    if (d.is_deleted) return false;
-    if (d.connection_status === 'offline') return false;
-    if (!d.last_seen) return false;
-    const ms = new Date(d.last_seen).getTime();
-    if (isNaN(ms)) return false;
-    // Do 60 minut uznajemy za aktywne
-    return (Date.now() - ms) <= 60 * 60 * 1000;
+    // Stan połączenia wylicza serwer — ta sama reguła co na pulpicie
+    return !d.is_deleted && d.connection_status !== 'offline';
   }
 
   isAllSelected(): boolean {
@@ -850,6 +860,16 @@ export class DevicesManager {
 
   toggleSortDirection(): void {
     this.sortDirection.set(this.sortDirection() === 'asc' ? 'desc' : 'asc');
+  }
+
+  constructor() {
+    // Dziennik i listy przychodzą osobnym zapytaniem — bez tego dziennik był pusty do pierwszej akcji
+    this.telemetry.fetchAdminDevices();
+  }
+
+  toggleLogs(): void {
+    if (!this.showLogsModal()) this.telemetry.fetchAdminDevices();
+    this.showLogsModal.set(!this.showLogsModal());
   }
 
   refreshData(): void {
@@ -906,14 +926,14 @@ export class DevicesManager {
     if (!isoStr) return '';
     try {
       const dt = new Date(isoStr);
-      return dt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return dt.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch {
       return isoStr;
     }
   }
 
   confirmSoftDelete(dev: Device): void {
-    if (confirm(`Czy na pewno chcesz usunąć urządzenie "${dev.friendly_name}" z Pulpitu na żywo?\n\nUrządzenie zostanie wyrejestrowane z Zigbee2MQTT i ukryte z pulpitu, ale JEGO HISTORIA TELEMETRII ZOSTANIE ZACHOWANA. W razie ponownego połączenia wróci na pulpit z pełną historią.`)) {
+    if (confirm(`Ukryć urządzenie "${dev.friendly_name}" z Pulpitu na żywo?\n\nUrządzenie zostaje sparowane i nadal zbiera historię — znika tylko z pulpitu. Wróci dopiero po kliknięciu „Przywróć” w tej tabeli.`)) {
       this.telemetry.deleteDevice(dev.ieee_address);
     }
   }
@@ -922,14 +942,19 @@ export class DevicesManager {
     this.telemetry.restoreDevice(dev.ieee_address);
   }
 
+  /** Dla urządzeń Zigbee: czy usunąć je także z Zigbee2MQTT (inaczej wrócą na listę). */
+  readonly removeFromNetwork = signal<boolean>(true);
+
   openPermanentDeleteModal(dev: Device): void {
+    this.removeFromNetwork.set(true);
     this.permanentTargetDevice.set(dev);
   }
 
   executePermanentDelete(): void {
     const target = this.permanentTargetDevice();
     if (!target) return;
-    this.telemetry.permanentDeleteDevice(target.ieee_address).then(() => {
+    const fromNetwork = target.driver === 'zigbee2mqtt' && this.removeFromNetwork();
+    this.telemetry.permanentDeleteDevice(target.ieee_address, fromNetwork).then(() => {
       this.permanentTargetDevice.set(null);
       this.selectedIeeeList.update((s) => {
         const copy = new Set(s);
@@ -968,7 +993,7 @@ export class DevicesManager {
   }
 
   purgeAllDevices(): void {
-    if (confirm('Czy na pewno chcesz usunąć wszystkie gniazdka/urządzenia z rejestru oraz skasować całą ich historię?')) {
+    if (confirm('Usunąć WSZYSTKIE urządzenia z bazy panelu razem z całą historią pomiarów i zapisanymi kluczami Wi-Fi (devicekey, Local Key)?\n\nUrządzenia Zigbee wrócą z listy Zigbee2MQTT (bez historii). Urządzenia Wi-Fi trzeba będzie dodać i skonfigurować od nowa.')) {
       this.telemetry.purgeAllDevices().then(() => {
         this.clearSelection();
       });

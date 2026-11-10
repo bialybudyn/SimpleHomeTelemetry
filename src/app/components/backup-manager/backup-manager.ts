@@ -26,9 +26,6 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
             </div>
             <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
               <span>Kopia Zapasowa (Backup & Restore)</span>
-              <span class="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                Wersja 2.5
-              </span>
             </h2>
             <p class="text-xs text-slate-400 max-w-3xl leading-relaxed">
               Zapisz i odtwórz urządzenia Zigbee i Wi-Fi, ich klucze (Tuya Local Key, Sonoff devicekey), adresy IP oraz ustawienia powiadomień. Historia pomiarów nie wchodzi do kopii. Plik zawiera klucze — przechowuj go bezpiecznie.
@@ -137,7 +134,7 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
                   <span class="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0"></span>
                   <div>
                     <strong class="text-white">Broker MQTT & Powiadomienia:</strong>
-                    <span class="text-slate-400 ml-1">Adres URL brokera Mosquitto, konfiguracja alertów e-mail/Telegram oraz progi przeciążeniowe 16A/32A.</span>
+                    <span class="text-slate-400 ml-1">Adres brokera MQTT oraz konfiguracja alertów e-mail/Telegram (z hasłem SMTP i tokenem bota).</span>
                   </div>
                 </li>
               </ul>
@@ -147,13 +144,13 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
             <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 text-[11px] font-mono space-y-1.5">
               <div class="flex items-center justify-between text-slate-400">
                 <span class="flex items-center gap-1 text-slate-300">
-                  <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">security</mat-icon>
-                  Integralność:
+                  <mat-icon class="text-xs !w-3.5 !h-3.5 text-amber-400">warning</mat-icon>
+                  Bezpieczeństwo pliku:
                 </span>
-                <span class="text-cyan-400 font-bold">Suma SHA-256</span>
+                <span class="text-amber-400 font-bold">bez szyfrowania</span>
               </div>
               <p class="text-slate-500 text-[10px] leading-relaxed">
-                Każdy wyeksportowany plik jest oznaczony stemplem czasowym oraz sumą kontrolną SHA-256, co uniemożliwia wgranie uszkodzonego pliku.
+                Klucze urządzeń, AppSecret eWeLink, hasło SMTP i token bota są w pliku zapisane jawnym tekstem. Plik nie ma sumy kontrolnej — przy imporcie sprawdzana jest tylko jego struktura.
               </p>
             </div>
           </div>
@@ -198,6 +195,7 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
             <!-- Obszar upuszczania / wyboru pliku .json -->
             <div
               (dragover)="onDragOver($event)"
+              (dragleave)="isDragging.set(false)"
               (drop)="onFileDrop($event)"
               class="p-5 rounded-2xl border-2 border-dashed transition-all text-center flex flex-col items-center justify-center gap-2.5 cursor-pointer"
               [class.border-cyan-500]="isDragging()"
@@ -259,7 +257,7 @@ import { SystemBackupPackage, BackupImportResponse } from '../../models/telemetr
                     Liczba urządzeń: <span class="text-cyan-400 font-bold">{{ pkg.devices.length }}</span>
                   </div>
                   <div class="text-slate-400">
-                    Konta z kluczami: <span class="text-amber-400">{{ pkg.metadata.counts.credentials_count }}</span>
+                    Urządzenia z kluczami: <span class="text-amber-400">{{ pkg.metadata.counts.credentials_count }}</span>
                   </div>
                 </div>
 
@@ -521,6 +519,19 @@ export class BackupManager {
         if (devList.length === 0) {
           throw new Error('Plik nie zawiera sekcji "devices". Czy to na pewno plik kopii zapasowej tego systemu?');
         }
+
+        // Plik bez sekcji metadata (np. ręcznie edytowany) też da się wczytać — uzupełniamy to, co pokazuje podgląd
+        const meta = parsed.metadata && typeof parsed.metadata === 'object' ? parsed.metadata : {};
+        const counts = meta.counts && typeof meta.counts === 'object' ? meta.counts : {};
+        parsed.metadata = {
+          ...meta,
+          counts: {
+            ...counts,
+            credentials_count:
+              counts.credentials_count ??
+              devList.filter((d: { local_key?: unknown; sonoff_api_key?: unknown }) => Boolean(d?.local_key || d?.sonoff_api_key)).length,
+          },
+        };
 
         this.parsedBackup.set(parsed as SystemBackupPackage);
       } catch (err: unknown) {

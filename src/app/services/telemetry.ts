@@ -100,6 +100,17 @@ export class Telemetry {
   readonly batteryAlertToast = signal<SystemNotification | null>(null);
 
   readonly isMuted = signal<boolean>(false);
+
+  /** Wyciszenie alarmu dźwiękowego jest zapamiętywane w przeglądarce. */
+  toggleMuted(): void {
+    const next = !this.isMuted();
+    this.isMuted.set(next);
+    try {
+      localStorage.setItem('simplehome_muted', String(next));
+    } catch {
+      // brak dostępu do localStorage — wyciszenie działa do odświeżenia strony
+    }
+  }
   readonly tempMaxLimit = signal<number>(28.0);
   readonly tempMinLimit = signal<number>(16.0);
   readonly batteryMinLimit = signal<number>(15);
@@ -112,15 +123,23 @@ export class Telemetry {
     this.devices().filter((d) => d.battery !== undefined && d.battery !== null && d.battery <= this.batteryMinLimit()),
   );
 
+  /**
+   * Urządzenia wymagające uwagi: słaba bateria albo temperatura poza progami alarmu ustawionymi
+   * dla tego urządzenia (tylko gdy alarm jest włączony i urządzenie jest w kontakcie).
+   */
   readonly alertCount = computed(() => {
-    const maxT = this.tempMaxLimit();
-    const minT = this.tempMinLimit();
     const minB = this.batteryMinLimit();
-    return this.devices().filter(
-      (d) =>
-        (d.last_temperature !== undefined && d.last_temperature !== null && (d.last_temperature > maxT || d.last_temperature < minT)) ||
-        (d.battery !== undefined && d.battery !== null && d.battery <= minB),
-    ).length;
+    return this.devices().filter((d) => {
+      const lowBattery = d.battery !== undefined && d.battery !== null && d.battery <= minB;
+      const t = d.last_temperature;
+      const tempAlarm =
+        Boolean(d.temp_alarm_enabled) &&
+        d.connection_status !== 'offline' &&
+        t !== undefined &&
+        t !== null &&
+        (t > (d.temp_alarm_max ?? this.tempMaxLimit()) || t < (d.temp_alarm_min ?? this.tempMinLimit()));
+      return lowBattery || tempAlarm;
+    }).length;
   });
 
   private pairingTimer: ReturnType<typeof setInterval> | null = null;
@@ -131,6 +150,11 @@ export class Telemetry {
 
   constructor() {
     if (!isPlatformBrowser(this.platformId)) return;
+    try {
+      this.isMuted.set(localStorage.getItem('simplehome_muted') === 'true');
+    } catch {
+      // ignorujemy
+    }
     this.fetchDevices();
     this.fetchSystemStatus();
     this.fetchMqttStatus();
@@ -201,8 +225,24 @@ export class Telemetry {
     return this.action(`/api/devices/${encodeURIComponent(ieee)}/restore`);
   }
 
-  permanentDeleteDevice(ieee: string): Promise<boolean> {
-    return this.action(`/api/devices/${encodeURIComponent(ieee)}/permanent-delete`);
+  /** Trwałe usunięcie z panelu; fromNetwork = poproś też Zigbee2MQTT o usunięcie urządzenia z sieci. */
+  async permanentDeleteDevice(ieee: string, fromNetwork = false): Promise<boolean> {
+    this.isActionProcessing.set(true);
+    try {
+      const res = await firstValueFrom(
+        this.http.post<{ success: boolean; message?: string }>(`/api/devices/${encodeURIComponent(ieee)}/permanent-delete`, { from_network: fromNetwork }),
+      );
+      this.showActionMessage(res?.message || 'Usunięto urządzenie.', res?.success !== false);
+      return res?.success !== false;
+    } catch (err) {
+      const e = err as { error?: { message?: string } };
+      this.showActionMessage(e?.error?.message || 'Nie udało się usunąć urządzenia.', false);
+      return false;
+    } finally {
+      this.isActionProcessing.set(false);
+      this.fetchDevices();
+      this.fetchAdminDevices();
+    }
   }
 
   batchDeviceAction(action: 'soft_delete' | 'restore' | 'permanent_delete', ieee_list: string[]): Promise<boolean> {
@@ -271,7 +311,10 @@ export class Telemetry {
         this.patchLocal(ieee, { friendly_name });
         return true;
       })
-      .catch(() => false);
+      .catch((err) => {
+        this.showActionMessage(`Nie udało się zmienić nazwy: ${err?.error?.message || 'brak odpowiedzi serwera'}`, false);
+        return false;
+      });
   }
 
   fetchDeviceHistory(ieee: string, range = '24h') {

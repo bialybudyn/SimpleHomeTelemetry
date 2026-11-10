@@ -104,7 +104,7 @@
 
       <!-- Przycisk Wyciszenia Alarmu Dźwiękowego -->
       <button
-        (click)="telemetry.isMuted.set(!telemetry.isMuted())"
+        (click)="telemetry.toggleMuted()"
         class="flex items-center justify-center p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow-sm transition-all cursor-pointer"
         [title]="telemetry.isMuted() ? 'Dźwiękowe alarmy wyciszone (kliknij aby włączyć)' : 'Dźwiękowe alarmy włączone (kliknij aby wyciszyć)'"
       >
@@ -374,7 +374,8 @@
           <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Broker Mosquitto</div>
           <div class="text-slate-200 truncate font-semibold">
             @if (telemetry.mqttStatus()?.connected) {
-              <span class="text-emerald-400">Połączono</span> (port 1883)
+              <span class="text-emerald-400">Połączono</span>
+              <span class="text-slate-500 text-[11px] ml-1">{{ brokerLabel() }}</span>
             } @else {
               <span class="text-rose-400">Rozłączono</span>
             }
@@ -395,7 +396,9 @@
             <span [class.text-emerald-400]="telemetry.bridgeState() === 'online'" [class.text-amber-400]="telemetry.bridgeState() !== 'online'">
               {{ telemetry.bridgeState() === 'online' ? 'Online' : (telemetry.bridgeState() || 'offline') }}
             </span>
-            <span class="text-slate-500 text-[11px] ml-1">(port 8080)</span>
+            @if (telemetry.mqttStatus()?.z2m_version) {
+              <span class="text-slate-500 text-[11px] ml-1">v{{ telemetry.mqttStatus()?.z2m_version }}</span>
+            }
           </div>
         </div>
       </div>
@@ -480,7 +483,7 @@
               <span>Pulpit Urządzeń Zigbee</span>
               @if (telemetry.alertCount() > 0) {
                 <span class="px-2 py-0.5 text-xs rounded-full bg-rose-950/80 border border-rose-800 text-rose-300 font-normal">
-                  {{ telemetry.alertCount() }} alerty
+                  Wymaga uwagi: {{ telemetry.alertCount() }}
                 </span>
               }
             </h2>
@@ -536,7 +539,7 @@
             </div>
             <div>
               <span class="font-bold text-white">Pulpit Urządzeń Zigbee (Zwinięty)</span>
-              <span class="text-slate-400 ml-2">— {{ allZigbeeDevices().length }} urządzeń Zigbee w sieci, transmisja aktywna</span>
+              <span class="text-slate-400 ml-2">— {{ allZigbeeDevices().length }} urządzeń Zigbee na pulpicie</span>
             </div>
           </div>
           <div class="flex items-center gap-1.5 text-cyan-400 font-semibold hover:underline">
@@ -716,26 +719,9 @@
                 class="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-950/40 transition-all cursor-pointer"
               >
                 <mat-icon class="text-base !w-4 !h-4">{{ telemetry.isPairing() ? 'refresh' : 'sensors' }}</mat-icon>
-                <span>{{ telemetry.isPairing() ? 'Parowanie aktywne (' + telemetry.pairingRemainingSeconds() + 's)' : 'Włącz tryb parowania (60s)' }}</span>
+                <span>{{ telemetry.isPairing() ? 'Parowanie aktywne (' + telemetry.pairingRemainingSeconds() + 's)' : 'Włącz tryb parowania (160 s)' }}</span>
               </button>
 
-              <button
-                (click)="setTab('settings')"
-                class="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-              >
-                <mat-icon class="text-base !w-4 !h-4">hub</mat-icon>
-                <span>Przeglądaj katalog produktów</span>
-              </button>
-
-              <a
-                href="http://localhost:8080"
-                target="_blank"
-                rel="noopener"
-                class="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-              >
-                <mat-icon class="text-base !w-4 !h-4">open_in_new</mat-icon>
-                <span>Konsola Zigbee2MQTT (port 8080)</span>
-              </a>
             </div>
           </div>
         }
@@ -1032,7 +1018,7 @@
           <mat-icon class="text-xl">edit</mat-icon>
         </div>
         <div>
-          <h3 class="text-base font-bold text-white">Zmień nazwę czujnika</h3>
+          <h3 class="text-base font-bold text-white">Zmień nazwę urządzenia</h3>
           <p class="text-xs font-mono text-slate-500">{{ renamingDevice()?.ieee_address }}</p>
         </div>
       </div>
@@ -1085,15 +1071,6 @@
     [targetDevice]="selectedDeviceForConfig()"
     [initialBrand]="initialConfigBrand()"
     (closeModal)="closeWifiModal()"
-  ></app-device-config-modal>
-}
-
-<!-- Modal Skanowania Kodu QR Tuya Local Key -->
-@if (showTuyaQrModal()) {
-  <app-device-config-modal
-    [targetDevice]="selectedTuyaDevice()"
-    [initialBrand]="'tuya'"
-    (closeModal)="closeTuyaQrModal()"
   ></app-device-config-modal>
 }
 

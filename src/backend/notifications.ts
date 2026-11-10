@@ -145,10 +145,18 @@ export class Notifier {
 
   async sendExternal(text: string, subject: string): Promise<void> {
     const cfg = this.getConfig();
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       cfg.email_enabled ? this.sendEmail(cfg, subject, text) : Promise.resolve(),
       cfg.telegram_enabled ? this.sendTelegram(cfg, text) : Promise.resolve(),
     ]);
+    // Nieudana wysyłka nie może przepaść bez śladu — trafia do dziennika usługi (journalctl -u simplehome)
+    const channels = ['e-mail', 'Telegram'];
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        console.warn(`[POWIADOMIENIA] Nie wysłano (${channels[i]}) "${subject}": ${reason}`);
+      }
+    });
   }
 
   async sendEmail(cfg: NotificationConfig, subject: string, text: string): Promise<void> {

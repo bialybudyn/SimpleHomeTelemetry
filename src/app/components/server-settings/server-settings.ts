@@ -191,7 +191,7 @@ export class ServerSettings {
       {
         id: 'notifications',
         title: 'Powiadomienia (SMTP & Telegram)',
-        subtitle: 'Alerty e-mail oraz powiadomienia bota Telegram przy awariach i alarmach',
+        subtitle: 'E-mail i Telegram przy alarmach czujników (temperatura, ruch, otwarcie, zalanie, dym) i słabej baterii',
         icon: 'notifications',
       },
     ];

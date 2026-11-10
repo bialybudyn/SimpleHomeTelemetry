@@ -161,7 +161,13 @@ export function devicesRouter(b: Backend): Router {
     let note = '';
     if (req.query['from_network'] === 'true' || req.body?.from_network === true) {
       const result = await b.registry.driverFor(dev)?.remove?.(dev);
-      note = result ? ` ${result.message}` : '';
+      if (result) {
+        note = result.success
+          ? ' Wysłano do Zigbee2MQTT prośbę o usunięcie z sieci.'
+          : ` Nie udało się przekazać prośby o usunięcie z sieci Zigbee (${result.message}) — urządzenie pozostaje sparowane i wróci na listę.`;
+      }
+    } else if (dev.driver === 'zigbee2mqtt') {
+      note = ' Urządzenie pozostaje sparowane w Zigbee2MQTT, więc wróci na listę przy najbliższej synchronizacji.';
     }
     if (dev.driver === 'tuya') b.tuya.forget(dev.ieee_address);
     b.registry.purge(dev.ieee_address);
@@ -193,7 +199,11 @@ export function devicesRouter(b: Backend): Router {
     b.tuya.stop();
     b.registry.purgeAll();
     b.tuya.start();
-    res.json({ success: true, message: 'Usunięto wszystkie urządzenia i historię. Zigbee2MQTT odtworzy listę swoich urządzeń.' });
+    // Ponowne połączenie z brokerem sprawia, że lista urządzeń Zigbee2MQTT (retained) wraca od razu,
+    // a nie dopiero przy następnej zmianie w sieci Zigbee; gniazdka Sonoff zgłoszą się przez mDNS.
+    b.z2m.reconfigure({});
+    b.sonoff.query();
+    res.json({ success: true, message: 'Usunięto wszystkie urządzenia i historię. Urządzenia Zigbee wracają z listy Zigbee2MQTT.' });
   };
   r.post('/api/devices/purge-all', purgeAll);
   r.post('/api/devices/reset', purgeAll);

@@ -115,7 +115,7 @@ type Brand = 'sonoff' | 'tuya';
                     <span class="text-slate-400">Wersja protokołu</span>
                     <select class="field" [value]="editVersion()" (change)="editVersion.set(val($event))">
                       @for (v of tuyaVersions; track v) {
-                        <option [value]="v">{{ v }}</option>
+                        <option [value]="v" [selected]="v === editVersion()">{{ v }}</option>
                       }
                     </select>
                   </label>
@@ -250,7 +250,7 @@ type Brand = 'sonoff' | 'tuya';
                 </select>
                 <select class="field" [value]="newVersion()" (change)="newVersion.set(val($event))">
                   @for (v of tuyaVersions; track v) {
-                    <option [value]="v">Protokół {{ v }}</option>
+                    <option [value]="v" [selected]="v === newVersion()">Protokół {{ v }}</option>
                   }
                 </select>
               </div>

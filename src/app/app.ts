@@ -70,10 +70,6 @@ export class App {
   readonly renameValue = signal<string>('');
   readonly showWifiModal = signal<boolean>(false);
 
-  // Modal skanowania kodu QR Tuya Local Key
-  readonly showTuyaQrModal = signal<boolean>(false);
-  readonly selectedTuyaDevice = signal<Device | null>(null);
-
   // Panel Konfiguracja urządzenia (Sonoff LAN & Baza OUI / Tuya Local Key)
   readonly showDeviceConfigModal = signal<boolean>(false);
   readonly selectedDeviceForConfig = signal<Device | null>(null);
@@ -95,9 +91,8 @@ export class App {
     this.openDeviceConfigModal(dev, 'tuya');
   }
 
-  closeTuyaQrModal(): void {
-    this.closeDeviceConfigModal();
-  }
+  /** Adres brokera MQTT do paska stanu (bez ewentualnego loginu i hasła w adresie). */
+  readonly brokerLabel = computed(() => (this.telemetry.mqttStatus()?.url ?? '').replace(/\/\/[^@/]*@/, '//'));
 
   // Identyfikacja czujników z najwyższą (czerwony) i najniższą (niebieski) temperaturą
   // ZGODNIE Z ŻYCZENIEM: Wykluczamy głowice/termostaty ('climate'), bierzemy pod uwagę TYLKO czujniki temperatury ('sensor')!
@@ -161,12 +156,8 @@ export class App {
 
   // Sprawdzanie czy urządzenie jest urządzeniem Wi-Fi (nie Zigbee)
   isWifiDevice(d: Device): boolean {
-    if (d.protocol === 'wifi') return true;
-    if (d.ieee_address?.startsWith('wifi_')) return true;
-    const v = (d.vendor || '').toLowerCase();
-    const m = (d.model || '').toLowerCase();
-    const f = (d.friendly_name || '').toLowerCase();
-    return v.includes('wi-fi') || v.includes('wifi') || m.includes('wi-fi') || m.includes('wifi') || f.includes('(wi-fi)') || f.includes('wifi');
+    // Protokół ustawia serwer; nazwa urządzenia nie decyduje o tym, na którym pulpicie jest kafelek
+    return d.protocol === 'wifi' || d.driver === 'sonoff' || d.driver === 'tuya';
   }
 
   // --- PULPIT ZIGBEE: Urządzenia i Kolejność Drag & Drop ---
@@ -390,18 +381,6 @@ export class App {
     this.renamingDevice.set(null);
   }
 
-  confirmDeleteFromDashboard(dev: Device): void {
-    const confirmed = confirm(
-      `Czy na pewno chcesz usunąć urządzenie "${dev.friendly_name || dev.ieee_address}" z Pulpitu na żywo?\n\n` +
-      `• Urządzenie zostanie wyrejestrowane z mostka Zigbee2MQTT / sterownika Wi-Fi\n` +
-      `• Historia pomiarów NIE zostanie skasowana i będzie bezpiecznie zachowana w archiwum serwera (Ustawienia serwera -> Urządzenia)\n` +
-      `• W razie ponownego podłączenia lub transmisji urządzenie automatycznie powróci na pulpit z tym samym opisem i kompletną historią.`
-    );
-    if (confirmed) {
-      this.telemetry.deleteDevice(dev.ieee_address);
-    }
-  }
-
   cancelRename(): void {
     this.renamingDevice.set(null);
   }
@@ -420,10 +399,6 @@ export class App {
 
   handleDeviceCommand(event: { device: Device; command: Record<string, unknown> }): void {
     this.telemetry.sendDeviceCommand(event.device.ieee_address, event.command);
-  }
-
-  resetData(): void {
-    this.telemetry.resetAllData();
   }
 
   private loadOrder(key: string): string[] {
