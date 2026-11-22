@@ -31,6 +31,8 @@ const ACCESS_SET = 0b010;
 const CACHED_STATE_WINDOW_MS = 30_000;
 /** Wiadomość z last_seen starszym niż tyle to powtórka starego stanu. */
 const FRESH_MAX_AGE_MS = 120_000;
+/** Limit wiadomości buforowanych, zanim przyjdzie lista urządzeń (bridge/devices). */
+const PENDING_MAX = 500;
 
 /** last_seen z Zigbee2MQTT: ISO 8601 albo epoch (ms). */
 function parseLastSeen(value: unknown): string | null {
@@ -52,6 +54,12 @@ export class Zigbee2MqttDriver implements Driver {
   private permitJoinEnd = 0;
   /** Do tej chwili stan urządzeń traktujemy jako zapamiętany przez mostek, a nie świeży pomiar. */
   private cachedStateUntil = 0;
+  /**
+   * Ostatnie wiadomości o nieznanych jeszcze nazwach (przyszły przed bridge/devices, np. po starcie
+   * albo po zmianie nazwy). Broker oddaje retained w dowolnej kolejności, a availability nie jest
+   * wysyłane ponownie, więc bez bufora urządzenie zostawało bez informacji o dostępności.
+   */
+  private pending = new Map<string, Buffer>();
 
   readonly status: MqttStatus = {
     connected: false,
@@ -91,6 +99,7 @@ export class Zigbee2MqttDriver implements Driver {
     client.on('connect', () => {
       // Po połączeniu broker oddaje wiadomości zachowane (retained) — to też stary stan
       this.cachedStateUntil = Date.now() + CACHED_STATE_WINDOW_MS;
+      this.pending.clear();
       this.status.connected = true;
       this.status.last_error = null;
       client.subscribe(`${topic}/#`, (err) => {
@@ -147,9 +156,14 @@ export class Zigbee2MqttDriver implements Driver {
     }
 
     const resolved = resolveTopic(sub, this.nameToId.keys());
-    if (!resolved) return;
-    const id = this.nameToId.get(resolved.name);
-    if (!id) return;
+    const id = resolved ? this.nameToId.get(resolved.name) : undefined;
+    if (!resolved || !id) {
+      // Nieznana nazwa: zachowaj ostatnią wiadomość do przetworzenia po następnym bridge/devices
+      if (this.pending.has(sub) || this.pending.size < PENDING_MAX) {
+        this.pending.set(sub, payload);
+      }
+      return;
+    }
 
     if (resolved.rest === '') {
       const parsed = parseJson(text);
@@ -234,6 +248,8 @@ export class Zigbee2MqttDriver implements Driver {
       if (!item?.ieee_address || item.type === 'Coordinator') continue;
       const id = item.ieee_address;
       seen.add(id);
+      // Urządzenie wyłączone w Z2M nie wysyła stanu — nie pokazujemy go jako wiecznie offline
+      if (item.disabled) continue;
       this.nameToId.set(item.friendly_name, id);
       const exposes = item.definition?.exposes ?? [];
       const existing = this.registry.get(id);
@@ -246,6 +262,8 @@ export class Zigbee2MqttDriver implements Driver {
           model: item.definition?.model ?? item.model_id ?? 'Nieznany model',
           vendor: item.definition?.vendor ?? item.manufacturer,
           description: item.definition?.description ?? null,
+          // "Battery" / "Mains (single phase)" / ... — decyduje o tym, jak długą ciszę uznajemy za normalną
+          power_source: item.power_source ?? existing?.power_source ?? null,
           exposes,
           category: categoryFromExposes(exposes),
           last_error: item.interview_completed === false ? 'Parowanie (interview) nie zostało ukończone.' : existing?.last_error ?? null,
@@ -268,6 +286,11 @@ export class Zigbee2MqttDriver implements Driver {
     this.status.devices_discovered = seen.size;
     this.registry.emitAll();
     this.emitStatus();
+
+    // Wiadomości, które przyszły przed listą urządzeń, przetwarzamy teraz (availability, stan)
+    const pending = [...this.pending];
+    this.pending.clear();
+    for (const [sub, payload] of pending) this.handleMessage(`${this.options.topic}/${sub}`, payload);
   }
 
   async sendCommand(dev: Device, command: Record<string, unknown>): Promise<CommandResult> {
@@ -318,6 +341,10 @@ export class Zigbee2MqttDriver implements Driver {
       // Starszy frontend wysyła current_heating_setpoint — TRVZB oczekuje occupied_heating_setpoint
       if (key === 'current_heating_setpoint' && !writable.has(key) && writable.has('occupied_heating_setpoint')) {
         target = 'occupied_heating_setpoint';
+      }
+      // Przełączniki wielokanałowe nie mają "state", tylko state_l1, state_l2... — kafelek steruje pierwszym kanałem
+      if (key === 'state' && !writable.has(key) && writable.has('state_l1')) {
+        target = 'state_l1';
       }
       // Bez exposes (urządzenie nieobsługiwane przez Z2M) przepuszczamy polecenie bez zmian
       if (writable.size === 0 || writable.has(target)) out[target] = value;

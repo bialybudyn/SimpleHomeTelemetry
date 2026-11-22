@@ -43,6 +43,8 @@ export interface Device {
   exposes?: Z2mExpose[];
   /** Dostępność zgłaszana przez sterownik (availability Z2M, połączenie LAN). */
   available?: boolean | null;
+  /** Źródło zasilania wg Zigbee2MQTT ("Battery", "Mains (single phase)", ...). */
+  power_source?: string | null;
   description?: string | null;
 
   // Tuya (lokalny protokół 3.1-3.5)

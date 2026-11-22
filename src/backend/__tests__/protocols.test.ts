@@ -24,6 +24,19 @@ describe('state-mapper', () => {
     expect(buildGetPayload([{ type: 'numeric', property: 'temperature', access: 1 }])).toBeNull();
   });
 
+  it('/get pyta tylko o atrybuty kafelka, nie o całą konfigurację urządzenia', () => {
+    const trv: Z2mExpose[] = [
+      { type: 'climate', features: [
+        { type: 'numeric', property: 'local_temperature', access: 5 },
+        { type: 'numeric', property: 'occupied_heating_setpoint', access: 7 },
+      ] },
+      { type: 'numeric', property: 'valve_opening_degree', access: 7 },
+      { type: 'numeric', property: 'idle_steps', access: 5 },
+      { type: 'text', property: 'weekly_schedule_monday', access: 7 },
+    ];
+    expect(buildGetPayload(trv)).toEqual({ local_temperature: '', occupied_heating_setpoint: '' });
+  });
+
   it('kategoria z exposes', () => {
     expect(categoryFromExposes(plugExposes)).toBe('plug');
     expect(categoryFromExposes([{ type: 'climate', features: [] }])).toBe('climate');

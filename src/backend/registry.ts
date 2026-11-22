@@ -241,9 +241,18 @@ export class DeviceRegistry {
     if (dev.available === false) return false;
     if (dev.available === true) return true;
     if (!dev.last_seen) return false;
-    // Brak informacji o dostępności: czujniki bateryjne raportują rzadko, więc limit jest szeroki
-    const limitMs = dev.battery !== null && dev.battery !== undefined ? 25 * 3600_000 : 2 * 3600_000;
-    return Date.now() - new Date(dev.last_seen).getTime() <= limitMs;
+    return Date.now() - new Date(dev.last_seen).getTime() <= this.silenceLimitMs(dev);
+  }
+
+  /**
+   * Jak długą ciszę uznajemy za normalną, gdy sterownik nie zgłasza dostępności.
+   * Urządzenia Zigbee (bateryjne i sieciowe) wysyłają stan tylko przy zmianie lub co kilka godzin,
+   * a Zigbee2MQTT bez włączonego `availability` ich nie odpytuje — krótki limit dawał fałszywe "offline".
+   */
+  private silenceLimitMs(dev: Device): number {
+    if (dev.driver === 'zigbee2mqtt') return 25 * 3600_000;
+    const battery = (dev.battery !== null && dev.battery !== undefined) || dev.power_source === 'Battery';
+    return battery ? 25 * 3600_000 : 2 * 3600_000;
   }
 
   emitDevice(dev: Device): void {

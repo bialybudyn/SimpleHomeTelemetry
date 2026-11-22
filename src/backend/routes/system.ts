@@ -65,12 +65,16 @@ export function systemRouter(b: Backend): Router {
 
   /** "Synchronizuj": odczyt na żądanie wszystkich urządzeń, które na to pozwalają (z odstępem, by nie zalać sieci Zigbee). */
   r.post('/api/mqtt/sync', async (_req, res) => {
-    const devices = b.registry.all().filter((d) => !d.is_deleted);
+    // Urządzeń Zigbee na baterii nie odpytujemy hurtowo: śpią, a zapytania czekają w kolejce koordynatora
+    const devices = b.registry
+      .all()
+      .filter((d) => !d.is_deleted && !(d.driver === 'zigbee2mqtt' && d.power_source === 'Battery'));
     let sent = 0;
     for (const dev of devices) {
       const result = await b.registry.driverFor(dev)?.refresh(dev);
       if (result?.success) sent++;
-      await new Promise((r) => setTimeout(r, 150));
+      // Zigbee: ok. 1 urządzenie na sekundę, żeby nie zalać sieci; Wi-Fi może szybciej
+      await new Promise((r) => setTimeout(r, dev.driver === 'zigbee2mqtt' ? 1000 : 150));
     }
     const skipped = devices.length - sent;
     res.json({

@@ -46,6 +46,10 @@ export function applyFlatFields(dev: Device, state: Record<string, unknown>): vo
   if (state['occupied_heating_setpoint'] !== undefined) {
     target['occupied_heating_setpoint'] = state['occupied_heating_setpoint'];
   }
+  // Przełączniki wielokanałowe (state_l1, state_l2...) nie mają "state" — kafelek pokazuje pierwszy kanał
+  if (state['state'] === undefined && state['state_l1'] !== undefined) {
+    target['state'] = state['state_l1'];
+  }
   // Głowice podają tylko local_temperature — pokaż ją jako temperaturę kafelka
   if (state['temperature'] === undefined && typeof state['local_temperature'] === 'number') {
     target['last_temperature'] = state['local_temperature'];
@@ -89,13 +93,20 @@ export function flattenExposes(exposes: Z2mExpose[] | undefined): Z2mExpose[] {
 const ACCESS_GET = 0b100;
 
 /**
- * Buduje payload dla tematu <name>/get: tylko atrybuty, które urządzenie pozwala odczytać.
+ * Atrybuty pokazywane na kafelku — tylko o nie pytamy przy odczycie na żądanie.
+ * Każdy atrybut w /get to osobny odczyt ZCL; pytanie o wszystkie (głowica TRVZB ma ich kilkadziesiąt)
+ * zapychało kolejkę koordynatora i powodowało błędy dostarczenia w całej sieci.
+ */
+const GET_KEYS = /^(state(_l\d+)?|brightness|position|power|current|voltage|energy|temperature|humidity|local_temperature|occupied_heating_setpoint|current_heating_setpoint|system_mode|running_state|fan_mode|fan_speed)$/;
+
+/**
+ * Buduje payload dla tematu <name>/get: tylko kluczowe atrybuty, które urządzenie pozwala odczytać.
  * Zwraca null, jeśli nic nie da się odpytać (np. czujniki bateryjne).
  */
 export function buildGetPayload(exposes: Z2mExpose[] | undefined): Record<string, string> | null {
   const payload: Record<string, string> = {};
   for (const f of flattenExposes(exposes)) {
-    if (f.property && typeof f.access === 'number' && (f.access & ACCESS_GET) !== 0) {
+    if (f.property && GET_KEYS.test(f.property) && typeof f.access === 'number' && (f.access & ACCESS_GET) !== 0) {
       payload[f.property] = '';
     }
   }

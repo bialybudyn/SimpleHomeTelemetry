@@ -116,6 +116,49 @@ describe('backend: Zigbee2MQTT -> rejestr -> historia', () => {
     expect(b.registry.get('0x2')?.is_deleted).toBe(false);
   });
 
+  it('availability i stan przysłane przed bridge/devices nie giną', () => {
+    b = createBackend(':memory:');
+    msg(b, 'Gniazdko/availability', { state: 'online' });
+    msg(b, 'Gniazdko', { state: 'OFF' });
+    msg(b, 'bridge/devices', bridgeDevices);
+    const plug = b.registry.get('0x1')!;
+    expect(plug.available).toBe(true);
+    expect(plug.state).toBe('OFF');
+  });
+
+  it('cisza urządzenia Zigbee krótsza niż doba nie oznacza offline', () => {
+    b = createBackend(':memory:');
+    msg(b, 'bridge/devices', bridgeDevices.map((d) => (d.ieee_address === '0x1' ? { ...d, power_source: 'Mains (single phase)' } : d)));
+    const plug = b.registry.get('0x1')!;
+    expect(plug.power_source).toBe('Mains (single phase)');
+    plug.last_seen = new Date(Date.now() - 5 * 3600_000).toISOString();
+    expect(b.registry.isOnline(plug)).toBe(true);
+    plug.last_seen = new Date(Date.now() - 26 * 3600_000).toISOString();
+    expect(b.registry.isOnline(plug)).toBe(false);
+  });
+
+  it('przełącznik wielokanałowy: kafelek pokazuje i steruje pierwszym kanałem', () => {
+    b = createBackend(':memory:');
+    msg(b, 'bridge/devices', [
+      {
+        ieee_address: '0x4',
+        type: 'Router',
+        friendly_name: 'Podwójny',
+        definition: {
+          model: 'TS0002',
+          exposes: [
+            { type: 'switch', endpoint: 'l1', features: [{ type: 'binary', property: 'state_l1', access: 7 }] },
+            { type: 'switch', endpoint: 'l2', features: [{ type: 'binary', property: 'state_l2', access: 7 }] },
+          ],
+        },
+      },
+    ]);
+    msg(b, 'Podwójny', { state_l1: 'ON', state_l2: 'OFF' });
+    const dev = b.registry.get('0x4')!;
+    expect(dev.state).toBe('ON');
+    expect(b.z2m.buildSetPayload(dev, { state: 'OFF' })).toEqual({ state_l1: 'OFF' });
+  });
+
   it('nie wysyła kluczy do przeglądarki', () => {
     b = createBackend(':memory:');
     b.registry.upsert('tuya_abc', { driver: 'tuya', local_key: 'secret', friendly_name: 'Wentylator' });
