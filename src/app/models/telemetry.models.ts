@@ -45,6 +45,8 @@ export interface Device {
   available?: boolean | null;
   /** Źródło zasilania wg Zigbee2MQTT ("Battery", "Mains (single phase)", ...). */
   power_source?: string | null;
+  /** Wysłano już powiadomienie, że urządzenie przestało odpowiadać (kasowane po powrocie). */
+  offline_alerted?: boolean;
   description?: string | null;
 
   // Tuya (lokalny protokół 3.1-3.5)

@@ -7,6 +7,7 @@ import { DeviceRegistry } from './registry';
 import { Zigbee2MqttDriver } from './drivers/zigbee2mqtt';
 import { SonoffDriver } from './drivers/sonoff';
 import { TuyaDriver } from './drivers/tuya';
+import { Watchdog } from './watchdog';
 
 export interface Backend {
   db: Db;
@@ -17,6 +18,7 @@ export interface Backend {
   z2m: Zigbee2MqttDriver;
   sonoff: SonoffDriver;
   tuya: TuyaDriver;
+  watchdog: Watchdog;
   start(): void;
   stop(): void;
 }
@@ -50,6 +52,7 @@ export function createBackend(dbPath = dataPath('simplehome.db')): Backend {
   registry.registerDriver(z2m);
   registry.registerDriver(sonoff);
   registry.registerDriver(tuya);
+  const watchdog = new Watchdog(registry, notifier, () => z2m.status);
 
   let maintenance: ReturnType<typeof setInterval> | null = null;
 
@@ -62,15 +65,18 @@ export function createBackend(dbPath = dataPath('simplehome.db')): Backend {
     z2m,
     sonoff,
     tuya,
+    watchdog,
     start() {
       z2m.start();
       sonoff.start();
       tuya.start();
+      watchdog.start();
       history.prune(config.rawRetentionDays, config.hourlyRetentionDays);
       maintenance = setInterval(() => history.prune(config.rawRetentionDays, config.hourlyRetentionDays), 6 * 3600_000);
     },
     stop() {
       if (maintenance) clearInterval(maintenance);
+      watchdog.stop();
       z2m.stop();
       sonoff.stop();
       tuya.stop();

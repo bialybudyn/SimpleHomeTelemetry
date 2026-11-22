@@ -135,10 +135,20 @@ export class Notifier {
     void this.sendExternal(message, `Bateria: ${dev.friendly_name}`);
   }
 
-  private store(dev: Device, type: string, level: string, message: string, extra: Record<string, unknown> = {}): void {
+  /**
+   * Powiadomienie systemowe (np. urządzenia przestały odpowiadać, Zigbee2MQTT nie działa):
+   * wpis w panelu + zdarzenie na żywo + e-mail/Telegram. O powtórzeniach decyduje wywołujący.
+   */
+  system(type: string, level: SystemNotification['level'], subject: string, message: string): void {
+    this.store(null, type, level, message, { device_name: subject });
+    this.events.broadcast({ type: 'system_alert', alert_type: type, level, message, timestamp: new Date().toISOString() });
+    void this.sendExternal(message, subject);
+  }
+
+  private store(dev: Device | null, type: string, level: string, message: string, extra: Record<string, unknown> = {}): void {
     this.db.sql
       .prepare('INSERT INTO notifications (ts, device, type, level, message, data) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(Date.now(), dev.ieee_address, type, level, message, JSON.stringify({ device_name: dev.friendly_name, ...extra }));
+      .run(Date.now(), dev?.ieee_address ?? null, type, level, message, JSON.stringify({ device_name: dev?.friendly_name, ...extra }));
     // Trzymamy ostatnie 1000 wpisów
     this.db.sql.exec('DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT 1000)');
   }

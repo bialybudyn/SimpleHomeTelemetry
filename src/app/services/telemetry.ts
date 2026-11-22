@@ -650,6 +650,9 @@ export class Telemetry {
         this.playAlarmAudio();
         this.fetchNotifications();
         break;
+      case 'system_alert':
+        this.fetchNotifications();
+        break;
       case 'permit_join':
         this.startPairingCountdown(Number(event['duration'] ?? 60));
         break;
