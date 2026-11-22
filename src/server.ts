@@ -1,12 +1,12 @@
 import { AngularNodeAppEngine, createNodeRequestHandler, isMainModule, writeResponseToNodeResponse } from '@angular/ssr/node';
 import express from 'express';
-import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { config } from './backend/config';
 import { basicAuthMiddleware, isUpgradeAuthorized } from './backend/auth';
 import { createBackend, type Backend } from './backend/context';
 import { initImgw } from './backend/imgw';
+import { createPanelListener } from './backend/tls';
 import { devicesRouter } from './backend/routes/devices';
 import { systemRouter } from './backend/routes/system';
 import { weatherRouter } from './backend/routes/weather';
@@ -24,6 +24,14 @@ const backend: Backend | null = runBackend ? createBackend() : null;
 
 const app = express();
 app.disable('x-powered-by');
+
+if (config.tlsCert && config.tlsKey) {
+  // Przeglądarka ma wracać tylko po HTTPS (bez includeSubDomains — panel bywa pod samym IP)
+  app.use((_req, res, next) => {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    next();
+  });
+}
 
 if (config.panelPassword) {
   app.use(basicAuthMiddleware(config.panelUser, config.panelPassword));
@@ -55,7 +63,10 @@ app.use((req, res, next) => {
 });
 
 if (isMainModule(import.meta.url) && backend) {
-  const server = createServer(app);
+  const { server, listener, secure } = createPanelListener(app, { cert: config.tlsCert, key: config.tlsKey });
+  if (!secure && config.panelPassword) {
+    console.warn('[HTTP] Brak TLS_CERT/TLS_KEY — login i hasło do panelu idą przez sieć otwartym tekstem.');
+  }
   const wss = new WebSocketServer({ noServer: true });
   backend.events.attachWebSocketServer(wss);
 
@@ -78,19 +89,19 @@ if (isMainModule(import.meta.url) && backend) {
 
   // Np. EADDRINUSE: kończymy proces, żeby systemd pokazał błąd i ponowił start,
   // zamiast zostawić żywy proces bez serwera HTTP (Angular SSR łapie uncaughtException).
-  server.on('error', (err) => {
+  listener.on('error', (err) => {
     console.error(`[HTTP] Nie można uruchomić serwera na ${config.host}:${config.port}:`, err.message);
     process.exit(1);
   });
-  server.listen(config.port, config.host, () => {
-    console.log(`[HTTP] Panel SimpleHome działa na http://${config.host}:${config.port} (dane: ${config.dataDir})`);
+  listener.listen(config.port, config.host, () => {
+    console.log(`[HTTP] Panel SimpleHome działa na ${secure ? 'https' : 'http'}://${config.host}:${config.port} (dane: ${config.dataDir})`);
   });
 
   const shutdown = (signal: string) => {
     console.log(`[HTTP] ${signal} — zamykanie...`);
     backend.stop();
     backend.db.close();
-    server.close(() => process.exit(0));
+    listener.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

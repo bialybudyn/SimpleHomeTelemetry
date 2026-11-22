@@ -16,6 +16,9 @@ export const config = {
   /** Hasło do panelu (HTTP Basic). Puste = brak logowania (niezalecane poza siecią domową). */
   panelUser: process.env['PANEL_USER'] || 'admin',
   panelPassword: process.env['PANEL_PASSWORD'] || '',
+  /** Certyfikat i klucz TLS (PEM). Ustawione = panel działa po HTTPS, a HTTP tylko przekierowuje. */
+  tlsCert: process.env['TLS_CERT'] || undefined,
+  tlsKey: process.env['TLS_KEY'] || undefined,
   /** Ile dni trzymać surowe próbki telemetrii (agregaty godzinowe są trzymane dłużej). */
   rawRetentionDays: Number(process.env['RAW_RETENTION_DAYS']) || 30,
   hourlyRetentionDays: Number(process.env['HOURLY_RETENTION_DAYS']) || 730,

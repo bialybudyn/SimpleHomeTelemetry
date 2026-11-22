@@ -7,7 +7,7 @@ Wszystko działa lokalnie. Chmura eWeLink lub Tuya jest potrzebna tylko raz, do 
 ## Architektura
 
 ```
-przeglądarka ──HTTP/WebSocket──► panel (Node.js, port 3000)
+przeglądarka ──HTTPS/WebSocket──► panel (Node.js, port 3000)
                                    ├─ Zigbee2MQTT driver ──MQTT──► Mosquitto ◄── Zigbee2MQTT ◄── koordynator
                                    ├─ Sonoff driver ── mDNS (stan) + HTTP :8081 (polecenia)
                                    ├─ Tuya driver ── stałe połączenie TCP :6668 (TuyAPI)
@@ -62,6 +62,7 @@ Przy przejściu ze starej wersji instalator wyłącza usługę `iot-telemetry`. 
 | `MQTT_USER` / `MQTT_PASSWORD` | puste | dane logowania do brokera |
 | `MQTT_TOPIC` | `zigbee2mqtt` | temat bazowy Zigbee2MQTT |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | adres panelu |
+| `TLS_CERT` / `TLS_KEY` | `/etc/simplehome/tls/*.pem` | certyfikat HTTPS (instalator tworzy samopodpisany); zwykłe HTTP na tym porcie tylko przekierowuje na HTTPS; puste = HTTP |
 | `DATA_DIR` | `/var/lib/simplehome` | baza i cache |
 | `RAW_RETENTION_DAYS` | `30` | jak długo trzymać surowe próbki |
 | `HOURLY_RETENTION_DAYS` | `730` | jak długo trzymać średnie godzinowe |
@@ -126,5 +127,7 @@ Tryb deweloperski: `NG_DEV_BACKEND=1 npm run dev`. Działa bez WebSocketu, zdarz
 
 ## Bezpieczeństwo
 - Ustaw `PANEL_PASSWORD`. Bez hasła każdy w sieci ma pełny dostęp, łącznie z kopią zapasową z kluczami.
+- Panel działa po HTTPS (`TLS_CERT`/`TLS_KEY`), bo logowanie HTTP Basic po zwykłym HTTP wysyła login i hasło otwartym tekstem. Certyfikat od instalatora jest samopodpisany: przeglądarka poprosi o akceptację, a `cert.pem` możesz dodać do zaufanych.
 - Klucze urządzeń nie trafiają do przeglądarki. Plik kopii zapasowej je zawiera, więc trzymaj go bezpiecznie.
+- W Zigbee2MQTT włącz `availability: enabled: true` i `advanced.last_seen: ISO_8601` — panel wtedy pokazuje rzeczywistą dostępność urządzeń zamiast zgadywać ją z czasu ostatniej wiadomości.
 - Mosquitto instalowany przez `--with-mosquitto` wymaga logowania. Starsze instalacje z `allow_anonymous true` warto przestawić na hasła.

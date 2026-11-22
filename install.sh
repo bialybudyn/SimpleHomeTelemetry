@@ -53,7 +53,7 @@ gen_secret() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 2
 c_info "Instalacja pakietów bazowych..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y >/dev/null
-apt-get install -y --no-install-recommends ca-certificates curl gnupg git rsync >/dev/null
+apt-get install -y --no-install-recommends ca-certificates curl gnupg git rsync openssl >/dev/null
 
 node_ok() {
   command -v node >/dev/null 2>&1 || return 1
@@ -232,6 +232,31 @@ fi
 chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
+# HTTPS: certyfikat samopodpisany (login i hasło do panelu nie idą otwartym tekstem).
+# Własny certyfikat: podmień pliki w ${TLS_DIR} albo zmień TLS_CERT/TLS_KEY w ${ENV_FILE}.
+TLS_DIR="${CONF_DIR}/tls"
+if [ ! -f "${TLS_DIR}/cert.pem" ] || [ ! -f "${TLS_DIR}/key.pem" ]; then
+  mkdir -p "$TLS_DIR"
+  HOST_NAME="$(hostname)"
+  SAN="DNS:${HOST_NAME},DNS:${HOST_NAME}.local,DNS:localhost,IP:127.0.0.1"
+  for ip in $(hostname -I); do SAN="${SAN},IP:${ip}"; done
+  # 825 dni: dłużej ważnych certyfikatów nie akceptują urządzenia Apple
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825     -subj "/CN=${HOST_NAME}" -addext "subjectAltName=${SAN}"     -keyout "${TLS_DIR}/key.pem" -out "${TLS_DIR}/cert.pem" 2>/dev/null
+  c_ok "Utworzono certyfikat HTTPS (${SAN})"
+fi
+chown -R root:"$APP_USER" "$TLS_DIR"
+chmod 750 "$TLS_DIR"
+chmod 640 "${TLS_DIR}/key.pem"
+chmod 644 "${TLS_DIR}/cert.pem"
+if ! grep -qE '^TLS_CERT=' "$ENV_FILE"; then
+  printf '
+# HTTPS (puste = zwykłe HTTP, niezalecane: hasło idzie otwartym tekstem)
+TLS_CERT=%s
+TLS_KEY=%s
+'     "${TLS_DIR}/cert.pem" "${TLS_DIR}/key.pem" >> "$ENV_FILE"
+  c_ok "Włączono HTTPS w ${ENV_FILE}"
+fi
+
 # ------------------------------------------------------------------------------
 # 6. Usługa systemd
 # ------------------------------------------------------------------------------
@@ -271,7 +296,9 @@ systemctl enable "$SERVICE" >/dev/null
 systemctl restart "$SERVICE"
 sleep 2
 if systemctl is-active --quiet "$SERVICE"; then
-  c_ok "Panel działa: http://$(hostname -I | awk '{print $1}'):$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2)"
+  SCHEME="http"; grep -qE '^TLS_CERT=.+' "$ENV_FILE" && SCHEME="https"
+  c_ok "Panel działa: ${SCHEME}://$(hostname -I | awk '{print $1}'):$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2)"
+  [ "$SCHEME" = "https" ] && c_info "Certyfikat jest samopodpisany — przy pierwszym wejściu przeglądarka poprosi o akceptację."
 else
   journalctl -u "$SERVICE" -n 30 --no-pager || true
   die "Usługa ${SERVICE} nie wystartowała."
