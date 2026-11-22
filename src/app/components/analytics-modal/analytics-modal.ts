@@ -178,9 +178,9 @@ import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-f
                       </mat-icon>
                     </div>
                     <div class="text-lg font-bold font-mono" [class.text-cyan-400]="device()?.occupancy" [class.text-slate-400]="!device()?.occupancy">
-                      {{ device()?.occupancy ? 'WYKRYTO RUCH' : 'BRAK OBECNOŚCI' }}
+                      {{ device()?.occupancy === undefined || device()?.occupancy === null ? 'BRAK DANYCH' : device()?.occupancy ? 'WYKRYTO RUCH' : 'BRAK RUCHU' }}
                     </div>
-                    <div class="text-[11px] text-slate-500 mt-1">Radar mmWave / PIR</div>
+                    <div class="text-[11px] text-slate-500 mt-1">Ostatni odczyt</div>
                   </div>
                 } @else if (category() === 'contact') {
                   <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
@@ -202,9 +202,9 @@ import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-f
                       </mat-icon>
                     </div>
                     <div class="text-lg font-bold font-mono" [class.text-emerald-400]="device()?.contact" [class.text-rose-400]="!device()?.contact">
-                      {{ device()?.contact ? 'ZAMKNIĘTE' : 'OTWARTE!' }}
+                      {{ device()?.contact === undefined || device()?.contact === null ? 'BRAK DANYCH' : device()?.contact ? 'ZAMKNIĘTE' : 'OTWARTE!' }}
                     </div>
-                    <div class="text-[11px] text-slate-500 mt-1">Kontaktron magnetyczny</div>
+                    <div class="text-[11px] text-slate-500 mt-1">Ostatni odczyt</div>
                   </div>
                 } @else {
                   <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
@@ -226,9 +226,9 @@ import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-f
                       </mat-icon>
                     </div>
                     <div class="text-lg font-bold font-mono" [class.text-rose-400]="device()?.water_leak" [class.text-emerald-400]="!device()?.water_leak">
-                      {{ device()?.water_leak ? 'ALARM ZALANIA!' : 'SUCHO / NORMA' }}
+                      {{ device()?.water_leak === undefined || device()?.water_leak === null ? 'BRAK DANYCH' : device()?.water_leak ? 'ALARM ZALANIA!' : 'SUCHO' }}
                     </div>
-                    <div class="text-[11px] text-slate-500 mt-1">Sonda wilgoci IP67</div>
+                    <div class="text-[11px] text-slate-500 mt-1">Ostatni odczyt</div>
                   </div>
                 }
 
@@ -390,12 +390,12 @@ import { formatEuropeanDateTime, formatChartTimeLabel } from '../../utils/date-f
                   <div class="text-xl font-bold font-mono text-emerald-400 tabular-nums">
                     {{ device()?.battery !== undefined && device()?.battery !== null ? device()?.battery + ' %' : 'brak danych' }}
                   </div>
-                  <div class="text-[11px] text-slate-500 mt-1">Ogniwo CR2032/CR2450</div>
+                  <div class="text-[11px] text-slate-500 mt-1">Ostatni odczyt</div>
                 </div>
 
                 <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
                   <div class="text-slate-400 mb-1 flex items-center justify-between">
-                    <span>Próbki w SQLite</span>
+                    <span>Liczba pomiarów</span>
                     <mat-icon class="text-slate-400 !w-3.5 !h-3.5 text-xs">storage</mat-icon>
                   </div>
                   <div class="text-xl font-bold font-mono text-slate-200 tabular-nums">
@@ -527,15 +527,10 @@ export class AnalyticsModal {
     return this.historyPoints().filter((p) => p.water_leak === true).length;
   });
 
+  /** Czas ostatniego ruchu / otwarcia / zalania w zakresie — liczony przez serwer, nie ostatni dowolny raport. */
   readonly lastEventTimeFormatted = computed(() => {
-    const pts = this.historyPoints();
-    if (pts.length > 0) {
-      const last = pts[pts.length - 1];
-      return this.formatPointTime(last.timestamp);
-    }
-    const d = this.device();
-    if (d?.last_seen) return this.formatPointTime(d.last_seen);
-    return 'brak danych';
+    const t = this.stats()?.last_event_time;
+    return t ? this.formatPointTime(t) : 'brak zdarzeń';
   });
 
   formatPointTime(timestamp: string): string {

@@ -107,11 +107,12 @@ export interface Device {
   system_mode?: 'heat' | 'auto' | 'off' | string | null;
   running_state?: 'heat' | 'idle' | string | null;
   child_lock?: 'LOCK' | 'UNLOCK' | string | null;
-  open_window?: boolean | null;
+  /** TRVZB: 'ON' / 'OFF' (Zigbee2MQTT), starsze wpisy: boolean. */
+  open_window?: 'ON' | 'OFF' | boolean | null;
   local_temperature_calibration?: number | null;
   frost_protection_temperature?: number | null;
-  temperature_sensor?: string | null;
-  external_temperature?: number | null;
+  temperature_sensor_select?: 'local_temperature' | 'remote_temperature' | 'remote_source_offline' | string | null;
+  external_temperature_input?: number | null;
   valve_opening_degree?: number | null;
   temperature_accuracy?: number | null;
   smart_temperature_control?: boolean | null;
@@ -119,7 +120,7 @@ export interface Device {
   // Dodatkowe opcje TRVZB zgloszone przez uzytkownika
   timer_mode_target_temp?: number | null;
   temporary_mode_duration?: number | null;
-  temporary_mode?: 'none' | 'boost' | 'timer' | string | null;
+  temporary_mode_select?: 'boost' | 'timer' | string | null;
   valve_closing_degree?: number | null;
   idle_steps?: number | null;
   closing_steps?: number | null;

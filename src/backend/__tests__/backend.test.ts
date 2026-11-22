@@ -73,6 +73,7 @@ describe('backend: Zigbee2MQTT -> rejestr -> historia', () => {
 
   it('korzysta z last_seen Zigbee2MQTT: stary stan nie trafia do historii, świeży tak', () => {
     b = createBackend(':memory:');
+    b.z2m.status.connected = true;
     msg(b, 'bridge/devices', bridgeDevices);
     const old = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
     msg(b, 'dom/salon/czujnik', { temperature: 19.5, last_seen: old });
@@ -128,6 +129,7 @@ describe('backend: Zigbee2MQTT -> rejestr -> historia', () => {
 
   it('cisza urządzenia Zigbee krótsza niż doba nie oznacza offline', () => {
     b = createBackend(':memory:');
+    b.z2m.status.connected = true;
     msg(b, 'bridge/devices', bridgeDevices.map((d) => (d.ieee_address === '0x1' ? { ...d, power_source: 'Mains (single phase)' } : d)));
     const plug = b.registry.get('0x1')!;
     expect(plug.power_source).toBe('Mains (single phase)');
@@ -173,6 +175,45 @@ describe('backend: Zigbee2MQTT -> rejestr -> historia', () => {
     b.registry.upsert('0x2', { temp_alarm_enabled: true, temp_alarm_max: 25 });
     for (let i = 0; i < 5; i++) msg(b, 'dom/salon/czujnik', { temperature: 30 + i });
     expect(b.notifier.list().filter((n) => n.type === 'temp_high')).toHaveLength(1);
+  });
+
+  it('gdy Zigbee2MQTT albo broker nie działa, zapamiętane "online" nie jest prawdą', () => {
+    b = createBackend(':memory:');
+    b.z2m.status.connected = true;
+    msg(b, 'bridge/devices', bridgeDevices);
+    msg(b, 'Gniazdko/availability', { state: 'online' });
+    const plug = b.registry.get('0x1')!;
+    expect(b.registry.isOnline(plug)).toBe(true);
+
+    msg(b, 'bridge/state', { state: 'offline' });
+    expect(b.registry.isOnline(plug)).toBe(false);
+    expect(b.registry.toPublic(plug).connection_status).toBe('offline');
+
+    msg(b, 'bridge/state', { state: 'online' });
+    expect(b.registry.isOnline(plug)).toBe(true);
+    b.z2m.status.connected = false;
+    expect(b.registry.isOnline(plug)).toBe(false);
+  });
+
+  it('urządzenie wyłączone w Zigbee2MQTT znika z pulpitu i wraca po włączeniu', () => {
+    b = createBackend(':memory:');
+    msg(b, 'bridge/devices', bridgeDevices);
+    msg(b, 'bridge/devices', bridgeDevices.map((d) => (d.ieee_address === '0x2' ? { ...d, disabled: true } : d)));
+    expect(b.registry.get('0x2')?.is_deleted).toBe(true);
+    expect(b.registry.auditLog()[0].message).toContain('wyłączone');
+    msg(b, 'bridge/devices', bridgeDevices);
+    expect(b.registry.get('0x2')?.is_deleted).toBe(false);
+  });
+
+  it('agregat godzinowy liczy też powtórzone wartości (średnia i liczba pomiarów)', () => {
+    b = createBackend(':memory:');
+    const t0 = Date.now() - 20 * 24 * 3600_000;
+    // 9 razy 0 W i raz 1000 W w tej samej godzinie: średnia 100 W, a nie 500 W
+    for (let i = 0; i < 9; i++) b.history.record('p', { power: 0 }, t0 + i * 1000);
+    b.history.record('p', { power: 1000 }, t0 + 10_000);
+    const { stats, points } = b.history.query('p', '30d', false);
+    expect(stats.count).toBe(10);
+    expect(points[0].power).toBe(100);
   });
 
   it('/set przepuszcza tylko atrybuty zapisywalne', () => {

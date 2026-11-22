@@ -11,6 +11,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { Device, DeviceCategory } from '../../models/telemetry.models';
 import { formatEuropeanDateTime, formatEuropeanDate, format24hTime } from '../../utils/date-format';
 import { Telemetry } from '../../services/telemetry';
+import { flattenExposes } from '../../../backend/state-mapper';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -177,10 +178,18 @@ import { Telemetry } from '../../services/telemetry';
               {{ device().battery }}%
             </span>
           </div>
-        } @else {
+        } @else if (isBatteryPowered()) {
+          <div
+            class="flex items-center gap-1 text-xs font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/80 border border-slate-800 text-slate-500"
+            title="Urządzenie bateryjne — poziom baterii jeszcze nie odczytany"
+          >
+            <mat-icon class="text-sm !w-4 !h-4">battery_unknown</mat-icon>
+            <span>—</span>
+          </div>
+        } @else if (isMainsPowered()) {
           <div
             class="flex items-center gap-1 text-[11px] font-mono shrink-0 px-2 py-1 rounded-md bg-slate-950/80 border border-slate-800 text-slate-400"
-            title="Zasilanie stałe 230V AC"
+            title="Zasilanie sieciowe"
           >
             <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">power</mat-icon>
             <span>230V</span>
@@ -348,14 +357,14 @@ import { Telemetry } from '../../services/telemetry';
               <div class="space-y-1">
                 <div class="flex justify-between text-slate-400">
                   <span>Kalibracja czujnika:</span>
-                  <span class="text-white font-bold">{{ device().local_temperature_calibration ?? 0 }}°C</span>
+                  <span class="text-white font-bold">{{ device().local_temperature_calibration ?? '—' }}°C</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <input
                     type="range"
-                    min="-12.5"
-                    max="12.5"
-                    step="0.5"
+                    [min]="calibrationRange().min"
+                    [max]="calibrationRange().max"
+                    [step]="calibrationRange().step"
                     [value]="device().local_temperature_calibration ?? 0"
                     (change)="setAdvancedAttr('local_temperature_calibration', $any($event.target).value)"
                     class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
@@ -368,16 +377,16 @@ import { Telemetry } from '../../services/telemetry';
                 <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between">
                   <span class="text-slate-400">Otwarte okno:</span>
                   <button
-                    (click)="setAdvancedAttr('open_window', !device().open_window)"
+                    (click)="setAdvancedAttr('open_window', openWindowOn() ? 'OFF' : 'ON')"
                     class="px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer"
-                    [class.bg-emerald-500/20]="device().open_window"
-                    [class.text-emerald-400]="device().open_window"
-                    [class.border-emerald-500/30]="device().open_window"
-                    [class.bg-slate-950]="!device().open_window"
-                    [class.text-slate-500]="!device().open_window"
-                    [class.border-slate-800]="!device().open_window"
+                    [class.bg-emerald-500/20]="openWindowOn()"
+                    [class.text-emerald-400]="openWindowOn()"
+                    [class.border-emerald-500/30]="openWindowOn()"
+                    [class.bg-slate-950]="!openWindowOn()"
+                    [class.text-slate-500]="!openWindowOn()"
+                    [class.border-slate-800]="!openWindowOn()"
                   >
-                    {{ device().open_window ? 'ON' : 'OFF' }}
+                    {{ device().open_window === undefined || device().open_window === null ? '—' : openWindowOn() ? 'WŁ.' : 'WYŁ.' }}
                   </button>
                 </div>
 
@@ -386,9 +395,9 @@ import { Telemetry } from '../../services/telemetry';
                   <input
                     type="number"
                     min="4"
-                    max="15"
+                    max="35"
                     step="0.5"
-                    [value]="device().frost_protection_temperature ?? 5.0"
+                    [value]="device().frost_protection_temperature ?? ''"
                     (change)="setAdvancedAttr('frost_protection_temperature', $any($event.target).value)"
                     class="w-12 px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white text-center focus:outline-none focus:border-indigo-500"
                   />
@@ -400,12 +409,14 @@ import { Telemetry } from '../../services/telemetry';
                 <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
                   <span class="text-slate-400 block">Czujnik źródła:</span>
                   <select
-                    [value]="device().temperature_sensor ?? 'local_temperature'"
-                    (change)="setAdvancedAttr('temperature_sensor', $any($event.target).value)"
+                    [value]="device().temperature_sensor_select ?? ''"
+                    (change)="setAdvancedAttr('temperature_sensor_select', $any($event.target).value)"
                     class="w-full bg-slate-950 border border-slate-800 text-white rounded text-[10px] px-1 py-0.5"
                   >
+                    <option value="" disabled>brak danych</option>
                     <option value="local_temperature">Wbudowany</option>
                     <option value="remote_temperature">Zewnętrzny</option>
+                    <option value="remote_source_offline" disabled>Zewnętrzny niedostępny</option>
                   </select>
                 </div>
 
@@ -414,10 +425,10 @@ import { Telemetry } from '../../services/telemetry';
                   <input
                     type="number"
                     min="0"
-                    max="50"
+                    max="99.9"
                     step="0.1"
-                    [value]="device().external_temperature ?? 22.0"
-                    (change)="setAdvancedAttr('external_temperature', $any($event.target).value)"
+                    [value]="device().external_temperature_input ?? ''"
+                    (change)="setAdvancedAttr('external_temperature_input', $any($event.target).value)"
                     class="w-full px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -428,13 +439,13 @@ import { Telemetry } from '../../services/telemetry';
                 <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
                   <span class="text-slate-400 block">Zawór otwarcie:</span>
                   <div class="flex items-center gap-1.5 justify-between">
-                    <span class="text-emerald-400 font-bold">{{ device().valve_opening_degree ?? 100 }}%</span>
+                    <span class="text-emerald-400 font-bold">{{ device().valve_opening_degree ?? '—' }}%</span>
                     <input
                       type="number"
                       min="0"
                       max="100"
-                      step="5"
-                      [value]="device().valve_opening_degree ?? 100"
+                      step="1"
+                      [value]="device().valve_opening_degree ?? ''"
                       (change)="setAdvancedAttr('valve_opening_degree', $any($event.target).value)"
                       class="w-10 px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white text-center text-[10px]"
                     />
@@ -444,11 +455,12 @@ import { Telemetry } from '../../services/telemetry';
                 <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
                   <span class="text-slate-400 block">Dokładność regulacji:</span>
                   <select
-                    [value]="device().temperature_accuracy ?? -1"
+                    [value]="device().temperature_accuracy ?? ''"
                     (change)="setAdvancedAttr('temperature_accuracy', $any($event.target).value)"
                     class="w-full bg-slate-950 border border-slate-800 text-white rounded text-[10px] px-1 py-0.5"
                   >
-                    <option value="-1">-1.0°C (Default)</option>
+                    <option value="" disabled>brak danych</option>
+                    <option value="-1">-1.0°C (domyślnie)</option>
                     <option value="-0.8">-0.8°C</option>
                     <option value="-0.6">-0.6°C</option>
                     <option value="-0.4">-0.4°C</option>
@@ -470,7 +482,7 @@ import { Telemetry } from '../../services/telemetry';
                   [class.text-slate-500]="!device().smart_temperature_control"
                   [class.border-slate-800]="!device().smart_temperature_control"
                 >
-                  {{ device().smart_temperature_control ? 'WŁĄCZ' : 'WYŁĄCZ' }}
+                  {{ device().smart_temperature_control === undefined || device().smart_temperature_control === null ? '—' : device().smart_temperature_control ? 'WŁ.' : 'WYŁ.' }}
                 </button>
               </div>
 
@@ -479,11 +491,11 @@ import { Telemetry } from '../../services/telemetry';
                 <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
                   <span class="text-slate-400 block">Tryb tymczasowy:</span>
                   <select
-                    [value]="device().temporary_mode ?? 'none'"
-                    (change)="setAdvancedAttr('temporary_mode', $any($event.target).value)"
+                    [value]="device().temporary_mode_select ?? ''"
+                    (change)="setAdvancedAttr('temporary_mode_select', $any($event.target).value)"
                     class="w-full bg-slate-950 border border-slate-800 text-white rounded text-[10px] px-1 py-0.5 focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="none">Brak (Normalny)</option>
+                    <option value="" disabled>brak danych</option>
                     <option value="boost">Boost Mode</option>
                     <option value="timer">Timer Mode</option>
                   </select>
@@ -496,7 +508,7 @@ import { Telemetry } from '../../services/telemetry';
                     min="0"
                     max="1440"
                     step="5"
-                    [value]="device().temporary_mode_duration ?? 0"
+                    [value]="device().temporary_mode_duration ?? ''"
                     (change)="setAdvancedAttr('temporary_mode_duration', $any($event.target).value)"
                     class="w-full px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500 text-center"
                   />
@@ -512,7 +524,7 @@ import { Telemetry } from '../../services/telemetry';
                     min="4"
                     max="35"
                     step="0.5"
-                    [value]="device().timer_mode_target_temp ?? 20"
+                    [value]="device().timer_mode_target_temp ?? ''"
                     (change)="setAdvancedAttr('timer_mode_target_temp', $any($event.target).value)"
                     class="w-full px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500 text-center"
                   />
@@ -521,13 +533,13 @@ import { Telemetry } from '../../services/telemetry';
                 <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
                   <span class="text-slate-400 block">Zawór zamkn. stopień:</span>
                   <div class="flex items-center gap-1.5 justify-between">
-                    <span class="text-orange-400 font-bold">{{ device().valve_closing_degree ?? 100 }}%</span>
+                    <span class="text-orange-400 font-bold">{{ device().valve_closing_degree ?? '—' }}%</span>
                     <input
                       type="number"
                       min="0"
                       max="100"
-                      step="5"
-                      [value]="device().valve_closing_degree ?? 100"
+                      step="1"
+                      [value]="device().valve_closing_degree ?? ''"
                       (change)="setAdvancedAttr('valve_closing_degree', $any($event.target).value)"
                       class="w-10 px-1 py-0.5 rounded bg-slate-950 border border-slate-800 text-white text-center text-[10px]"
                     />
@@ -816,14 +828,15 @@ import { Telemetry } from '../../services/telemetry';
               <div class="min-w-0">
                 <div class="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
                   <mat-icon class="text-xs !w-3.5 !h-3.5 text-amber-400">power</mat-icon>
-                  <span>Przekaźnik DIN 32A (Rozłączanie L+N)</span>
+                  <span>{{ isBasicZb1gsp() ? 'Przekaźnik DIN 32A (rozłączanie L+N)' : 'Przekaźnik' }}</span>
                 </div>
                 <div
                   class="text-base font-bold font-mono tracking-tight mt-0.5 flex items-center gap-2 flex-wrap"
                   [class.text-emerald-400]="isStateOn()"
                   [class.text-slate-500]="!isStateOn()"
                 >
-                  <span>{{ isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}</span>
+                  <span>{{ isStateUnknown() ? 'STAN NIEZNANY' : isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}</span>
+                  @if (isBasicZb1gsp() && !isStateUnknown()) {
                   <span
                     class="text-[10px] font-normal px-1.5 py-0.5 rounded border"
                     [class.bg-emerald-500/10]="isStateOn()"
@@ -835,6 +848,7 @@ import { Telemetry } from '../../services/telemetry';
                   >
                     {{ isStateOn() ? 'L+N ZWARTE' : 'L+N ROZWARTE' }}
                   </span>
+                  }
                 </div>
               </div>
 
@@ -848,10 +862,10 @@ import { Telemetry } from '../../services/telemetry';
                 [class.bg-slate-800]="!isStateOn()"
                 [class.hover:bg-slate-700]="!isStateOn()"
                 [class.text-slate-300]="!isStateOn()"
-                title="Przełącz stan przekaźnika 32A (L+N)"
+                title="Przełącz stan przekaźnika"
               >
                 <mat-icon class="text-sm !w-4 !h-4">{{ isStateOn() ? 'power_settings_new' : 'toggle_on' }}</mat-icon>
-                <span>{{ isStateOn() ? 'ROZŁĄCZ 32A' : 'ZAŁĄCZ 32A' }}</span>
+                <span>{{ isStateOn() ? 'ROZŁĄCZ' : 'ZAŁĄCZ' }}</span>
               </button>
             </div>
 
@@ -860,7 +874,7 @@ import { Telemetry } from '../../services/telemetry';
               <div class="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-mono flex items-center gap-2 animate-pulse">
                 <mat-icon class="text-rose-400 text-base shrink-0">warning</mat-icon>
                 <span class="leading-tight">
-                  Wysokie obciążenie obwodu! Pobór: <strong>{{ device().power }} W / {{ device().current }} A</strong> (Limit: {{ device().overload_power_threshold || 7680 }} W).
+                  Wysokie obciążenie obwodu! Pobór: <strong>{{ device().power }} W / {{ device().current }} A</strong> (Limit: {{ powerLimit() }} W).
                 </span>
               </div>
             }
@@ -873,7 +887,7 @@ import { Telemetry } from '../../services/telemetry';
                   <mat-icon class="text-[11px] !w-3 !h-3 text-amber-400">bolt</mat-icon>
                 </div>
                 <div class="text-white font-bold text-sm mt-0.5" [class.text-amber-300]="(device().power || 0) > 3000" [class.text-rose-400]="(device().power || 0) > 6000">
-                  {{ device().power !== undefined && device().power !== null ? device().power + ' W' : '0 W' }}
+                  {{ device().power !== undefined && device().power !== null ? device().power + ' W' : '—' }}
                 </div>
               </div>
 
@@ -889,13 +903,14 @@ import { Telemetry } from '../../services/telemetry';
 
               <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
                 <div class="text-slate-400 text-[10px] flex items-center justify-between">
-                  <span>Prąd (32A max)</span>
+                  <span>Prąd{{ currentLimit() ? ' (max ' + currentLimit() + ' A)' : '' }}</span>
                   <mat-icon class="text-[11px] !w-3 !h-3 text-emerald-400">electric_meter</mat-icon>
                 </div>
                 <div class="text-emerald-300 font-bold text-sm mt-0.5">
-                  {{ device().current !== undefined && device().current !== null ? device().current + ' A' : '0.0 A' }}
+                  {{ formattedCurrent() }}
                 </div>
-                <div class="w-full bg-slate-800 rounded-full h-1 mt-1 overflow-hidden" title="Wykorzystanie dopuszczalnego prądu 32A">
+                @if (currentLimit()) {
+                <div class="w-full bg-slate-800 rounded-full h-1 mt-1 overflow-hidden" title="Wykorzystanie dopuszczalnego prądu">
                   <div
                     class="h-full rounded-full transition-all"
                     [class.bg-emerald-500]="currentLoadPercent() < 60"
@@ -904,6 +919,7 @@ import { Telemetry } from '../../services/telemetry';
                     [style.width.%]="currentLoadPercent()"
                   ></div>
                 </div>
+                }
               </div>
 
               <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
@@ -912,7 +928,7 @@ import { Telemetry } from '../../services/telemetry';
                   <mat-icon class="text-[11px] !w-3 !h-3 text-purple-400">energy_savings_leaf</mat-icon>
                 </div>
                 <div class="text-purple-300 font-bold text-sm mt-0.5">
-                  {{ device().energy !== undefined && device().energy !== null ? device().energy + ' kWh' : '0.0 kWh' }}
+                  {{ device().energy !== undefined && device().energy !== null ? device().energy + ' kWh' : '—' }}
                 </div>
               </div>
             </div>
@@ -920,9 +936,9 @@ import { Telemetry } from '../../services/telemetry';
             <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 text-[11px] font-mono text-slate-400 flex items-center justify-between">
               <span class="flex items-center gap-1.5">
                 <mat-icon class="text-xs !w-3.5 !h-3.5 text-cyan-400">router</mat-icon>
-                <span>Router Zigbee 3.0 Mesh (Szyna DIN 35mm):</span>
+                <span>Model:</span>
               </span>
-              <span class="text-amber-400 font-semibold">{{ isBasicZb1gsp() ? 'SONOFF BASIC-ZB1GSP' : (device().model || 'Smart Switch') }}</span>
+              <span class="text-amber-400 font-semibold">{{ device().model || '—' }}</span>
             </div>
           </div>
         } @else {
@@ -931,7 +947,7 @@ import { Telemetry } from '../../services/telemetry';
               <div>
                 <div class="text-[11px] font-medium text-slate-400">Przekaźnik obwodu</div>
                 <div class="text-base font-bold font-mono tracking-tight mt-0.5" [class.text-emerald-400]="isStateOn()" [class.text-slate-500]="!isStateOn()">
-                  {{ isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}
+                  {{ isStateUnknown() ? 'STAN NIEZNANY' : isStateOn() ? 'ZAŁĄCZONY' : 'ROZŁĄCZONY' }}
                 </div>
               </div>
 
@@ -951,8 +967,8 @@ import { Telemetry } from '../../services/telemetry';
               </button>
             </div>
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs font-mono text-slate-400 flex items-center justify-between">
-              <span>Sterowanie zdalne / bistabilne:</span>
-              <span class="text-cyan-400 font-semibold">ZBMINIR2 Zigbee 3.0</span>
+              <span>Model:</span>
+              <span class="text-cyan-400 font-semibold">{{ device().model || '—' }}</span>
             </div>
           </div>
         }
@@ -966,19 +982,19 @@ import { Telemetry } from '../../services/telemetry';
               class="w-10 h-10 rounded-xl flex items-center justify-center"
               [class.bg-emerald-950]="device().contact"
               [class.text-emerald-400]="device().contact"
-              [class.bg-amber-950]="!device().contact"
-              [class.text-amber-400]="!device().contact"
+              [class.bg-amber-950]="device().contact === false"
+              [class.text-amber-400]="device().contact === false"
+              [class.text-slate-500]="device().contact === undefined || device().contact === null"
             >
               <mat-icon class="text-xl">{{ device().contact ? 'door_front' : 'meeting_room' }}</mat-icon>
             </div>
             <div>
               <div class="text-[11px] text-slate-400 font-medium">Stan kontaktronu</div>
-              <div class="text-base font-bold font-mono" [class.text-emerald-400]="device().contact" [class.text-amber-400]="!device().contact">
-                {{ device().contact ? 'ZAMKNIĘTE' : 'OTWARTE!' }}
+              <div class="text-base font-bold font-mono" [class.text-emerald-400]="device().contact" [class.text-amber-400]="device().contact === false" [class.text-slate-500]="device().contact === undefined || device().contact === null">
+                {{ device().contact === undefined || device().contact === null ? 'BRAK DANYCH' : device().contact ? 'ZAMKNIĘTE' : 'OTWARTE!' }}
               </div>
             </div>
           </div>
-          <span class="text-xs font-mono text-slate-500">Magnetyczny</span>
         </div>
       }
 
@@ -996,9 +1012,9 @@ import { Telemetry } from '../../services/telemetry';
               <mat-icon class="text-xl">{{ device().occupancy ? 'directions_walk' : 'person_off' }}</mat-icon>
             </div>
             <div>
-              <div class="text-[11px] text-slate-400 font-medium">Detekcja ruchu / radar mmWave</div>
+              <div class="text-[11px] text-slate-400 font-medium">Detekcja ruchu</div>
               <div class="text-base font-bold font-mono" [class.text-cyan-400]="device().occupancy" [class.text-slate-400]="!device().occupancy">
-                {{ device().occupancy ? 'WYKRYTO RUCH' : 'BRAK OBECNOŚCI' }}
+                {{ device().occupancy === undefined || device().occupancy === null ? 'BRAK DANYCH' : device().occupancy ? 'WYKRYTO RUCH' : 'BRAK RUCHU' }}
               </div>
             </div>
           </div>
@@ -1019,19 +1035,19 @@ import { Telemetry } from '../../services/telemetry';
               class="w-10 h-10 rounded-xl flex items-center justify-center"
               [class.bg-rose-950]="device().water_leak"
               [class.text-rose-400]="device().water_leak"
-              [class.bg-emerald-950]="!device().water_leak"
-              [class.text-emerald-400]="!device().water_leak"
+              [class.bg-emerald-950]="device().water_leak === false"
+              [class.text-emerald-400]="device().water_leak === false"
+              [class.text-slate-500]="device().water_leak === undefined || device().water_leak === null"
             >
               <mat-icon class="text-xl">{{ device().water_leak ? 'water_damage' : 'water_drop' }}</mat-icon>
             </div>
             <div>
               <div class="text-[11px] text-slate-400 font-medium">Czujnik sondy zalania</div>
-              <div class="text-base font-bold font-mono" [class.text-rose-400]="device().water_leak" [class.text-emerald-400]="!device().water_leak">
-                {{ device().water_leak ? 'ALARM ZALANIA!' : 'SUCHO / BEZPIECZNIE' }}
+              <div class="text-base font-bold font-mono" [class.text-rose-400]="device().water_leak" [class.text-emerald-400]="device().water_leak === false" [class.text-slate-500]="device().water_leak === undefined || device().water_leak === null">
+                {{ device().water_leak === undefined || device().water_leak === null ? 'BRAK DANYCH' : device().water_leak ? 'ALARM ZALANIA!' : 'SUCHO' }}
               </div>
             </div>
           </div>
-          <span class="text-xs font-mono text-slate-500">Sonda IP67</span>
         </div>
       }
 
@@ -1063,10 +1079,10 @@ import { Telemetry } from '../../services/telemetry';
               </div>
               <div>
                 <span class="text-xs font-bold block" [class.text-red-300]="isSmokeAlarm()" [class.text-slate-300]="!isSmokeAlarm()">
-                  {{ isSmokeAlarm() ? '⚠️ WYKRYTO DYM (ALARM!)' : 'Czujka dymu: Stan bezpieczny' }}
+                  {{ isSmokeAlarm() ? '⚠️ WYKRYTO DYM (ALARM!)' : smokeKnown() ? 'Czujka dymu: brak dymu' : 'Czujka dymu: brak danych' }}
                 </span>
                 <span class="text-[11px] font-mono text-slate-400">
-                  Status: <strong [class.text-red-400]="isSmokeAlarm()" [class.text-emerald-400]="!isSmokeAlarm()">{{ device().smoke_status || (isSmokeAlarm() ? 'alarm' : 'normal') }}</strong>
+                  Status: <strong [class.text-red-400]="isSmokeAlarm()" [class.text-emerald-400]="!isSmokeAlarm()">{{ device().smoke_status || (isSmokeAlarm() ? 'alarm' : smokeKnown() ? 'normal' : '—') }}</strong>
                 </span>
               </div>
             </div>
@@ -1079,13 +1095,13 @@ import { Telemetry } from '../../services/telemetry';
               <span class="text-slate-400 text-[11px]">Bateria:</span>
               <span class="font-bold flex items-center gap-1" [class.text-emerald-400]="device().battery !== null && device().battery !== undefined && device().battery! > 20" [class.text-red-400]="device().battery !== null && device().battery !== undefined && device().battery! <= 20">
                 <mat-icon class="text-xs !w-3.5 !h-3.5">battery_std</mat-icon>
-                {{ device().battery ?? '—' }}%
+                {{ device().battery !== undefined && device().battery !== null ? device().battery + '%' : '—' }}
               </span>
             </div>
             <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
               <span class="text-slate-400 text-[11px]">Sabotaż (Tamper):</span>
-              <span class="font-bold" [class.text-red-400]="device().tamper_alarm" [class.text-emerald-400]="!device().tamper_alarm">
-                {{ device().tamper_alarm ? 'ZDJĘTA' : 'OK' }}
+              <span class="font-bold" [class.text-red-400]="device().tamper_alarm" [class.text-emerald-400]="device().tamper_alarm === false">
+                {{ device().tamper_alarm === undefined || device().tamper_alarm === null ? '—' : device().tamper_alarm ? 'ZDJĘTA' : 'OK' }}
               </span>
             </div>
           </div>
@@ -1329,7 +1345,7 @@ import { Telemetry } from '../../services/telemetry';
                       min="500"
                       max="7680"
                       step="100"
-                      [value]="device().overload_power_threshold || 7680"
+                      [value]="device().overload_power_threshold ?? ''"
                       (click)="$event.stopPropagation()"
                       (change)="setAdvancedAttr('overload_power_threshold', $any($event.target).value)"
                       class="w-full px-2 py-1 rounded bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:border-amber-500 focus:outline-none"
@@ -1345,7 +1361,7 @@ import { Telemetry } from '../../services/telemetry';
                       min="1"
                       max="32"
                       step="1"
-                      [value]="device().overload_current_threshold || 32"
+                      [value]="device().overload_current_threshold ?? ''"
                       (click)="$event.stopPropagation()"
                       (change)="setAdvancedAttr('overload_current_threshold', $any($event.target).value)"
                       class="w-full px-2 py-1 rounded bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:border-amber-500 focus:outline-none"
@@ -1572,7 +1588,27 @@ export class DeviceCard {
     return dev[`weekly_schedule_${dayKey}`] ?? '';
   }
 
+  /** TRVZB podaje open_window jako 'ON'/'OFF'; starsze wpisy mogły mieć boolean. */
+  readonly openWindowOn = computed(() => {
+    const v = this.device().open_window;
+    return v === 'ON' || v === true;
+  });
+
+  /** Zakres atrybutu z exposes Zigbee2MQTT (min/max/krok), a gdy go brak — podane wartości. */
+  exposeRange(property: string, min: number, max: number, step: number): { min: number; max: number; step: number } {
+    const f = flattenExposes(this.device().exposes).find((e) => e.property === property);
+    return {
+      min: typeof f?.value_min === 'number' ? f.value_min : min,
+      max: typeof f?.value_max === 'number' ? f.value_max : max,
+      step: typeof f?.value_step === 'number' ? f.value_step : step,
+    };
+  }
+
+  readonly calibrationRange = computed(() => this.exposeRange('local_temperature_calibration', -12.7, 12.7, 0.2));
+
   setAdvancedAttr(attr: string, value: unknown): void {
+    // Puste pole to "bez zmian" — Number('') dawało 0 i wysyłało zero do urządzenia
+    if (typeof value === 'string' && value.trim() === '') return;
     const parsedValue = typeof value === 'string' && !isNaN(Number(value)) ? Number(value) : value;
     this.commandRequested.emit({
       device: this.device(),
@@ -1622,58 +1658,78 @@ export class DeviceCard {
     return this.category() === 'switch' && (d.power !== undefined || d.voltage !== undefined || d.current !== undefined || d.energy !== undefined);
   });
 
+  // Sterowniki podają już V i A (Tuya: skala i mA przeliczane w backendzie) — bez zgadywania jednostek
   readonly formattedVoltage = computed<string>(() => {
     const v = this.device().voltage;
-    if (v === undefined || v === null) return '—';
-    if (v > 1000) return (v / 100).toFixed(1) + ' V';
-    if (v > 500) return (v / 10).toFixed(1) + ' V';
-    return v + ' V';
+    return v === undefined || v === null ? '—' : v + ' V';
   });
 
   readonly formattedCurrent = computed<string>(() => {
     const c = this.device().current;
-    if (c === undefined || c === null) return '0.0 A';
-    if (c > 100) return (c / 100).toFixed(2) + ' A';
-    if (c > 50) return (c / 10).toFixed(1) + ' A';
-    return c + ' A';
+    return c === undefined || c === null ? '—' : c + ' A';
+  });
+
+  /** Limit prądu: ustawiony w urządzeniu albo znany z modelu (BASIC-ZB1GSP 32 A); inaczej nieznany. */
+  readonly currentLimit = computed<number | null>(() => {
+    const d = this.device();
+    return d.overload_current_threshold ?? (this.isBasicZb1gsp() ? 32 : null);
+  });
+
+  readonly powerLimit = computed<number | null>(() => {
+    const d = this.device();
+    return d.overload_power_threshold ?? (this.isBasicZb1gsp() ? 7680 : null);
   });
 
   readonly currentLoadPercent = computed<number>(() => {
     const c = this.device().current ?? 0;
-    const maxA = this.device().overload_current_threshold ?? 32;
-    return Math.min(100, Math.max(0, Math.round((c / maxA) * 100)));
+    const maxA = this.currentLimit();
+    return maxA ? Math.min(100, Math.max(0, Math.round((c / maxA) * 100))) : 0;
   });
 
   readonly isOverloadWarning = computed<boolean>(() => {
     const d = this.device();
     const p = d.power ?? 0;
-    const pMax = d.overload_power_threshold ?? 7680;
+    const pMax = this.powerLimit();
     const c = d.current ?? 0;
-    const cMax = d.overload_current_threshold ?? 32;
-    return (p > 0 && p >= pMax * 0.9) || (c > 0 && c >= cMax * 0.9);
+    const cMax = this.currentLimit();
+    return (pMax !== null && p > 0 && p >= pMax * 0.9) || (cMax !== null && c > 0 && c >= cMax * 0.9);
+  });
+
+  readonly isBatteryPowered = computed<boolean>(() => this.device().power_source === 'Battery');
+
+  /** Zasilanie sieciowe: wg Zigbee2MQTT albo gniazdko / przełącznik / wentylator Wi-Fi. */
+  readonly isMainsPowered = computed<boolean>(() => {
+    const d = this.device();
+    if (d.power_source) return d.power_source !== 'Battery';
+    return d.driver !== 'zigbee2mqtt' && ['plug', 'switch', 'fan'].includes(this.category());
+  });
+
+  readonly smokeKnown = computed<boolean>(() => {
+    const d = this.device();
+    return (d.smoke_alarm !== undefined && d.smoke_alarm !== null) || !!d.smoke_status;
   });
 
   readonly categoryBadgeLabel = computed(() => {
     switch (this.category()) {
       case 'smoke':
-        return 'Czujka Dymu Wi-Fi';
+        return 'Czujka dymu';
       case 'fan':
-        return 'Wentylator 7w1';
+        return 'Wentylator';
       case 'climate':
-        return 'Głowica TRVZB';
+        return 'Głowica termostatyczna';
       case 'plug':
-        return 'Gniazdko 16A';
+        return 'Gniazdko';
       case 'switch':
         if (this.isBasicZb1gsp()) return 'Przekaźnik DIN 32A';
         return 'Wyłącznik';
       case 'contact':
         return 'Kontaktron';
       case 'occupancy':
-        return 'Obecność / PIR';
+        return 'Czujnik ruchu';
       case 'water_leak':
-        return 'Czujnik Zalania';
+        return 'Czujnik zalania';
       default:
-        return 'Sensor Temp/Wilg';
+        return 'Czujnik';
     }
   });
 
@@ -1817,7 +1873,8 @@ export class DeviceCard {
     const current = this.device().current_heating_setpoint;
     // Bez odczytanej nastawy nie zgadujemy punktu wyjścia
     if (current === undefined || current === null) return;
-    const next = Math.min(30, Math.max(5, parseFloat((current + delta).toFixed(1))));
+    const { min, max } = this.exposeRange('occupied_heating_setpoint', 4, 35, 0.5);
+    const next = Math.min(max, Math.max(min, parseFloat((current + delta).toFixed(1))));
     this.commandRequested.emit({
       device: this.device(),
       command: { current_heating_setpoint: next },

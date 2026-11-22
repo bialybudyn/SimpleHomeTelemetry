@@ -41,10 +41,12 @@ export class History {
     for (const [key, value] of Object.entries(samples)) {
       const cacheKey = `${device}\u0000${key}`;
       const prev = this.last.get(cacheKey);
+      // Agregat godzinowy dostaje każdą próbkę — pomijanie powtórzeń zawyżało średnią na rzecz
+      // wartości zmiennych (np. krótkie skoki mocy przy długim, stałym 0 W)
+      upsertHourly.run(device, key, hour, value, value, value);
       if (prev && prev.value === value && ts - prev.ts < SAME_VALUE_INTERVAL) continue;
       this.last.set(cacheKey, { ts, value });
       insertSample.run(device, key, ts, value);
-      upsertHourly.run(device, key, hour, value, value, value);
     }
   }
 
@@ -81,7 +83,7 @@ export class History {
     const targetPoints = 150;
     const bucket = Math.max(useRaw ? 60_000 : HOUR, Math.ceil(span / targetPoints));
 
-    type Row = { key: string; ts: number; value: number; min?: number; max?: number };
+    type Row = { key: string; ts: number; value: number; min?: number; max?: number; n?: number };
     let rows: Row[];
     if (useRaw) {
       rows = this.db.sql
@@ -89,7 +91,7 @@ export class History {
         .all(device, from) as Row[];
     } else {
       rows = this.db.sql
-        .prepare('SELECT key, hour AS ts, sum / count AS value, min, max FROM hourly WHERE device = ? AND hour >= ? ORDER BY hour')
+        .prepare('SELECT key, hour AS ts, sum / count AS value, min, max, count AS n FROM hourly WHERE device = ? AND hour >= ? ORDER BY hour')
         .all(device, from) as Row[];
     }
 
@@ -102,8 +104,10 @@ export class History {
       const s = stats.get(r.key) ?? { min: Infinity, max: -Infinity, sum: 0, n: 0 };
       s.min = Math.min(s.min, r.min ?? r.value);
       s.max = Math.max(s.max, r.max ?? r.value);
-      s.sum += r.value;
-      s.n++;
+      // Agregat godzinowy waży tyle, ile próbek zawiera — średnia i liczba próbek są wtedy prawdziwe
+      const weight = r.n ?? 1;
+      s.sum += r.value * weight;
+      s.n += weight;
       stats.set(r.key, s);
 
       if (EVENT_KEYS.has(r.key) && useRaw) {

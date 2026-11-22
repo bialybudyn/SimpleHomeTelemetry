@@ -135,6 +135,11 @@ export class Zigbee2MqttDriver implements Driver {
     this.start();
   }
 
+  /** Broker połączony i Zigbee2MQTT nie zgłosił "offline" (null = jeszcze nie wiadomo, nie alarmujemy). */
+  isHealthy(): boolean {
+    return this.status.connected && this.status.bridge_state !== 'offline';
+  }
+
   get permitJoinRemaining(): number {
     return Math.max(0, Math.round((this.permitJoinEnd - Date.now()) / 1000));
   }
@@ -247,9 +252,10 @@ export class Zigbee2MqttDriver implements Driver {
     for (const item of list) {
       if (!item?.ieee_address || item.type === 'Coordinator') continue;
       const id = item.ieee_address;
-      seen.add(id);
-      // Urządzenie wyłączone w Z2M nie wysyła stanu — nie pokazujemy go jako wiecznie offline
+      // Urządzenie wyłączone w Z2M nie wysyła stanu — chowamy je jak usunięte (wróci po włączeniu),
+      // zamiast pokazywać jako wiecznie offline i alarmować o nim
       if (item.disabled) continue;
+      seen.add(id);
       this.nameToId.set(item.friendly_name, id);
       const exposes = item.definition?.exposes ?? [];
       const existing = this.registry.get(id);
@@ -279,7 +285,10 @@ export class Zigbee2MqttDriver implements Driver {
       for (const dev of this.registry.byDriver('zigbee2mqtt')) {
         if (!seen.has(dev.ieee_address) && !dev.is_deleted) {
           this.registry.upsert(dev.ieee_address, { is_deleted: true, deleted_at: new Date().toISOString(), deleted_by_bridge: true }, { silent: true });
-          this.registry.audit('soft_delete', dev, `Urządzenie "${dev.friendly_name}" zniknęło z Zigbee2MQTT.`);
+          const disabled = list.some((i) => i?.ieee_address === dev.ieee_address && i.disabled);
+          this.registry.audit('soft_delete', dev, disabled
+            ? `Urządzenie "${dev.friendly_name}" zostało wyłączone w Zigbee2MQTT.`
+            : `Urządzenie "${dev.friendly_name}" zniknęło z Zigbee2MQTT.`);
         }
       }
     }

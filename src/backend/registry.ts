@@ -20,6 +20,11 @@ export interface Driver {
   /** Odczyt bieżącego stanu na żądanie. */
   refresh(dev: Device): Promise<CommandResult>;
   rename?(dev: Device, newName: string): Promise<CommandResult>;
+  /**
+   * Czy sterownik ma teraz łączność ze swoimi urządzeniami (np. broker MQTT i Zigbee2MQTT działają).
+   * Bez niej zapamiętana dostępność (retained availability) jest nieaktualna.
+   */
+  isHealthy?(): boolean;
   remove?(dev: Device): Promise<CommandResult>;
 }
 
@@ -238,6 +243,9 @@ export class DeviceRegistry {
 
   isOnline(dev: Device): boolean {
     if (dev.is_deleted) return false;
+    // Gdy Zigbee2MQTT albo broker nie działa, ostatnie "online" z availability jest nieaktualne
+    const driver = this.driverFor(dev);
+    if (driver?.isHealthy && !driver.isHealthy()) return false;
     if (dev.available === false) return false;
     if (dev.available === true) return true;
     if (!dev.last_seen) return false;
