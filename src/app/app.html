@@ -57,6 +57,19 @@
       </button>
 
       <button
+        (click)="setTab('inverter')"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'inverter'"
+        [class.text-white]="activeTab() === 'inverter'"
+        [class.shadow-sm]="activeTab() === 'inverter'"
+        [class.text-slate-400]="activeTab() !== 'inverter'"
+        [class.hover:text-white]="activeTab() !== 'inverter'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4 text-amber-400">solar_power</mat-icon>
+        <span class="font-bold">Falownik</span>
+      </button>
+
+      <button
         (click)="setTab('settings')"
         class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
         [class.bg-slate-800]="activeTab() === 'settings'"
@@ -984,6 +997,10 @@
   }
 
   <!-- ZAKŁADKA 4: POGODA IMGW-PIB -->
+  @if (activeTab() === 'inverter') {
+    <app-inverter-view />
+  }
+
   @if (activeTab() === 'weather') {
     <app-weather-view />
   }

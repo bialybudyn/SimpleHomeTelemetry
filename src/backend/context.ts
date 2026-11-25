@@ -8,6 +8,7 @@ import { Zigbee2MqttDriver } from './drivers/zigbee2mqtt';
 import { SonoffDriver } from './drivers/sonoff';
 import { TuyaDriver } from './drivers/tuya';
 import { Watchdog } from './watchdog';
+import { InverterService } from './inverter/service';
 
 export interface Backend {
   db: Db;
@@ -19,6 +20,7 @@ export interface Backend {
   sonoff: SonoffDriver;
   tuya: TuyaDriver;
   watchdog: Watchdog;
+  inverter: InverterService;
   start(): void;
   stop(): void;
 }
@@ -53,6 +55,7 @@ export function createBackend(dbPath = dataPath('simplehome.db')): Backend {
   registry.registerDriver(sonoff);
   registry.registerDriver(tuya);
   const watchdog = new Watchdog(registry, notifier, () => z2m.status);
+  const inverter = new InverterService(db, registry, notifier, { retentionDays: config.inverterRetentionDays });
 
   let maintenance: ReturnType<typeof setInterval> | null = null;
 
@@ -66,17 +69,24 @@ export function createBackend(dbPath = dataPath('simplehome.db')): Backend {
     sonoff,
     tuya,
     watchdog,
+    inverter,
     start() {
       z2m.start();
       sonoff.start();
       tuya.start();
       watchdog.start();
+      inverter.start();
       history.prune(config.rawRetentionDays, config.hourlyRetentionDays);
-      maintenance = setInterval(() => history.prune(config.rawRetentionDays, config.hourlyRetentionDays), 6 * 3600_000);
+      inverter.prune();
+      maintenance = setInterval(() => {
+        history.prune(config.rawRetentionDays, config.hourlyRetentionDays);
+        inverter.prune();
+      }, 6 * 3600_000);
     },
     stop() {
       if (maintenance) clearInterval(maintenance);
       watchdog.stop();
+      inverter.stop();
       z2m.stop();
       sonoff.stop();
       tuya.stop();

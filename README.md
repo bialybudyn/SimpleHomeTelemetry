@@ -66,6 +66,7 @@ Przy przejściu ze starej wersji instalator wyłącza usługę `iot-telemetry`. 
 | `DATA_DIR` | `/var/lib/simplehome` | baza i cache |
 | `RAW_RETENTION_DAYS` | `30` | jak długo trzymać surowe próbki |
 | `HOURLY_RETENTION_DAYS` | `730` | jak długo trzymać średnie godzinowe |
+| `INVERTER_RETENTION_DAYS` | `366` | jak długo trzymać historię falownika (próbki co 5 min i liczniki dzienne) |
 
 Po zmianie uruchom:
 
@@ -104,6 +105,29 @@ Protokół jest taki sam jak w integracji [SonoffLAN](https://github.com/AlexxIT
 - **Import kodem QR** (Wi-Fi → Tuya): kod użytkownika z aplikacji Smart Life (Ja → Ustawienia → Konto i bezpieczeństwo), potem skan QR. Pobierane są Device ID, Local Key i **mapa DP**, czyli który numer DP to prędkość, tryb czy oscylacja.
 - Dodanie ręczne: Device ID, Local Key i wersja protokołu (3.1, 3.3, 3.4 lub 3.5). Mapę DP możesz wtedy wpisać w ustawieniach urządzenia jako JSON. Surowy stan DP jest widoczny obok.
 - Panel utrzymuje jedno stałe połączenie z każdym urządzeniem, więc zmiany z pilota lub aplikacji widać od razu.
+
+### Falownik Deye (logger Solarman)
+
+Zakładka **Falownik** czyta falownik Deye SUN-xK-SG04LP3 przez logger Wi-Fi Solarman (protokół V5, port 8899).
+Logger nie ma hasła, wystarczy jego numer seryjny. Wpisujesz go w sekcji „Połączenie z loggerem”.
+
+- Odczyt co 30 s (ustawialne): PV, bateria, sieć z podziałem na fazy, zużycie domu, temperatury i liczniki energii.
+- Historia przez rok: średnie co 5 min i liczniki dzienne według zegara falownika.
+  Wykresy pokazują 24 h, 7 dni, 30 dni i rok.
+- Logger dostaje adres z DHCP. Po dwóch nieudanych odczytach panel szuka go w sieci, najwyżej co 5 min:
+  - przeszukuje podsieć /24 ostatniego adresu i podsieci serwera,
+  - rozpoznaje logger po numerze seryjnym,
+  - sam aktualizuje zapisany adres.
+- Gdy falownik nie odpowiada dłużej niż 15 min, dostajesz powiadomienie.
+- **Sterowanie jest domyślnie wyłączone.** Po włączeniu panel może zmieniać:
+  - tryb pracy,
+  - limit oddawania i sprzedaż z PV,
+  - prądy baterii,
+  - ładowanie z sieci,
+  - harmonogram (6 przedziałów: moc, minimalny SOC, ładowanie z sieci).
+
+  Każdą zmianę panel sprawdza z zakresem, zapisuje funkcją Modbus 0x10, odczytuje z powrotem i notuje w dzienniku zdarzeń.
+  Parametrów baterii (napięcia, typ, progi wyłączenia) panel nie zmienia.
 
 ## Rozwój
 

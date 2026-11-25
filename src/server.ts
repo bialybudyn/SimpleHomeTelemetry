@@ -8,6 +8,7 @@ import { createBackend, type Backend } from './backend/context';
 import { initImgw } from './backend/imgw';
 import { createPanelListener } from './backend/tls';
 import { devicesRouter } from './backend/routes/devices';
+import { inverterRouter } from './backend/routes/inverter';
 import { systemRouter } from './backend/routes/system';
 import { weatherRouter } from './backend/routes/weather';
 import { wifiRouter } from './backend/routes/wifi';
@@ -45,6 +46,7 @@ if (backend) {
   app.use(devicesRouter(backend));
   app.use(wifiRouter(backend));
   app.use(systemRouter(backend));
+  app.use(inverterRouter(backend));
   app.use(weatherRouter());
 }
 app.use('/api', (_req, res) => {
