@@ -158,6 +158,18 @@ export interface Device {
   inching_time?: number | null;               // sekundy
   network_indicator?: boolean | null;
 
+  // SONOFF BASIC-ZB1GSP — prawdziwe nazwy atrybutów z Zigbee2MQTT
+  energy_yesterday?: number | null;
+  total_energy?: number | null;
+  outlet_control_protect?: boolean | null;
+  ac_current_max_overload?: number | null;          // A (0.1–32)
+  ac_current_max_overload_enable?: 'ON' | 'OFF' | null;
+  ac_voltage_max_overload?: number | null;          // V (85–277)
+  ac_voltage_max_overload_enable?: 'ON' | 'OFF' | null;
+  ac_power_max_overload?: number | null;            // W (10–7680)
+  ac_power_max_overload_enable?: 'ON' | 'OFF' | null;
+  inching_control_set?: { inching_control?: 'ENABLE' | 'DISABLE'; inching_time?: number; inching_mode?: 'ON' | 'OFF' } | null;
+
   // Czujniki kontaktronowe, ruchu, zalania (Sonoff SNZB-03/04/05, Tuya mmWave)
   contact?: boolean | null;       // true = zamknięte, false = otwarte
   occupancy?: boolean | null;     // true = ruch/obecność wykryta

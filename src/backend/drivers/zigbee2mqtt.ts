@@ -310,8 +310,8 @@ export class Zigbee2MqttDriver implements Driver {
     return this.publish(`${dev.friendly_name}/set`, payload);
   }
 
-  async refresh(dev: Device): Promise<CommandResult> {
-    const payload = buildGetPayload(dev.exposes);
+  async refresh(dev: Device, keys?: string[]): Promise<CommandResult> {
+    const payload = buildGetPayload(dev.exposes, keys);
     if (!payload) {
       return {
         success: false,

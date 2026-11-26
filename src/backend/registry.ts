@@ -17,8 +17,8 @@ export interface Driver {
   stop(): void;
   /** Wysyła polecenie do urządzenia. Stan w panelu zmienia się dopiero po potwierdzeniu z urządzenia. */
   sendCommand(dev: Device, command: Record<string, unknown>): Promise<CommandResult>;
-  /** Odczyt bieżącego stanu na żądanie. */
-  refresh(dev: Device): Promise<CommandResult>;
+  /** Odczyt bieżącego stanu na żądanie; `keys` zawęża odczyt do wybranych atrybutów (gdy sterownik to obsługuje). */
+  refresh(dev: Device, keys?: string[]): Promise<CommandResult>;
   rename?(dev: Device, newName: string): Promise<CommandResult>;
   /**
    * Czy sterownik ma teraz łączność ze swoimi urządzeniami (np. broker MQTT i Zigbee2MQTT działają).

@@ -18,6 +18,10 @@ const DIRECT_KEYS = new Set<string>([
   'weekly_schedule_thursday', 'weekly_schedule_friday', 'weekly_schedule_saturday',
   'power_on_behavior', 'overload_protection', 'overload_power_threshold', 'overload_current_threshold',
   'overload_voltage_threshold', 'under_voltage_threshold', 'inching_mode', 'inching_time', 'network_indicator',
+  // SONOFF BASIC-ZB1GSP (nazwy z Zigbee2MQTT)
+  'energy_yesterday', 'total_energy', 'outlet_control_protect', 'inching_control_set',
+  'ac_current_max_overload', 'ac_current_max_overload_enable', 'ac_voltage_max_overload', 'ac_voltage_max_overload_enable',
+  'ac_power_max_overload', 'ac_power_max_overload_enable',
   'fan_speed', 'fan_mode', 'fan_oscillation', 'fan_timer', 'fan_ionizer', 'fan_humidifier', 'fan_uv',
   'smoke_status', 'smoke_alarm', 'tamper_alarm',
 ]);
@@ -103,10 +107,13 @@ const GET_KEYS = /^(state(_l\d+)?|brightness|position|power|current|voltage|ener
  * Buduje payload dla tematu <name>/get: tylko kluczowe atrybuty, które urządzenie pozwala odczytać.
  * Zwraca null, jeśli nic nie da się odpytać (np. czujniki bateryjne).
  */
-export function buildGetPayload(exposes: Z2mExpose[] | undefined): Record<string, string> | null {
+export function buildGetPayload(exposes: Z2mExpose[] | undefined, keys?: string[]): Record<string, string> | null {
   const payload: Record<string, string> = {};
+  const wanted = keys && keys.length > 0 ? new Set(keys) : null;
   for (const f of flattenExposes(exposes)) {
-    if (f.property && GET_KEYS.test(f.property) && typeof f.access === 'number' && (f.access & ACCESS_GET) !== 0) {
+    if (!f.property) continue;
+    const selected = wanted ? wanted.has(f.property) : GET_KEYS.test(f.property);
+    if (selected && typeof f.access === 'number' && (f.access & ACCESS_GET) !== 0) {
       payload[f.property] = '';
     }
   }

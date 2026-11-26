@@ -57,16 +57,16 @@
       </button>
 
       <button
-        (click)="setTab('inverter')"
+        (click)="setTab('energy')"
         class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
-        [class.bg-slate-800]="activeTab() === 'inverter'"
-        [class.text-white]="activeTab() === 'inverter'"
-        [class.shadow-sm]="activeTab() === 'inverter'"
-        [class.text-slate-400]="activeTab() !== 'inverter'"
-        [class.hover:text-white]="activeTab() !== 'inverter'"
+        [class.bg-slate-800]="activeTab() === 'energy'"
+        [class.text-white]="activeTab() === 'energy'"
+        [class.shadow-sm]="activeTab() === 'energy'"
+        [class.text-slate-400]="activeTab() !== 'energy'"
+        [class.hover:text-white]="activeTab() !== 'energy'"
       >
-        <mat-icon class="text-sm !w-4 !h-4 text-amber-400">solar_power</mat-icon>
-        <span class="font-bold">Falownik</span>
+        <mat-icon class="text-sm !w-4 !h-4 text-amber-400">bolt</mat-icon>
+        <span class="font-bold">Monitor Energii</span>
       </button>
 
       <button
@@ -997,8 +997,8 @@
   }
 
   <!-- ZAKŁADKA 4: POGODA IMGW-PIB -->
-  @if (activeTab() === 'inverter') {
-    <app-inverter-view />
+  @if (activeTab() === 'energy') {
+    <app-energy-monitor-view />
   }
 
   @if (activeTab() === 'weather') {

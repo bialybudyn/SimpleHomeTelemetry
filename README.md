@@ -108,7 +108,7 @@ Protokół jest taki sam jak w integracji [SonoffLAN](https://github.com/AlexxIT
 
 ### Falownik Deye (logger Solarman)
 
-Zakładka **Falownik** czyta falownik Deye SUN-xK-SG04LP3 przez logger Wi-Fi Solarman (protokół V5, port 8899).
+Sekcja falownika w zakładce **Monitor Energii** czyta falownik Deye SUN-xK-SG04LP3 przez logger Wi-Fi Solarman (protokół V5, port 8899).
 Logger nie ma hasła, wystarczy jego numer seryjny. Wpisujesz go w sekcji „Połączenie z loggerem”.
 
 - Odczyt co 30 s (ustawialne): PV, bateria, sieć z podziałem na fazy, zużycie domu, temperatury i liczniki energii.
@@ -128,6 +128,16 @@ Logger nie ma hasła, wystarczy jego numer seryjny. Wpisujesz go w sekcji „Po�
 
   Każdą zmianę panel sprawdza z zakresem, zapisuje funkcją Modbus 0x10, odczytuje z powrotem i notuje w dzienniku zdarzeń.
   Parametrów baterii (napięcia, typ, progi wyłączenia) panel nie zmienia.
+
+### Przekaźniki SONOFF BASIC-ZB1GSP
+
+Każdy sparowany przekaźnik BASIC-ZB1GSP ma w zakładce **Monitor Energii** własną zwijaną sekcję (sterowanie przez Zigbee2MQTT):
+
+- moc, napięcie, prąd i liczniki energii (dziś, wczoraj, miesiąc, łącznie) na żywo,
+- wykres mocy i napięcia (24 h, 7 dni, 30 dni, rok) oraz zużycie dzienne liczone z licznika `total_energy`,
+- załączanie i wyłączanie (wyłączenie wymaga potwierdzenia),
+- ustawienia: stan po zaniku zasilania, dioda sieci, ochrona nadprądowa, nadnapięciowa i mocy z progami, tryb impulsowy.
+  Panel pokazuje tylko te ustawienia, które Zigbee2MQTT zgłasza dla danego urządzenia, sprawdza zakresy i zapisuje zmiany po potwierdzeniu.
 
 ## Rozwój
 

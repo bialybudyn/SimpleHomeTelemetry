@@ -1335,7 +1335,8 @@ import { flattenExposes } from '../../../backend/state-mapper';
                 </div>
               </div>
 
-              <!-- Ochrona przeciążeniowa (Overload Thresholds) -->
+              <!-- Ochrona przeciążeniowa (Overload Thresholds); BASIC-ZB1GSP ma własne atrybuty w Monitorze Energii -->
+              @if (!isBasicZb1gsp()) {
               <div class="grid grid-cols-2 gap-2 text-xs font-mono">
                 <div>
                   <span class="text-slate-400 text-[10px] block mb-1">Próg mocy (max 7680 W):</span>
@@ -1370,9 +1371,15 @@ import { flattenExposes } from '../../../backend/state-mapper';
                   </div>
                 </div>
               </div>
+              }
 
               <!-- Tryb Inching (Impulsowy) oraz Dioda LED -->
               <div class="grid grid-cols-2 gap-2 text-xs font-mono pt-1 border-t border-slate-800/60">
+                @if (isBasicZb1gsp()) {
+                  <div class="text-[10px] text-slate-400 leading-snug">
+                    Progi ochrony i tryb impulsowy ustawisz w zakładce <strong class="text-amber-300">Monitor Energii</strong>.
+                  </div>
+                } @else {
                 <div>
                   <span class="text-slate-400 text-[10px] block mb-1">Tryb impulsowy (Inching s):</span>
                   <input
@@ -1387,6 +1394,7 @@ import { flattenExposes } from '../../../backend/state-mapper';
                     class="w-full px-2 py-1 rounded bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:border-amber-500 focus:outline-none"
                   />
                 </div>
+                }
                 <div>
                   <span class="text-slate-400 text-[10px] block mb-1">Dioda LED w szafie:</span>
                   <button
@@ -1672,12 +1680,14 @@ export class DeviceCard {
   /** Limit prądu: ustawiony w urządzeniu albo znany z modelu (BASIC-ZB1GSP 32 A); inaczej nieznany. */
   readonly currentLimit = computed<number | null>(() => {
     const d = this.device();
-    return d.overload_current_threshold ?? (this.isBasicZb1gsp() ? 32 : null);
+    if (this.isBasicZb1gsp()) return d.ac_current_max_overload_enable === 'ON' && d.ac_current_max_overload ? d.ac_current_max_overload : 32;
+    return d.overload_current_threshold ?? null;
   });
 
   readonly powerLimit = computed<number | null>(() => {
     const d = this.device();
-    return d.overload_power_threshold ?? (this.isBasicZb1gsp() ? 7680 : null);
+    if (this.isBasicZb1gsp()) return d.ac_power_max_overload_enable === 'ON' && d.ac_power_max_overload ? d.ac_power_max_overload : 7680;
+    return d.overload_power_threshold ?? null;
   });
 
   readonly currentLoadPercent = computed<number>(() => {

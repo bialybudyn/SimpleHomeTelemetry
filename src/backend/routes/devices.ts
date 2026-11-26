@@ -57,6 +57,12 @@ export function devicesRouter(b: Backend): Router {
     res.json({ device_ieee: id(req), range, count: points.length, stats, history: points });
   });
 
+  /** Zużycie energii dzień po dniu (z licznika urządzenia). */
+  r.get('/api/devices/:id/daily-energy', (req, res) => {
+    const days = Math.max(1, Math.min(366, Math.round(Number(req.query['days']) || 30)));
+    res.json({ device_ieee: id(req), days: b.history.dailyEnergy(id(req), days) });
+  });
+
   /** Polecenie do urządzenia. Stan zmienia się dopiero po potwierdzeniu z urządzenia. */
   r.post('/api/devices/:id/set', async (req, res) => {
     const dev = b.registry.get(id(req));
@@ -88,7 +94,9 @@ export function devicesRouter(b: Backend): Router {
     if (!dev) return void res.status(404).json({ success: false, message: 'Nie znaleziono urządzenia.' });
     const driver = b.registry.driverFor(dev);
     if (!driver) return void res.json({ success: false, message: 'Urządzenie nie ma przypisanego sterownika.' });
-    const result = await driver.refresh(dev);
+    // Opcjonalna lista atrybutów (np. progi ochrony przekaźnika), domyślnie podstawowe pomiary
+    const keys = Array.isArray(req.body?.keys) ? (req.body.keys as unknown[]).filter((k): k is string => typeof k === 'string') : undefined;
+    const result = await driver.refresh(dev, keys);
     res.json({ ...result, device: pub(dev) });
   };
   r.post('/api/devices/:id/refresh', refresh);

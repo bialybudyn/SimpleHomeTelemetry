@@ -321,6 +321,21 @@ export class Telemetry {
     return this.http.get<HistoryResponse>(`/api/devices/${encodeURIComponent(ieee)}/history?range=${range}`);
   }
 
+  /** Zużycie energii dzień po dniu (z licznika urządzenia). */
+  fetchDailyEnergy(ieee: string, days = 30) {
+    return this.http.get<{ device_ieee: string; days: { day: string; energy: number }[] }>(
+      `/api/devices/${encodeURIComponent(ieee)}/daily-energy?days=${days}`,
+    );
+  }
+
+  /** Odczyt wybranych atrybutów z urządzenia (np. progów ochrony); wynik przyjdzie jako aktualizacja stanu. */
+  readDeviceAttributes(ieee: string, keys: string[]): Promise<ApiResult> {
+    return firstValueFrom(this.http.post<ApiResult>(`/api/devices/${encodeURIComponent(ieee)}/refresh`, { keys })).catch((err) => ({
+      success: false,
+      message: err?.error?.message || 'Nie udało się wysłać zapytania.',
+    }));
+  }
+
   /**
    * Wysyła polecenie do urządzenia. Kafelek zmieni stan dopiero, gdy urządzenie potwierdzi zmianę
    * (zdarzenie device_updated) — dzięki temu panel nie pokazuje stanu, którego nie ma.

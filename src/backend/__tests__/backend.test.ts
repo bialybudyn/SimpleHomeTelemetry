@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createBackend, type Backend } from '../context';
+import { buildGetPayload } from '../state-mapper';
 
 const PREFIX = 'zigbee2mqtt';
 const msg = (b: Backend, topic: string, payload: unknown) =>
@@ -221,5 +222,74 @@ describe('backend: Zigbee2MQTT -> rejestr -> historia', () => {
     msg(b, 'bridge/devices', bridgeDevices);
     const plug = b.registry.get('0x1')!;
     expect(b.z2m.buildSetPayload(plug, { state: 'OFF', power: 5, temp_alarm_enabled: true })).toEqual({ state: 'OFF' });
+  });
+
+  it('BASIC-ZB1GSP: ustawienia ochrony przechodzą do Zigbee2MQTT, odczyt na żądanie pyta o wybrane atrybuty', () => {
+    b = createBackend(':memory:');
+    const zb1 = {
+      ieee_address: '0x9',
+      type: 'Router',
+      friendly_name: 'Bojler',
+      definition: {
+        model: 'BASIC-ZB1GSP',
+        vendor: 'SONOFF',
+        exposes: [
+          { type: 'switch', features: [{ type: 'binary', property: 'state', access: 7, value_on: 'ON', value_off: 'OFF' }] },
+          { type: 'numeric', property: 'power', access: 5 },
+          { type: 'numeric', property: 'total_energy', access: 5 },
+          { type: 'binary', property: 'ac_current_max_overload_enable', access: 7, value_on: 'ON', value_off: 'OFF' },
+          { type: 'numeric', property: 'ac_current_max_overload', access: 7, value_min: 0.1, value_max: 32 },
+          {
+            type: 'composite',
+            property: 'inching_control_set',
+            access: 2,
+            features: [{ type: 'numeric', property: 'inching_time', access: 2 }],
+          },
+        ],
+      },
+    };
+    msg(b, 'bridge/devices', [...bridgeDevices, zb1]);
+    const dev = b.registry.get('0x9')!;
+    expect(dev.category).toBe('plug');
+    const inching = { inching_control: 'ENABLE', inching_time: 5, inching_mode: 'ON' };
+    expect(
+      b.z2m.buildSetPayload(dev, { ac_current_max_overload_enable: 'ON', ac_current_max_overload: 16, inching_control_set: inching, power: 1 }),
+    ).toEqual({ ac_current_max_overload_enable: 'ON', ac_current_max_overload: 16, inching_control_set: inching });
+
+    msg(b, 'Bojler', { state: 'ON', power: 1200, total_energy: 10.5, ac_current_max_overload: 16, ac_current_max_overload_enable: 'ON' });
+    const after = b.registry.get('0x9')!;
+    expect(after.total_energy).toBe(10.5);
+    expect(after.ac_current_max_overload).toBe(16);
+    expect(after.ac_current_max_overload_enable).toBe('ON');
+  });
+
+  it('odczyt na żądanie: domyślnie pomiary, z listą kluczy tylko wskazane i odczytywalne', () => {
+    b = createBackend(':memory:');
+    const exposes = [
+      { type: 'numeric', property: 'power', access: 5 },
+      { type: 'numeric', property: 'ac_power_max_overload', access: 7 },
+      { type: 'composite', property: 'inching_control_set', access: 2, features: [] },
+    ];
+    expect(buildGetPayload(exposes)).toEqual({ power: '' });
+    expect(buildGetPayload(exposes, ['ac_power_max_overload', 'inching_control_set'])).toEqual({ ac_power_max_overload: '' });
+  });
+
+  it('zużycie dzienne liczone z przyrostu licznika total_energy (dni lokalne)', () => {
+    b = createBackend(':memory:');
+    const day = (offset: number, hour: number) => {
+      const d = new Date();
+      d.setHours(hour, 0, 0, 0);
+      d.setDate(d.getDate() - offset);
+      return d.getTime();
+    };
+    // Przedwczoraj licznik 100 -> 102, wczoraj do 105, dziś do 105.5
+    b.history.record('m', { total_energy: 100 }, day(2, 1));
+    b.history.record('m', { total_energy: 102 }, day(2, 22));
+    b.history.record('m', { total_energy: 103 }, day(1, 8));
+    b.history.record('m', { total_energy: 105 }, day(1, 20));
+    b.history.record('m', { total_energy: 105.5 }, day(0, 0));
+    const days = b.history.dailyEnergy('m', 30);
+    expect(days.map((d) => d.energy)).toEqual([2, 3, 0.5]);
+    expect(b.history.dailyEnergy('m', 1).map((d) => d.energy)).toEqual([0.5]);
   });
 });

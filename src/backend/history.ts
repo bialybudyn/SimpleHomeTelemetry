@@ -138,6 +138,48 @@ export class History {
 
     return { points, stats: buildStats(stats, events) };
   }
+
+  /**
+   * Zużycie energii w kolejnych dniach (czas lokalny serwera) z agregatów godzinowych.
+   * Najpewniejszy jest licznik narastający `total_energy`: dzień = przyrost licznika, niezależnie od tego,
+   * o której urządzenie zeruje swój licznik dzienny. Bez niego bierzemy maksimum `energy_today` z dnia.
+   */
+  dailyEnergy(device: string, days: number, now = Date.now()): { day: string; energy: number }[] {
+    const from = now - (days + 1) * 24 * HOUR;
+    const rows = this.db.sql
+      .prepare(
+        "SELECT key, hour AS ts, min, max FROM hourly WHERE device = ? AND key IN ('total_energy', 'energy_today') AND hour >= ? ORDER BY hour",
+      )
+      .all(device, from) as { key: string; ts: number; min: number; max: number }[];
+    const key = rows.some((r) => r.key === 'total_energy') ? 'total_energy' : 'energy_today';
+    const perDay = new Map<string, { min: number; max: number }>();
+    for (const r of rows) {
+      if (r.key !== key) continue;
+      const day = localDay(r.ts);
+      const d = perDay.get(day) ?? { min: Infinity, max: -Infinity };
+      d.min = Math.min(d.min, r.min);
+      d.max = Math.max(d.max, r.max);
+      perDay.set(day, d);
+    }
+    const out: { day: string; energy: number }[] = [];
+    let prevMax: number | null = null;
+    for (const [day, d] of [...perDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      let energy = d.max;
+      if (key === 'total_energy') {
+        // Po wyzerowaniu licznika (np. reset urządzenia) przyrost liczymy tylko w obrębie dnia
+        energy = prevMax !== null && d.max >= prevMax ? d.max - prevMax : d.max - d.min;
+        prevMax = d.max;
+      }
+      out.push({ day, energy: Math.round(energy * 1000) / 1000 });
+    }
+    return out.filter((d) => d.day > localDay(now - days * 24 * HOUR));
+  }
+}
+
+/** Data YYYY-MM-DD w strefie czasowej serwera. */
+function localDay(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function pick(values: Record<string, number>, ...keys: string[]): number | null {
