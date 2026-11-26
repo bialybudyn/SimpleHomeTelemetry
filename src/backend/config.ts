@@ -24,6 +24,8 @@ export const config = {
   hourlyRetentionDays: Number(process.env['HOURLY_RETENTION_DAYS']) || 730,
   /** Ile dni trzymać historię falownika (próbki co 5 min i liczniki dzienne). */
   inverterRetentionDays: Number(process.env['INVERTER_RETENTION_DAYS']) || 366,
+  /** Program do odbioru strumieni RTSP kamer (podgląd na żywo, bez nagrywania). */
+  ffmpegPath: process.env['FFMPEG_PATH'] || 'ffmpeg',
   /** Wyłącza sterowniki — przydatne w buildzie i testach. */
   disableDrivers: process.env['DISABLE_DRIVERS'] === '1',
 };

@@ -9,6 +9,8 @@ import { initImgw } from './backend/imgw';
 import { createPanelListener } from './backend/tls';
 import { devicesRouter } from './backend/routes/devices';
 import { inverterRouter } from './backend/routes/inverter';
+import { cctvRouter } from './backend/routes/cctv';
+import { handleCctvSocket } from './backend/cctv/socket';
 import { systemRouter } from './backend/routes/system';
 import { weatherRouter } from './backend/routes/weather';
 import { wifiRouter } from './backend/routes/wifi';
@@ -47,6 +49,7 @@ if (backend) {
   app.use(wifiRouter(backend));
   app.use(systemRouter(backend));
   app.use(inverterRouter(backend));
+  app.use(cctvRouter(backend));
   app.use(weatherRouter());
 }
 app.use('/api', (_req, res) => {
@@ -72,10 +75,18 @@ if (isMainModule(import.meta.url) && backend) {
   const wss = new WebSocketServer({ noServer: true });
   backend.events.attachWebSocketServer(wss);
 
+  // Obraz z kamer: osobne gniazdo, żeby klatki nie szły do wszystkich kart z pulpitem
+  const cctvWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+
   server.on('upgrade', (req, socket, head) => {
-    if (req.url !== '/ws' || !isUpgradeAuthorized(req, config.panelUser, config.panelPassword)) {
+    const known = req.url === '/ws' || req.url === '/ws/cctv';
+    if (!known || !isUpgradeAuthorized(req, config.panelUser, config.panelPassword)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
+      return;
+    }
+    if (req.url === '/ws/cctv') {
+      cctvWss.handleUpgrade(req, socket, head, (ws) => handleCctvSocket(ws, backend.cctv));
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {

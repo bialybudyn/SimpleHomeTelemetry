@@ -54,6 +54,8 @@ c_info "Instalacja pakietów bazowych..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y >/dev/null
 apt-get install -y --no-install-recommends ca-certificates curl gnupg git rsync openssl >/dev/null
+# ffmpeg: podgląd kamer RTSP na żywo (obraz tylko w pamięci, bez nagrywania)
+apt-get install -y --no-install-recommends ffmpeg >/dev/null
 
 node_ok() {
   command -v node >/dev/null 2>&1 || return 1

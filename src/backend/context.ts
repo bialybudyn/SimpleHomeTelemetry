@@ -9,6 +9,7 @@ import { SonoffDriver } from './drivers/sonoff';
 import { TuyaDriver } from './drivers/tuya';
 import { Watchdog } from './watchdog';
 import { InverterService } from './inverter/service';
+import { CctvService } from './cctv/service';
 
 export interface Backend {
   db: Db;
@@ -21,6 +22,7 @@ export interface Backend {
   tuya: TuyaDriver;
   watchdog: Watchdog;
   inverter: InverterService;
+  cctv: CctvService;
   start(): void;
   stop(): void;
 }
@@ -56,6 +58,7 @@ export function createBackend(dbPath = dataPath('simplehome.db')): Backend {
   registry.registerDriver(tuya);
   const watchdog = new Watchdog(registry, notifier, () => z2m.status);
   const inverter = new InverterService(db, registry, notifier, { retentionDays: config.inverterRetentionDays });
+  const cctv = new CctvService(db, { ffmpegPath: config.ffmpegPath });
 
   let maintenance: ReturnType<typeof setInterval> | null = null;
 
@@ -70,6 +73,7 @@ export function createBackend(dbPath = dataPath('simplehome.db')): Backend {
     tuya,
     watchdog,
     inverter,
+    cctv,
     start() {
       z2m.start();
       sonoff.start();
@@ -87,6 +91,7 @@ export function createBackend(dbPath = dataPath('simplehome.db')): Backend {
       if (maintenance) clearInterval(maintenance);
       watchdog.stop();
       inverter.stop();
+      cctv.stop();
       z2m.stop();
       sonoff.stop();
       tuya.stop();

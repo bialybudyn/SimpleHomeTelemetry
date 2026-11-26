@@ -70,6 +70,19 @@
       </button>
 
       <button
+        (click)="setTab('cctv')"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
+        [class.bg-slate-800]="activeTab() === 'cctv'"
+        [class.text-white]="activeTab() === 'cctv'"
+        [class.shadow-sm]="activeTab() === 'cctv'"
+        [class.text-slate-400]="activeTab() !== 'cctv'"
+        [class.hover:text-white]="activeTab() !== 'cctv'"
+      >
+        <mat-icon class="text-sm !w-4 !h-4 text-rose-400">videocam</mat-icon>
+        <span class="font-bold">CCTV</span>
+      </button>
+
+      <button
         (click)="setTab('settings')"
         class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer"
         [class.bg-slate-800]="activeTab() === 'settings'"
@@ -999,6 +1012,10 @@
   <!-- ZAKŁADKA 4: POGODA IMGW-PIB -->
   @if (activeTab() === 'energy') {
     <app-energy-monitor-view />
+  }
+
+  @if (activeTab() === 'cctv') {
+    <app-cctv-view />
   }
 
   @if (activeTab() === 'weather') {

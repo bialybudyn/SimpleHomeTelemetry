@@ -19,6 +19,7 @@ import { TopologyGraph } from './components/topology-graph/topology-graph';
 import { ServerSettings, ServerSubTab } from './components/server-settings/server-settings';
 import { WeatherView } from './components/weather-view/weather-view';
 import { EnergyMonitorView } from './components/energy-monitor-view/energy-monitor-view';
+import { CctvView } from './components/cctv-view/cctv-view';
 import { WeatherWidget } from './components/weather-widget/weather-widget';
 import { DeviceConfigModal } from './components/device-config-modal/device-config-modal';
 
@@ -37,6 +38,7 @@ import { DeviceConfigModal } from './components/device-config-modal/device-confi
     ServerSettings,
     WeatherView,
     EnergyMonitorView,
+    CctvView,
     WeatherWidget,
     DeviceConfigModal,
   ],
@@ -51,7 +53,7 @@ export class App {
   // Stan modala / rozwinięcia szczegółów ostrzeżenia meteorologicznego
   readonly showWeatherWarningDetailsModal = signal<boolean>(false);
 
-  readonly activeTab = signal<'dashboard' | 'analytics' | 'settings' | 'weather' | 'energy'>('dashboard');
+  readonly activeTab = signal<'dashboard' | 'analytics' | 'settings' | 'weather' | 'energy' | 'cctv'>('dashboard');
 
   // Stany zwijania pulpitów (Pulpit Zigbee oraz Pulpit Wi-Fi)
   readonly isZigbeeCollapsed = signal<boolean>(this.loadBoolean('z2m_zigbee_collapsed', false));
@@ -345,7 +347,7 @@ export class App {
     this.saveBoolean('z2m_wifi_collapsed', next);
   }
 
-  setTab(tab: 'dashboard' | 'analytics' | 'settings' | 'weather' | 'energy'): void {
+  setTab(tab: 'dashboard' | 'analytics' | 'settings' | 'weather' | 'energy' | 'cctv'): void {
     this.activeTab.set(tab);
   }
 
