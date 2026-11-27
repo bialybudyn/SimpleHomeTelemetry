@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FramePlayer, MAX_QUEUE } from './frame-player';
+import { FramePlayer, MAX_QUEUE, TARGET_BUFFER } from './frame-player';
 
 class Frame {
   closed = false;
@@ -63,8 +63,7 @@ describe('FramePlayer: równe tempo wyświetlania', () => {
 
   it('po zamknięciu nie trzyma żadnych klatek', async () => {
     const { p, tick, blob } = setup();
-    p.push(blob, 0);
-    p.push(blob, 33);
+    for (let i = 0; i < TARGET_BUFFER; i++) p.push(blob, i * 33);
     await flush();
     tick(200);
     const cur = p.current!;

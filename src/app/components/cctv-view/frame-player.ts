@@ -3,12 +3,12 @@ export interface DecodedFrame {
   close(): void;
 }
 
-/** Ile klatek trzymamy w zapasie przed wyświetleniem — wyrównuje nierówne odstępy z sieci (~2 klatki opóźnienia). */
-export const TARGET_BUFFER = 2;
+/** Ile klatek trzymamy w zapasie przed wyświetleniem — wyrównuje nierówne odstępy z sieci (~3 klatki, ok. 100 ms opóźnienia). */
+export const TARGET_BUFFER = 3;
 /** Powyżej tylu klatek w kolejce najstarsze są wyrzucane (np. po chwilowym zawieszeniu karty). */
-export const MAX_QUEUE = 6;
+export const MAX_QUEUE = 7;
 /** Przy starcie lub po przerwie czekamy na zapas najwyżej tyle ms. */
-const MAX_WAIT_MS = 150;
+const MAX_WAIT_MS = 200;
 /** Ile klatek może się dekodować naraz; więcej = urządzenie nie nadąża, nowe pomijamy. */
 const MAX_PENDING = 4;
 
