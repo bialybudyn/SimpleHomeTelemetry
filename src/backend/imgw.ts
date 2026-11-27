@@ -163,7 +163,7 @@ export interface WeatherLocation {
   id: string; // unikalny identyfikator
   name: string; // np. Radom, Warszawa, Piaseczno
   voivodeship: string; // np. Mazowieckie
-  type: 'city' | 'synop' | 'meteo';
+  type: 'city' | 'synop' | 'meteo' | 'place';
   synopStationId: string; // powiązana stacja synoptyczna (dla historii i ciśnienia)
   synopStationName?: string;
   meteoStationCode?: string; // stacja meteo
@@ -177,6 +177,21 @@ export interface WeatherLocation {
   groundTemp: number | null;
   measurementTime?: string;
   sourceDesc: string;
+  /** Współrzędne miejsca wpisanego przez użytkownika (type = 'place'). */
+  lat?: number;
+  lon?: number;
+  /** Pełny opis miejsca, np. „gmina Mińsk Mazowiecki, powiat miński”. */
+  placeLabel?: string;
+}
+
+/** Miejsce wpisane ręcznie (dowolna wieś lub adres), zapisane na serwerze. */
+export interface CustomPlace {
+  id: string;
+  name: string;
+  label: string;
+  voivodeship: string;
+  lat: number;
+  lon: number;
 }
 
 export interface WeatherLocationDetails {
@@ -464,6 +479,43 @@ let warningsLastFetch = 0;
 
 const stationHistoryStore = new Map<string, ImgwHourlyPoint[]>();
 let favoriteStationIds: string[] = ['12375', '12566', '12424', '12330', '12155', 'city_radom'];
+let customPlaces: CustomPlace[] = [];
+
+function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const rad = Math.PI / 180;
+  const dLat = (bLat - aLat) * rad;
+  const dLon = (bLon - aLon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+function meteoLatLon(m: ImgwMeteoStation): { lat: number; lon: number } | null {
+  const lat = Number(m.lat);
+  const lon = Number(m.lon);
+  return Number.isFinite(lat) && Number.isFinite(lon) && lat && lon ? { lat, lon } : null;
+}
+
+export function getCustomPlaces(): CustomPlace[] {
+  return customPlaces;
+}
+
+/** Zapisuje miejsce (to samo miejsce w promieniu ~100 m nie jest dodawane drugi raz). */
+export function addCustomPlace(p: Omit<CustomPlace, 'id'>): CustomPlace {
+  const existing = customPlaces.find((c) => haversineKm(c.lat, c.lon, p.lat, p.lon) < 0.1 && normalizePl(c.name) === normalizePl(p.name));
+  if (existing) return existing;
+  const place: CustomPlace = { ...p, id: `place_${Date.now().toString(36)}` };
+  customPlaces = [...customPlaces, place];
+  saveCacheToDisk();
+  return place;
+}
+
+export function removeCustomPlace(id: string): boolean {
+  const before = customPlaces.length;
+  customPlaces = customPlaces.filter((c) => c.id !== id);
+  favoriteStationIds = favoriteStationIds.filter((f) => f !== id);
+  saveCacheToDisk();
+  return customPlaces.length < before;
+}
 
 // Usuwanie znaków diakrytycznych do szybkiego wyszukiwania bez względu na polskie litery
 export function normalizePl(str: string): string {
@@ -492,6 +544,11 @@ function loadCacheFromDisk() {
       if (Array.isArray(data.favorites)) {
         favoriteStationIds = data.favorites;
       }
+      if (Array.isArray(data.places)) {
+        customPlaces = (data.places as CustomPlace[]).filter(
+          (p) => p && typeof p.id === 'string' && typeof p.name === 'string' && Number.isFinite(p.lat) && Number.isFinite(p.lon),
+        );
+      }
       if (data.history && typeof data.history === 'object') {
         for (const [id, points] of Object.entries(data.history)) {
           if (Array.isArray(points)) {
@@ -514,6 +571,7 @@ function saveCacheToDisk() {
     }
     const payload = {
       favorites: favoriteStationIds,
+      places: customPlaces,
       history: historyObj,
       saved_at: new Date().toISOString(),
     };
@@ -893,6 +951,65 @@ export async function getImgwLocations(search = '', voivodeship = 'all', typeFil
     });
   }
 
+  // 4. Miejsca wpisane ręcznie: pomiary z najbliższej stacji meteo, ciśnienie i historia z najbliższej synoptycznej
+  const synopCoords = new Map<string, { lat: number; lon: number }>();
+  for (const syn of synopStations) {
+    const n = normalizePl(syn.stacja).replace(/[^a-z]/g, '');
+    const m = meteoStations.find((x) => normalizePl(x.nazwa_stacji).replace(/[^a-z]/g, '').startsWith(n));
+    const c = m && meteoLatLon(m);
+    if (c) synopCoords.set(syn.id_stacji, c);
+  }
+  for (const place of customPlaces) {
+    let nearMeteo: ImgwMeteoStation | null = null;
+    let nearMeteoKm = Infinity;
+    for (const m of meteoStations) {
+      const c = meteoLatLon(m);
+      if (!c || m.temperatura_powietrza === null || m.temperatura_powietrza === undefined) continue;
+      const d = haversineKm(place.lat, place.lon, c.lat, c.lon);
+      if (d < nearMeteoKm) {
+        nearMeteoKm = d;
+        nearMeteo = m;
+      }
+    }
+    let nearSynop = synopStations[0];
+    let nearSynopKm = Infinity;
+    for (const syn of synopStations) {
+      const c = synopCoords.get(syn.id_stacji);
+      if (!c) continue;
+      const d = haversineKm(place.lat, place.lon, c.lat, c.lon);
+      if (d < nearSynopKm) {
+        nearSynopKm = d;
+        nearSynop = syn;
+      }
+    }
+    if (!nearSynop) continue;
+    const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+    locations.push({
+      id: place.id,
+      name: place.name,
+      voivodeship: place.voivodeship,
+      type: 'place',
+      synopStationId: nearSynop.id_stacji,
+      synopStationName: nearSynop.stacja,
+      meteoStationCode: nearMeteo?.kod_stacji,
+      meteoStationName: nearMeteo?.nazwa_stacji,
+      temp: num(nearMeteo?.temperatura_powietrza) ?? num(nearSynop.temperatura),
+      humidity: num(nearMeteo?.wilgotnosc_wzgledna) ?? num(nearSynop.wilgotnosc_wzgledna),
+      pressure: num(nearSynop.cisnienie),
+      windSpeed: num(nearMeteo?.wiatr_srednia_predkosc) ?? num(nearSynop.predkosc_wiatru),
+      windGust: num(nearMeteo?.wiatr_poryw_10min),
+      rain: num(nearMeteo?.opad_10min) ?? num(nearSynop.suma_opadu),
+      groundTemp: num(nearMeteo?.temperatura_gruntu),
+      measurementTime: `${nearSynop.data_pomiaru} ${nearSynop.godzina_pomiaru}:00`,
+      sourceDesc: nearMeteo
+        ? `Najbliższa stacja meteo: ${nearMeteo.nazwa_stacji} (${Math.round(nearMeteoKm)} km), synop: ${nearSynop.stacja}`
+        : `Najbliższa stacja synoptyczna: ${nearSynop.stacja}`,
+      lat: place.lat,
+      lon: place.lon,
+      placeLabel: place.label,
+    });
+  }
+
   // Filtrowanie
   let filtered = locations;
 
@@ -934,10 +1051,13 @@ export async function getImgwLocationDetails(locationId: string): Promise<Weathe
     getImgwStationHistory(loc.synopStationId),
     getImgwWarnings(),
     getImgwHydroStations(loc.voivodeship, 20),
-    getImgwMeteoStations(loc.name, 1),
+    getImgwMeteoStations('', 5000),
   ]);
 
-  const matchedMeteo = meteoList.length > 0 ? meteoList[0] : null;
+  const matchedMeteo =
+    (loc.meteoStationCode ? meteoList.find((m) => m.kod_stacji === loc.meteoStationCode) : undefined) ??
+    meteoList.find((m) => normalizePl(m.nazwa_stacji).includes(normalizePl(loc.name))) ??
+    null;
 
   // Ostrzeżenia dla województwa danej lokalizacji
   const relevantWarnings = [...warningsRes.meteo, ...warningsRes.hydro].filter((w) => warningInVoivodeship(w, loc.voivodeship));

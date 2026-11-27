@@ -10,6 +10,8 @@ import {
   getImgwSynopStations,
   getImgwWarnings,
   setImgwFavoriteStations,
+  addCustomPlace,
+  removeCustomPlace,
   type WeatherLocation,
 } from '../imgw';
 import { locationCoords, stationCoords } from '../weather/coords';
@@ -147,8 +149,12 @@ export function weatherRouter(): Router {
       const loc = await findLocation(String(req.params['id']));
       if (!loc) return void res.status(404).json({ error: 'Nie znaleziono miejscowości' });
       const climate = weatherServices.climate();
+      if (loc.lat !== undefined && loc.lon !== undefined) {
+        const near = await climate.nearest(loc.lat, loc.lon);
+        return void res.json({ location: loc.name, station: near?.station ?? null, distanceKm: near?.km ?? null, status: climate.status() });
+      }
       const station = (await climate.forStation(loc.synopStationName ?? loc.name)) ?? (await climate.forStation(loc.name));
-      res.json({ location: loc.name, station, status: climate.status() });
+      res.json({ location: loc.name, station, distanceKm: null, status: climate.status() });
     } catch (err) {
       fail(res, 'normy klimatyczne', err);
     }
@@ -194,6 +200,40 @@ export function weatherRouter(): Router {
     } catch (err) {
       fail(res, 'mapa stacji', err);
     }
+  });
+
+  // Dowolna miejscowość / wieś / adres (OpenStreetMap Nominatim) — tylko na wyraźne zapytanie
+  r.get('/api/weather/geocode', async (req, res) => {
+    try {
+      res.json({ results: await weatherServices.geocoder().search(String(req.query['q'] ?? '')) });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : String(err), results: [] });
+    }
+  });
+
+  r.post('/api/weather/places', (req, res) => {
+    const b = req.body ?? {};
+    const lat = Number(b.lat);
+    const lon = Number(b.lon);
+    const name = typeof b.name === 'string' ? b.name.trim().slice(0, 80) : '';
+    if (!name || !Number.isFinite(lat) || !Number.isFinite(lon) || lat < 48.5 || lat > 55.2 || lon < 13.8 || lon > 24.5) {
+      return void res.status(400).json({ error: 'Podaj nazwę i współrzędne miejsca w Polsce.' });
+    }
+    const place = addCustomPlace({
+      name,
+      label: typeof b.label === 'string' ? b.label.slice(0, 200) : '',
+      voivodeship: typeof b.voivodeship === 'string' && b.voivodeship ? b.voivodeship.slice(0, 40) : 'Polska',
+      lat,
+      lon,
+    });
+    // Prognoza dokładnie dla tego punktu: bieżący przebieg modelu pobierany jeszcze raz w tle
+    const cosmo = weatherServices.cosmo();
+    if (!cosmo.hasPoint(lat, lon)) cosmo.refreshForNewPoint();
+    res.json({ place });
+  });
+
+  r.delete('/api/weather/places/:id', (req, res) => {
+    res.json({ removed: removeCustomPlace(String(req.params['id'])) });
   });
 
   r.get('/api/weather/favorites', (_req, res) => {

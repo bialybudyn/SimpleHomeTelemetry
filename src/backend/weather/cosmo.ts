@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dataPath } from '../config';
-import { getImgwMeteoStations } from '../imgw';
+import { getCustomPlaces, getImgwMeteoStations } from '../imgw';
 import { grib1Length, parseGrib1, readRotatedGrid, rotatedIndex, type RotatedGrid } from './grib1';
-import { stationCoords } from './coords';
+import { distanceKm, stationCoords } from './coords';
 
 /**
  * Prognoza z modelu COSMO IMGW (siatka 2,8 km, 4 przebiegi na dobę, 60 h do przodu).
@@ -57,6 +57,8 @@ export interface PointForecast {
   run: string;
   model: string;
   steps: ForecastStep[];
+  /** Gdy punktu nie było w przebiegu: odległość do najbliższego punktu z prognozą [km]. */
+  approxKm: number | null;
 }
 
 interface RawStep {
@@ -118,6 +120,7 @@ export class CosmoForecast {
   private timer: ReturnType<typeof setInterval> | null = null;
   private startTimer: ReturnType<typeof setTimeout> | null = null;
   private abort: AbortController | null = null;
+  private rerun = false;
 
   constructor(private readonly fetchImpl: typeof fetch = fetch) {
     this.load();
@@ -148,8 +151,21 @@ export class CosmoForecast {
   forecast(lat: number, lon: number, now = Date.now()): PointForecast | null {
     const s = this.store;
     if (!s) return null;
-    const idx = s.points.findIndex((p) => p.key === pointKey(lat, lon));
-    if (idx < 0) return null;
+    let idx = s.points.findIndex((p) => p.key === pointKey(lat, lon));
+    let approxKm: number | null = null;
+    if (idx < 0) {
+      // Miejsce dodane po ostatnim pobraniu: najbliższy punkt (do 25 km) do czasu następnego przebiegu
+      let best = Infinity;
+      s.points.forEach((p, i) => {
+        const d = distanceKm({ lat, lon }, p);
+        if (d < best) {
+          best = d;
+          idx = i;
+        }
+      });
+      if (idx < 0 || best > 25) return null;
+      approxKm = Math.round(best * 10) / 10;
+    }
     const angle = s.northAngle[idx] ?? 0;
     const steps: ForecastStep[] = [];
     for (let k = 0; k < s.steps.length; k++) {
@@ -185,18 +201,32 @@ export class CosmoForecast {
         snow: round(diff(snowNow, snowPrev), 1),
       });
     }
-    return { run: s.run, model: 'COSMO 2,8 km (IMGW-PIB)', steps };
+    return { run: s.run, model: 'COSMO 2,8 km (IMGW-PIB)', steps, approxKm };
+  }
+
+  /** Czy punkt jest już w pobranej prognozie. */
+  hasPoint(lat: number, lon: number): boolean {
+    return !!this.store?.points.some((p) => p.key === pointKey(lat, lon));
+  }
+
+  /** Nowe miejsce: pobiera bieżący przebieg jeszcze raz, żeby prognoza była dokładnie dla niego. */
+  refreshForNewPoint(): void {
+    if (this.busy) {
+      this.rerun = true;
+      return;
+    }
+    void this.update(true);
   }
 
   /** Sprawdza, czy jest nowszy przebieg modelu, i jeśli tak — pobiera go. */
-  async update(): Promise<void> {
+  async update(force = false): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.error = null;
     try {
       const latest = await this.latestRun();
       if (!latest) throw new Error('IMGW nie udostępnia teraz żadnego przebiegu modelu COSMO.');
-      if (this.store?.run === latest.run) return;
+      if (!force && this.store?.run === latest.run) return;
       await this.process(latest.run, latest.files);
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
@@ -204,6 +234,10 @@ export class CosmoForecast {
     } finally {
       this.busy = false;
       this.progress = null;
+      if (this.rerun) {
+        this.rerun = false;
+        void this.update(true);
+      }
     }
   }
 
@@ -248,6 +282,12 @@ export class CosmoForecast {
       if (seen.has(key)) continue;
       seen.add(key);
       points.push({ key, lat: c.lat, lon: c.lon });
+    }
+    for (const p of getCustomPlaces()) {
+      const key = pointKey(p.lat, p.lon);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      points.push({ key, lat: p.lat, lon: p.lon });
     }
     if (points.length === 0) throw new Error('Brak współrzędnych stacji IMGW.');
 

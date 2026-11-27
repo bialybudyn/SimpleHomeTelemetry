@@ -1,5 +1,6 @@
 import { ClimateNormals } from './climate';
 import { CosmoForecast } from './cosmo';
+import { Geocoder } from './geocode';
 import { RadarService } from './radar';
 
 /**
@@ -9,11 +10,13 @@ import { RadarService } from './radar';
 let cosmo: CosmoForecast | null = null;
 let radar: RadarService | null = null;
 let climate: ClimateNormals | null = null;
+let geocoder: Geocoder | null = null;
 
 export const weatherServices = {
   cosmo: () => (cosmo ??= new CosmoForecast()),
   radar: () => (radar ??= new RadarService()),
   climate: () => (climate ??= new ClimateNormals()),
+  geocoder: () => (geocoder ??= new Geocoder()),
 };
 
 /** Start w tle: prognoza sprawdza nowe przebiegi co godzinę, normy pobierają się raz. */

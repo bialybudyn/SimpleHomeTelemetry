@@ -43,7 +43,7 @@ interface ForecastStep {
 interface ForecastResponse {
   location: string;
   coords: GeoPoint | null;
-  forecast: { run: string; model: string; steps: ForecastStep[] } | null;
+  forecast: { run: string; model: string; steps: ForecastStep[]; approxKm: number | null } | null;
   status: { run: string | null; generatedAt: string | null; busy: boolean; progress: string | null; error: string | null };
 }
 
@@ -87,6 +87,7 @@ interface ClimateResponse {
     months: MonthNormal[];
     recent: { year: number; month: number; temp: number | null; precip: number | null }[];
   } | null;
+  distanceKm?: number | null;
   status: { generatedAt: string | null; stations: number; busy: boolean; error: string | null };
 }
 
@@ -160,7 +161,11 @@ function radarPixel(lat: number, lon: number): { x: number; y: number } {
                 }
               </div>
               <p class="text-[11px] text-slate-500">
-                Przebieg modelu {{ runLabel(f.forecast.run) }} UTC · punkt: {{ f.coords?.source }} · kroki co 3 h, opad to suma z 3 h, wiatr średni / porywy.
+                Przebieg modelu {{ runLabel(f.forecast.run) }} UTC · punkt: {{ f.coords?.source }}
+                @if (f.forecast.approxKm !== null) {
+                  <span class="text-amber-300">(na razie z punktu oddalonego o {{ f.forecast.approxKm }} km — dokładna prognoza dla tego miejsca pobiera się w tle)</span>
+                }
+                · kroki co 3 h, opad to suma z 3 h, wiatr średni / porywy.
                 IMGW publikuje przebiegi z opóźnieniem, więc prognoza sięga ok. 1–1,5 doby do przodu.
               </p>
             </div>
@@ -303,7 +308,7 @@ function radarPixel(lat: number, lon: number): { x: number; y: number } {
                 </table>
               </div>
               <p class="text-[11px] text-slate-500">
-                Stacja {{ st.name }} · norma = średnia z lat 1991–2020 (standard WMO) · rekordy z lat {{ st.firstYear }}–{{ st.lastYear }} · archiwum IMGW-PIB.
+                Stacja {{ st.name }}{{ c.distanceKm ? ' (' + c.distanceKm + ' km od miejsca)' : '' }} · norma = średnia z lat 1991–2020 (standard WMO) · rekordy z lat {{ st.firstYear }}–{{ st.lastYear }} · archiwum IMGW-PIB.
               </p>
             </div>
           } @else if (c.status.busy || !c.status.generatedAt) {

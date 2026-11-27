@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { Telemetry } from './telemetry';
 import { Device } from '../models/telemetry.models';
 
@@ -93,11 +94,14 @@ export interface WeatherLocation {
   id: string;
   name: string;
   voivodeship: string;
-  type: 'city' | 'synop' | 'meteo';
+  type: 'city' | 'synop' | 'meteo' | 'place';
   synopStationId: string;
   synopStationName?: string;
   meteoStationCode?: string;
   meteoStationName?: string;
+  lat?: number;
+  lon?: number;
+  placeLabel?: string;
   temp: number | null;
   humidity: number | null;
   pressure: number | null;
@@ -107,6 +111,16 @@ export interface WeatherLocation {
   groundTemp: number | null;
   measurementTime?: string;
   sourceDesc: string;
+}
+
+/** Wynik wyszukiwania dowolnej miejscowości w OpenStreetMap. */
+export interface GeocodeResult {
+  name: string;
+  label: string;
+  kind: string;
+  voivodeship: string;
+  lat: number;
+  lon: number;
 }
 
 export interface WeatherLocationDetails {
@@ -646,6 +660,32 @@ export class Weather {
 
   setSearchQuery(q: string): void {
     this.searchQuery.set(q);
+  }
+
+  /** Szukanie wsi / adresu w OpenStreetMap (na wyraźne polecenie, nie przy każdym znaku). */
+  async searchPlaces(q: string): Promise<GeocodeResult[]> {
+    const res = await firstValueFrom(this.http.get<{ results: GeocodeResult[]; error?: string }>(`/api/weather/geocode?q=${encodeURIComponent(q)}`));
+    return res.results ?? [];
+  }
+
+  /** Zapisuje miejsce na serwerze, dodaje do ulubionych i od razu je wybiera. */
+  async addPlace(r: GeocodeResult): Promise<void> {
+    const res = await firstValueFrom(
+      this.http.post<{ place: { id: string } }>('/api/weather/places', { name: r.name, label: r.label, voivodeship: r.voivodeship, lat: r.lat, lon: r.lon }),
+    );
+    const list = await firstValueFrom(this.http.get<WeatherLocation[]>('/api/weather/locations'));
+    if (Array.isArray(list) && list.length) this.locations.set(list);
+    if (!this.isFavoriteLocation(res.place.id)) this.toggleFavoriteLocation(res.place.id);
+    this.selectLocation(res.place.id);
+  }
+
+  async removePlace(id: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`/api/weather/places/${encodeURIComponent(id)}`));
+    if (this.isFavoriteLocation(id)) this.toggleFavoriteLocation(id);
+    const list = await firstValueFrom(this.http.get<WeatherLocation[]>('/api/weather/locations'));
+    if (Array.isArray(list) && list.length) this.locations.set(list);
+    const next = this.favoriteLocationIds().find((f) => list.some((l) => l.id === f)) ?? list[0]?.id;
+    if (next) this.selectLocation(next);
   }
 
   // Kompatybilność ze starymi metodami

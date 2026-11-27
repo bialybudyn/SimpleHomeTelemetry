@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
 import { dataPath } from '../config';
-import { normalizePl } from '../imgw';
+import { getImgwMeteoStations, normalizePl } from '../imgw';
 
 /**
  * Normy klimatyczne i rekordy ze stacji synoptycznych IMGW (archiwum miesięczne).
@@ -229,6 +229,29 @@ export class ClimateNormals {
     if (!n) return null;
     const norm = (s: string) => normalizePl(s).replace(/[^a-z]/g, '');
     return stations.find((s) => norm(s.name) === n) ?? stations.find((s) => norm(s.name).startsWith(n)) ?? stations.find((s) => n.startsWith(norm(s.name))) ?? null;
+  }
+
+  /** Najbliższa stacja z wieloletnią serią (współrzędne z listy stacji meteo IMGW o tej samej nazwie). */
+  async nearest(lat: number, lon: number): Promise<{ station: StationClimate; km: number } | null> {
+    await this.ensure();
+    const stations = this.store?.stations ?? [];
+    const meteo = await getImgwMeteoStations('', 5000);
+    const norm = (s: string) => normalizePl(s).replace(/[^a-z]/g, '');
+    let best: { station: StationClimate; km: number } | null = null;
+    for (const st of stations) {
+      const n = norm(st.name);
+      const m =
+        meteo.find((x) => norm(x.nazwa_stacji) === n) ??
+        meteo.find((x) => norm(x.nazwa_stacji).startsWith(n) || n.startsWith(norm(x.nazwa_stacji)));
+      const mlat = Number(m?.lat);
+      const mlon = Number(m?.lon);
+      if (!m || !Number.isFinite(mlat) || !Number.isFinite(mlon) || !mlat) continue;
+      const rad = Math.PI / 180;
+      const h = Math.sin(((mlat - lat) * rad) / 2) ** 2 + Math.cos(lat * rad) * Math.cos(mlat * rad) * Math.sin(((mlon - lon) * rad) / 2) ** 2;
+      const km = 2 * 6371 * Math.asin(Math.sqrt(h));
+      if (!best || km < best.km) best = { station: st, km: Math.round(km) };
+    }
+    return best;
   }
 
   async ensure(): Promise<void> {

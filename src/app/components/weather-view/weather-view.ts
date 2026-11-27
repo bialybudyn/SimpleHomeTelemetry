@@ -19,6 +19,7 @@ import {
   ImgwHourlyPoint,
   WeatherLocation,
   ImgwMeteoStation,
+  GeocodeResult,
   warningInVoivodeship,
 } from '../../services/weather';
 import { Telemetry } from '../../services/telemetry';
@@ -207,7 +208,7 @@ import { WeatherExtras } from './weather-extras';
             <!-- Pole wyszukiwania miejscowości (Input text z autouzupełnianiem) -->
             <div class="md:col-span-5 relative">
               <label for="locationSearchInput" class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                Wyszukaj miejscowość lub stację:
+                Wyszukaj miejscowość, wieś lub stację:
               </label>
               <div class="relative">
                 <mat-icon class="absolute left-3 top-2.5 text-slate-400 text-sm !w-4 !h-4 pointer-events-none">search</mat-icon>
@@ -217,7 +218,10 @@ import { WeatherExtras } from './weather-extras';
                   type="text"
                   [value]="weather.searchQuery()"
                   (input)="onSearchInput(searchInput.value)"
-                  placeholder="Wpisz np. Radom, Piaseczno, Siedlce, Gdynia, Krosno, Grudziądz, Płock..."
+                  (keydown.enter)="searchOsm(searchInput.value)"
+                  (keydown.escape)="clearSearch(searchInput)"
+                  autocomplete="off"
+                  placeholder="Wpisz miasto albo wieś i naciśnij Enter, np. Stanisławów"
                   class="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-medium focus:outline-none focus:border-cyan-500 placeholder:text-slate-500"
                 />
                 @if (weather.searchQuery()) {
@@ -231,6 +235,56 @@ import { WeatherExtras } from './weather-extras';
                   </button>
                 }
               </div>
+
+              @if (weather.searchQuery().trim().length >= 2) {
+                <!-- Podpowiedzi: katalog IMGW od razu, wsie i adresy z OpenStreetMap po Enter -->
+                <div class="absolute z-30 left-0 right-0 mt-1 max-h-96 overflow-y-auto rounded-xl bg-slate-950 border border-slate-700 shadow-2xl text-xs">
+                  @for (loc of suggestions(); track loc.id) {
+                    <button type="button" (click)="pickLocation(loc.id, searchInput)"
+                      class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-slate-800 cursor-pointer">
+                      <span class="min-w-0">
+                        <span class="font-bold text-white">{{ loc.name }}</span>
+                        <span class="text-slate-400"> · {{ loc.voivodeship }}</span>
+                        @if (loc.type !== 'city' && loc.type !== 'place') {
+                          <span class="ml-1 text-[10px] font-mono text-slate-500">{{ loc.type === 'synop' ? 'SYNOP' : 'METEO' }}</span>
+                        }
+                      </span>
+                      @if (loc.temp !== null) {
+                        <span class="font-mono text-cyan-400 shrink-0">{{ loc.temp }}°C</span>
+                      }
+                    </button>
+                  }
+                  <div class="border-t border-slate-800 px-3 py-2 space-y-1">
+                    @if (osmLoading()) {
+                      <div class="text-slate-400 flex items-center gap-2"><mat-icon class="animate-spin text-sm !w-4 !h-4">progress_activity</mat-icon>Szukam w OpenStreetMap…</div>
+                    } @else if (osmResults(); as results) {
+                      <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">OpenStreetMap — kliknij, aby zapisać jako swoje miejsce</div>
+                      @for (r of results; track r.lat + ',' + r.lon) {
+                        <button type="button" (click)="pickPlace(r, searchInput)"
+                          class="w-full flex items-start gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-slate-800 cursor-pointer">
+                          <mat-icon class="text-sm !w-4 !h-4 text-fuchsia-400 mt-0.5 shrink-0">place</mat-icon>
+                          <span class="min-w-0">
+                            <span class="font-bold text-white">{{ r.name }}</span>
+                            <span class="text-slate-500"> ({{ r.kind }})</span>
+                            <span class="block text-slate-400 truncate">{{ r.label }}</span>
+                          </span>
+                        </button>
+                      } @empty {
+                        <div class="text-slate-400">Nic nie znaleziono w Polsce. Spróbuj dopisać gminę, np. „Stanisławów, gmina Stanisławów”.</div>
+                      }
+                    } @else {
+                      <button type="button" (click)="searchOsm(searchInput.value)"
+                        class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-fuchsia-300 hover:bg-slate-800 cursor-pointer">
+                        <mat-icon class="text-sm !w-4 !h-4">travel_explore</mat-icon>
+                        Szukaj „{{ weather.searchQuery().trim() }}” w OpenStreetMap (wsie, przysiółki, adresy) — Enter
+                      </button>
+                    }
+                    @if (osmError(); as e) {
+                      <div class="text-rose-300">{{ e }}</div>
+                    }
+                  </div>
+                </div>
+              }
             </div>
 
             <!-- Filtr Województwa -->
@@ -289,9 +343,12 @@ import { WeatherExtras } from './weather-extras';
                   (change)="selectLocation($any($event.target).value)"
                   class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-cyan-600/70 text-white text-xs font-semibold focus:outline-none focus:border-cyan-400 cursor-pointer appearance-none pr-9 shadow-inner"
                 >
+                  @if (!selectedInFiltered()) {
+                    <option value="" disabled selected>— {{ weather.selectedLocation()?.name ?? 'wybierz' }} (wybierz z {{ weather.filteredLocations().length }} wyników) —</option>
+                  }
                   @for (loc of weather.filteredLocations(); track loc.id) {
                     <option [value]="loc.id">
-                      {{ loc.name }} ({{ loc.voivodeship }}) — {{ loc.temp !== null ? loc.temp + '°C' : '--' }} [{{ loc.type === 'city' ? 'MIASTO' : (loc.type === 'synop' ? 'SYNOP' : 'METEO') }}]
+                      {{ loc.name }} ({{ loc.voivodeship }}) — {{ loc.temp !== null ? loc.temp + '°C' : '--' }} [{{ loc.type === 'city' ? 'MIASTO' : loc.type === 'synop' ? 'SYNOP' : loc.type === 'place' ? 'MOJE MIEJSCE' : 'METEO' }}]
                     </option>
                   }
                 </select>
@@ -320,6 +377,15 @@ import { WeatherExtras } from './weather-extras';
                   <span>{{ weather.isFavoriteLocation(curLoc.id) ? 'W ulubionych' : 'Dodaj do ulubionych' }}</span>
                 </button>
               </div>
+              @if (curLoc.type === 'place') {
+                <div class="self-end sm:self-center shrink-0">
+                  <button type="button" (click)="removePlace(curLoc)"
+                    class="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-rose-800 bg-rose-950/50 text-rose-300 text-xs font-semibold hover:bg-rose-900/60 cursor-pointer">
+                    <mat-icon class="text-sm !w-4 !h-4">delete</mat-icon>
+                    <span>Usuń miejsce</span>
+                  </button>
+                </div>
+              }
             }
           </div>
 
@@ -639,6 +705,18 @@ export class WeatherView implements OnDestroy {
   private chartInstance: Chart | null = null;
 
   readonly warningsExpanded = signal<boolean>(false);
+  readonly osmResults = signal<GeocodeResult[] | null>(null);
+  readonly osmLoading = signal(false);
+  readonly osmError = signal<string | null>(null);
+  /** Najlepsze dopasowania z katalogu: najpierw nazwy zaczynające się od wpisanego tekstu. */
+  readonly suggestions = computed(() => {
+    const q = this.weather.searchQuery().trim().toLowerCase();
+    const list = this.weather.filteredLocations();
+    const starts = list.filter((l) => l.name.toLowerCase().startsWith(q));
+    const rest = list.filter((l) => !l.name.toLowerCase().startsWith(q));
+    return [...starts, ...rest].slice(0, 8);
+  });
+  readonly selectedInFiltered = computed(() => this.weather.filteredLocations().some((l) => l.id === this.weather.selectedLocationId()));
   readonly headerSubtitle = computed(() => {
     const loc = this.weather.selectedLocation();
     return loc ? `${loc.name} · woj. ${loc.voivodeship}` : 'Instytut Meteorologii i Gospodarki Wodnej';
@@ -711,11 +789,48 @@ export class WeatherView implements OnDestroy {
 
   onSearchInput(val: string): void {
     this.weather.setSearchQuery(val);
+    this.osmResults.set(null);
+    this.osmError.set(null);
   }
 
   clearSearch(inputEl: HTMLInputElement): void {
     inputEl.value = '';
     this.weather.setSearchQuery('');
+    this.osmResults.set(null);
+    this.osmError.set(null);
+  }
+
+  pickLocation(id: string, inputEl: HTMLInputElement): void {
+    this.weather.selectLocation(id);
+    this.clearSearch(inputEl);
+  }
+
+  async searchOsm(q: string): Promise<void> {
+    const query = q.trim();
+    if (query.length < 2 || this.osmLoading()) return;
+    this.osmLoading.set(true);
+    this.osmError.set(null);
+    try {
+      this.osmResults.set(await this.weather.searchPlaces(query));
+    } catch {
+      this.osmError.set('Wyszukiwarka OpenStreetMap nie odpowiada — spróbuj za chwilę.');
+    } finally {
+      this.osmLoading.set(false);
+    }
+  }
+
+  async pickPlace(r: GeocodeResult, inputEl: HTMLInputElement): Promise<void> {
+    try {
+      await this.weather.addPlace(r);
+      this.clearSearch(inputEl);
+    } catch {
+      this.osmError.set('Nie udało się zapisać miejsca.');
+    }
+  }
+
+  async removePlace(loc: WeatherLocation): Promise<void> {
+    if (!confirm(`Usunąć „${loc.name}” z zapisanych miejsc?`)) return;
+    await this.weather.removePlace(loc.id);
   }
 
   selectLocation(locId: string): void {

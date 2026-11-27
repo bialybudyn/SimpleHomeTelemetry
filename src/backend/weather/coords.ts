@@ -18,7 +18,11 @@ export function stationCoords(m: ImgwMeteoStation): GeoPoint | null {
  * Współrzędne miejscowości: z powiązanej stacji meteo IMGW, a gdy jej nie ma — ze stacji
  * o tej samej nazwie co miejscowość lub stacja synoptyczna (np. „Warszawa” → „WARSZAWA-BIELANY”).
  */
-export async function locationCoords(loc: Pick<WeatherLocation, 'name' | 'meteoStationCode' | 'synopStationName'>): Promise<GeoPoint | null> {
+export async function locationCoords(
+  loc: Pick<WeatherLocation, 'name' | 'meteoStationCode' | 'synopStationName' | 'lat' | 'lon'>,
+): Promise<GeoPoint | null> {
+  // Miejsce wpisane ręcznie: dokładne współrzędne
+  if (loc.lat !== undefined && loc.lon !== undefined) return { lat: loc.lat, lon: loc.lon, source: loc.name };
   const stations = await getImgwMeteoStations('', 5000);
   if (loc.meteoStationCode) {
     const m = stations.find((s) => s.kod_stacji === loc.meteoStationCode);

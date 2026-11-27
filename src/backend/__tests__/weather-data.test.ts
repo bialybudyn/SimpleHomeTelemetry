@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 const dir = mkdtempSync(join(tmpdir(), 'sh-weather-'));
 vi.mock('../config', () => ({ dataPath: (f: string) => join(dir, f) }));
 vi.mock('../imgw', () => ({
+  getCustomPlaces: () => [{ id: 'place_x', name: 'Wieś', label: '', voivodeship: 'Mazowieckie', lat: 52.3, lon: 21.5 }],
   normalizePl: (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l'),
   getImgwMeteoStations: async () => [
     { kod_stacji: '252200150', nazwa_stacji: 'WARSZAWA-BIELANY', lat: '52.2805', lon: '20.9619' },
@@ -197,6 +198,9 @@ describe('GRIB1 i siatka obrócona COSMO', () => {
     expect(s.humidity).toBeGreaterThan(80);
     expect(s.windDir).not.toBeNull();
     expect(cosmo.forecast(10, 10)).toBeNull();
+    // miejsce wpisane ręcznie jest w prognozie dokładnie, a punkt obok — z najbliższego punktu
+    expect(cosmo.forecast(52.3, 21.5)!.approxKm).toBeNull();
+    expect(cosmo.forecast(52.31, 21.5)!.approxKm).toBeCloseTo(1.1, 0);
     // drugi raz ten sam przebieg — nic nie pobiera
     await cosmo.update();
     expect(cosmo.status().run).toBe(runStamp);
@@ -284,5 +288,26 @@ describe('Normy klimatyczne z archiwum IMGW', () => {
     const r = parseMonthRow('"1","X","2024","01",10.4,"8",4.1,"",-17.0,"",-2.2,"",.6,"",-24.3,"",58.0,"",10.6,"","01","",70.7,"",14,"",15,"",9,"",9,""')!;
     expect(r.tmax).toBeNull();
     expect(r.temp).toBe(0.6);
+  });
+});
+
+import { parseNominatim } from '../weather/geocode';
+
+describe('Wyszukiwanie wsi (OpenStreetMap)', () => {
+  it('wyciąga nazwę, gminę, powiat i województwo', () => {
+    const r = parseNominatim([
+      {
+        lat: '52.29110',
+        lon: '21.54800',
+        name: 'Stanisławów',
+        display_name: 'Stanisławów, gmina Stanisławów, powiat miński, województwo mazowieckie, Polska',
+        addresstype: 'village',
+        address: { village: 'Stanisławów', municipality: 'gmina Stanisławów', county: 'powiat miński', state: 'województwo mazowieckie' },
+      },
+      { lat: 'x', lon: '1', display_name: 'zły', address: { state: 'województwo mazowieckie' } },
+    ]);
+    expect(r).toEqual([
+      { name: 'Stanisławów', label: 'gmina Stanisławów, powiat miński, woj. mazowieckie', kind: 'wieś', voivodeship: 'Mazowieckie', lat: 52.2911, lon: 21.548 },
+    ]);
   });
 });
