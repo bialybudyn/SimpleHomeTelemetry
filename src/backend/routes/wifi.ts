@@ -4,6 +4,7 @@ import { sonoffId } from '../drivers/sonoff';
 import { tuyaId } from '../drivers/tuya';
 import { DEFAULT_PLUG_DP_MAP } from '../drivers/tuya-protocol';
 import { randomBytes } from 'node:crypto';
+import { config } from '../config';
 import { ewelinkExchangeCode, ewelinkListDevices, ewelinkOauthUrl, type EwelinkCloudDevice } from '../drivers/ewelink-cloud';
 import { checkTuyaQrStatus, generateTuyaQrCode } from '../drivers/tuya-cloud';
 import { SECRET_MASK } from '../notifications';
@@ -72,6 +73,13 @@ export function wifiRouter(b: Backend): Router {
     const s = b.db.getSetting<EwelinkSettings>('ewelink', {});
     if (!s.app_id || !s.app_secret || !s.redirect_url) {
       return void res.status(400).json({ success: false, message: 'Zapisz najpierw AppID, AppSecret i adres przekierowania.' });
+    }
+    // Panel działa po HTTPS, a zapisany adres to http:// — powrót z eWeLink by nie zadziałał
+    if (config.tlsCert && s.redirect_url.startsWith('http://')) {
+      return void res.status(400).json({
+        success: false,
+        message: `Adres przekierowania zaczyna się od http://, a panel działa po HTTPS. Zmień go na ${s.redirect_url.replace(/^http:/, 'https:')} — tutaj i w ustawieniach aplikacji na dev.ewelink.cc.`,
+      });
     }
     const state = randomBytes(8).toString('hex');
     b.db.setSetting('ewelink_oauth_state', state);
