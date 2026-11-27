@@ -187,6 +187,12 @@ function radarPixel(lat: number, lon: number): { x: number; y: number } {
           <span class="hidden sm:inline">{{ radarPlaying() ? 'Pauza' : 'Animacja 1 h' }}</span>
         </button>
         @if (radar(); as r) {
+          @if (radarStaleSince(); as since) {
+            <div class="mb-3 px-3 py-2 rounded-xl bg-amber-950/60 border border-amber-700 text-amber-200 text-xs flex items-center gap-2">
+              <mat-icon class="text-sm !w-4 !h-4">schedule</mat-icon>
+              IMGW nie publikuje nowych obrazów radarowych od {{ since }} — pokazuję ostatnie dostępne.
+            </div>
+          }
           <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div class="lg:col-span-2 space-y-2">
               @if (frameUrl(); as url) {
@@ -214,7 +220,7 @@ function radarPixel(lat: number, lon: number): { x: number; y: number } {
                   <div class="p-3 rounded-xl border"
                     [class.bg-sky-950/60]="rain.rate !== null" [class.border-sky-700]="rain.rate !== null"
                     [class.bg-slate-950/70]="rain.rate === null" [class.border-slate-800]="rain.rate === null">
-                    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Teraz nad {{ weather.selectedLocation()?.name }}</div>
+                    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{{ radarStaleSince() ? 'O ' + radarStaleSince() : 'Teraz' }} nad {{ weather.selectedLocation()?.name }}</div>
                     <div class="text-lg font-black text-white mt-0.5">
                       {{ rain.rate !== null ? rainLabel(rain.rate) : 'Brak opadu' }}
                     </div>
@@ -379,9 +385,20 @@ export class WeatherExtras implements OnDestroy {
     return first ? `${f.location}: teraz ${first.temp ?? '--'}°, ${this.precipSummary(f.forecast!.steps)}` : f.location;
   });
 
+  /** Godzina ostatniej klatki, gdy jest starsza niż 30 min (IMGW przestał publikować). */
+  readonly radarStaleSince = computed(() => {
+    const last = this.frames().at(-1);
+    if (!last) return null;
+    const t = new Date(last.time);
+    if (Date.now() - t.getTime() < 30 * 60_000) return null;
+    const sameDay = t.toDateString() === new Date().toDateString();
+    return t.toLocaleString('pl-PL', sameDay ? { hour: '2-digit', minute: '2-digit' } : { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  });
+
   readonly radarSubtitle = computed(() => {
     const rain = this.radar()?.rain;
     if (!rain) return 'Opad w okolicy domu, animacja z ostatniej godziny';
+    if (this.radarStaleSince()) return `Brak nowych danych z IMGW od ${this.radarStaleSince()}`;
     if (!rain.covered) return 'Poza zasięgiem radarów';
     if (rain.rate !== null) return `Teraz pada: ok. ${rain.rate} mm/h`;
     if (rain.nearestKm !== null) return `Najbliższy opad ${rain.nearestKm} km na ${this.compass(rain.nearestBearing)}${rain.trend === 'approaching' ? ' — zbliża się' : ''}`;
