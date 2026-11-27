@@ -11,7 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { DecimalPipe, isPlatformBrowser } from '@angular/common';
+import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { MatIconModule } from '@angular/material/icon';
 import { firstValueFrom } from 'rxjs';
@@ -124,7 +124,7 @@ function radarPixel(lat: number, lon: number): { x: number; y: number } {
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   selector: 'app-weather-extras',
-  imports: [MatIconModule, CollapsibleSection, DecimalPipe],
+  imports: [MatIconModule, CollapsibleSection],
   template: `
     <div class="space-y-6">
       <!-- 8. PROGNOZA COSMO -->
@@ -147,9 +147,9 @@ function radarPixel(lat: number, lon: number): { x: number; y: number } {
                       @if (s.windDir !== null) {
                         <mat-icon class="!w-3 !h-3 text-xs text-slate-300" [style.transform]="'rotate(' + (s.windDir + 180) + 'deg)'">navigation</mat-icon>
                       }
-                      {{ s.wind !== null ? (s.wind * 3.6 | number: 0) : '--' }}
+                      {{ kmh(s.wind) }}
                       @if (s.gust !== null && s.gust > (s.wind ?? 0) + 3) {
-                        <span class="text-amber-300">/{{ s.gust * 3.6 | number: 0 }}</span>
+                        <span class="text-amber-300">/{{ kmh(s.gust) }}</span>
                       }
                       <span>km/h</span>
                     </div>
@@ -707,6 +707,10 @@ export class WeatherExtras implements OnDestroy {
     if (rate < 2.5) return 'Umiarkowany opad';
     if (rate < 10) return 'Silny opad';
     return 'Bardzo silny opad';
+  }
+
+  kmh(ms: number | null): string {
+    return ms === null ? '--' : String(Math.round(ms * 3.6));
   }
 
   monthName(m: number): string {
