@@ -35,7 +35,13 @@ interface InverterState {
   work_modes: Record<string, string>;
 }
 
-type Range = '24h' | '7d' | '30d' | '365d';
+type Range = '24h' | '7d' | '30d' | '365d' | 'custom';
+
+/** Data w formacie pola datetime-local (czas lokalny). */
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 const SETTING_LABELS: Record<keyof InverterSettings, string> = {
   work_mode: 'tryb pracy',
@@ -186,6 +192,27 @@ const COLORS = {
               }
             </div>
           </div>
+          @if (range() === 'custom') {
+            <div class="flex flex-wrap items-end gap-2 mb-3 text-xs">
+              <label class="flex flex-col gap-1 text-slate-400">
+                Od
+                <input type="datetime-local" [value]="customFrom()" [max]="customTo()" (change)="customFrom.set($any($event.target).value)"
+                  class="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white [color-scheme:dark]" />
+              </label>
+              <label class="flex flex-col gap-1 text-slate-400">
+                Do
+                <input type="datetime-local" [value]="customTo()" [min]="customFrom()" (change)="customTo.set($any($event.target).value)"
+                  class="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white [color-scheme:dark]" />
+              </label>
+              <button type="button" (click)="applyCustomRange()" class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold cursor-pointer">Pokaż</button>
+              @for (p of customPresets; track p.label) {
+                <button type="button" (click)="presetCustom(p.hours)" class="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">{{ p.label }}</button>
+              }
+              @if (customError(); as e) {
+                <span class="text-rose-300">{{ e }}</span>
+              }
+            </div>
+          }
           <div class="relative h-[320px]">
             <canvas #powerCanvas></canvas>
             @if (history().length === 0) {
@@ -377,6 +404,14 @@ export class InverterView implements OnDestroy {
   readonly bucketSeconds = signal(300);
   readonly daily = signal<InverterDaily[]>([]);
   readonly range = signal<Range>('24h');
+  readonly customFrom = signal(toLocalInput(new Date(Date.now() - 3 * 24 * 3600_000)));
+  readonly customTo = signal(toLocalInput(new Date()));
+  readonly customError = signal<string | null>(null);
+  readonly customPresets = [
+    { label: 'ostatnie 48 h', hours: 48 },
+    { label: '14 dni', hours: 14 * 24 },
+    { label: '90 dni', hours: 90 * 24 },
+  ];
   readonly days = signal<30 | 365>(30);
   readonly busy = signal(false);
   readonly message = signal<{ ok: boolean; text: string } | null>(null);
@@ -388,6 +423,7 @@ export class InverterView implements OnDestroy {
     { key: '7d', label: '7 dni' },
     { key: '30d', label: '30 dni' },
     { key: '365d', label: 'Rok' },
+    { key: 'custom', label: 'Własny' },
   ];
   readonly dayRanges = [30, 365] as const;
 
@@ -486,11 +522,34 @@ export class InverterView implements OnDestroy {
     if (!dirty || !this.draft()) this.draft.set(s.settings ? structuredClone(s.settings) : null);
   }
 
+  applyCustomRange(): void {
+    void this.loadHistory();
+  }
+
+  presetCustom(hours: number): void {
+    this.customTo.set(toLocalInput(new Date()));
+    this.customFrom.set(toLocalInput(new Date(Date.now() - hours * 3600_000)));
+    void this.loadHistory();
+  }
+
   private async loadHistory(): Promise<void> {
+    let url = `/api/inverter/history?range=${this.range()}`;
+    if (this.range() === 'custom') {
+      const from = new Date(this.customFrom());
+      const to = new Date(this.customTo());
+      if (isNaN(from.getTime()) || isNaN(to.getTime()) || from >= to) {
+        this.customError.set('Data „od” musi być wcześniejsza niż „do”.');
+        return;
+      }
+      if (to.getTime() - from.getTime() > 366 * 24 * 3600_000) {
+        this.customError.set('Zakres może mieć najwyżej rok.');
+        return;
+      }
+      this.customError.set(null);
+      url = `/api/inverter/history?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
+    }
     try {
-      const h = await firstValueFrom(
-        this.http.get<{ points: InverterHistoryPoint[]; bucket_seconds: number }>(`/api/inverter/history?range=${this.range()}`),
-      );
+      const h = await firstValueFrom(this.http.get<{ points: InverterHistoryPoint[]; bucket_seconds: number }>(url));
       this.bucketSeconds.set(h.bucket_seconds);
       this.history.set(h.points);
     } catch {

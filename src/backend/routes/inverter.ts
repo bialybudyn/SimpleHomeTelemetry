@@ -19,6 +19,18 @@ export function inverterRouter(b: Backend): Router {
   });
 
   r.get('/api/inverter/history', (req, res) => {
+    // Zakres własny: ?from=ISO&to=ISO (najwyżej rok wstecz — tyle trzymamy historii)
+    if (req.query['from'] !== undefined || req.query['to'] !== undefined) {
+      const from = Date.parse(String(req.query['from'] ?? ''));
+      const to = req.query['to'] ? Date.parse(String(req.query['to'])) : Date.now();
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
+        return void res.status(400).json({ detail: 'Podaj poprawny zakres: data „od” musi być wcześniejsza niż „do”.' });
+      }
+      if (to - from > 400 * 24 * 3600_000) {
+        return void res.status(400).json({ detail: 'Zakres może mieć najwyżej rok.' });
+      }
+      return void res.json(inv.store.historyCustom(from, to));
+    }
     res.json(inv.store.history(String(req.query['range'] ?? '24h')));
   });
 

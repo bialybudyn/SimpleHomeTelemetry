@@ -270,6 +270,13 @@ describe('falownik: usługa (odczyt, wyszukiwanie, sterowanie, historia)', () =>
     const pts = b.inverter.store.history('24h').points;
     expect(pts.map((p) => p.pv_power)).toEqual([200, 1000]);
     expect(b.inverter.store.history('365d').points).toHaveLength(1);
+    // Zakres własny: tylko próbki z przedziału, krok dobrany do długości zakresu
+    const only1st = b.inverter.store.historyCustom(t0 - 60_000, t0 + 120_000);
+    expect(only1st.range).toBe('custom');
+    expect(only1st.bucket_seconds).toBe(300);
+    expect(only1st.points.map((p) => p.pv_power)).toEqual([200]);
+    expect(b.inverter.store.historyCustom(t0 - 30 * 86400_000, t0 + 3600_000).bucket_seconds).toBe(7200);
+    expect(b.inverter.store.historyCustom(t0 + 3600_000, t0 + 7200_000).points).toHaveLength(0);
     b.inverter.store.prune(0, Date.now() + 1000);
     expect(b.inverter.store.history('24h').points).toHaveLength(0);
   });

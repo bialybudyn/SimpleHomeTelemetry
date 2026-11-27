@@ -14,6 +14,9 @@ export const SAMPLE_WINDOW_MS = 5 * 60_000;
 const DAY_MS = 24 * 3600_000;
 
 /** Zakres wykresu → szerokość kubełka (ok. 150–350 punktów). */
+/** Kroki uśredniania dla zakresu własnego (od najdrobniejszego): 5 min … 1 doba. */
+const CUSTOM_BUCKETS = [SAMPLE_WINDOW_MS, 15 * 60_000, 30 * 60_000, 3600_000, 2 * 3600_000, 6 * 3600_000, 12 * 3600_000, DAY_MS];
+
 export const RANGES: Record<string, { span: number; bucket: number }> = {
   '24h': { span: DAY_MS, bucket: SAMPLE_WINDOW_MS },
   '7d': { span: 7 * DAY_MS, bucket: 30 * 60_000 },
@@ -86,6 +89,19 @@ export class InverterStore {
 
   history(range: string, now = Date.now()): { range: string; bucket_seconds: number; points: InverterHistoryPoint[] } {
     const r = RANGES[range] ?? RANGES['24h'];
+    const res = this.historyBetween(now - r.span, now, r.bucket);
+    return { range: range in RANGES ? range : '24h', ...res };
+  }
+
+  /** Dowolny przedział [from, to] (ms). Krok uśredniania dobierany tak, by punktów było najwyżej ~600. */
+  historyCustom(from: number, to: number): { range: string; bucket_seconds: number; points: InverterHistoryPoint[] } {
+    const span = Math.max(0, to - from);
+    const bucket = CUSTOM_BUCKETS.find((b) => span / b <= 600) ?? DAY_MS;
+    return { range: 'custom', ...this.historyBetween(from, to, bucket) };
+  }
+
+  private historyBetween(from: number, to: number, bucket: number, now = to): { bucket_seconds: number; points: InverterHistoryPoint[] } {
+    const r = { bucket };
     // Kubełki dobowe wg czasu lokalnego serwera, a nie UTC (inaczej noc trafiałaby do poprzedniego dnia)
     const offset = r.bucket >= DAY_MS ? -new Date(now).getTimezoneOffset() * 60_000 : 0;
     const cols = ['pv_power', 'load_power', 'grid_power', 'battery_power', 'battery_soc', 'battery_temp', 'radiator_temp',
@@ -93,10 +109,9 @@ export class InverterStore {
     const rows = this.db.sql
       // CAST: node:sqlite przekazuje liczby jako REAL, więc samo "/" nie obcinałoby do pełnych kubełków
       .prepare(`SELECT CAST((ts + ?) / ? AS INTEGER) * ? - ? AS t, ${cols.map((c) => `ROUND(AVG(${c}), 1) AS ${c}`).join(', ')}
-        FROM inverter_samples WHERE ts >= ? GROUP BY t ORDER BY t`)
-      .all(offset, r.bucket, r.bucket, offset, now - r.span) as Array<Record<string, number | null>>;
+        FROM inverter_samples WHERE ts >= ? AND ts <= ? GROUP BY t ORDER BY t`)
+      .all(offset, r.bucket, r.bucket, offset, from, to) as Array<Record<string, number | null>>;
     return {
-      range: range in RANGES ? range : '24h',
       bucket_seconds: r.bucket / 1000,
       points: rows.map((row) => {
         const p: Record<string, unknown> = { timestamp: new Date(Number(row['t'])).toISOString() };
