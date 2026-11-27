@@ -66,6 +66,95 @@ export interface ImgwWarning {
   przebieg?: string;
   komentarz?: string;
   obszary?: { wojewodztwo?: string; opis?: string; kod_zlewni?: string[] }[];
+  /** Kody TERYT powiatów (tylko ostrzeżenia meteorologiczne). */
+  teryt?: string[];
+}
+
+/** Kod TERYT województwa (2 pierwsze cyfry kodu powiatu) → nazwa. */
+const VOIVODESHIP_TERYT: Record<string, string> = {
+  '02': 'dolnośląskie',
+  '04': 'kujawsko-pomorskie',
+  '06': 'lubelskie',
+  '08': 'lubuskie',
+  '10': 'łódzkie',
+  '12': 'małopolskie',
+  '14': 'mazowieckie',
+  '16': 'opolskie',
+  '18': 'podkarpackie',
+  '20': 'podlaskie',
+  '22': 'pomorskie',
+  '24': 'śląskie',
+  '26': 'świętokrzyskie',
+  '28': 'warmińsko-mazurskie',
+  '30': 'wielkopolskie',
+  '32': 'zachodniopomorskie',
+};
+
+function powiatyLabel(n: number): string {
+  if (n === 1) return '1 powiat';
+  const d = n % 10;
+  const dd = n % 100;
+  return d >= 2 && d <= 4 && (dd < 12 || dd > 14) ? `${n} powiaty` : `${n} powiatów`;
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/** IMGW wpisuje „Brak.” gdy nie ma komentarza — nie pokazujemy tego jako treści. */
+function meaningful(v: unknown): string | undefined {
+  const t = str(v);
+  return t && !/^brak\.?$/i.test(t) ? t : undefined;
+}
+
+function normalizeWarningEndDate(rawDate: unknown): string {
+  if (typeof rawDate !== 'string') return '';
+  const trimmed = rawDate.trim();
+  if (trimmed.startsWith('9999') || trimmed.toLowerCase().includes('odwołania')) return 'do odwołania';
+  return trimmed;
+}
+
+/**
+ * Ostrzeżenie z API IMGW → wspólny format.
+ * Meteo (warningsmeteo) ma inne pola niż hydro: nazwa_zdarzenia, obowiazuje_od/do, tresc i kody TERYT powiatów
+ * zamiast listy województw — z TERYT wyliczamy województwa i liczbę objętych powiatów.
+ */
+export function parseImgwWarning(item: Record<string, unknown>, type: 'meteo' | 'hydro'): ImgwWarning {
+  const teryt = Array.isArray(item['teryt']) ? (item['teryt'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+  let obszary = Array.isArray(item['obszary'])
+    ? (item['obszary'] as { wojewodztwo?: string; opis?: string; kod_zlewni?: string[] }[])
+    : undefined;
+  if (!obszary && teryt && teryt.length) {
+    const perVoiv = new Map<string, number>();
+    for (const code of teryt) {
+      const name = VOIVODESHIP_TERYT[code.slice(0, 2)];
+      if (name) perVoiv.set(name, (perVoiv.get(name) ?? 0) + 1);
+    }
+    obszary = [...perVoiv].map(([wojewodztwo, n]) => ({ wojewodztwo, opis: `${wojewodztwo}: ${powiatyLabel(n)}` }));
+  }
+  return {
+    type,
+    id: str(item['id']),
+    numer: str(item['numer']) ?? '',
+    zdarzenie: str(item['nazwa_zdarzenia']) ?? str(item['zdarzenie']) ?? (type === 'meteo' ? 'Zjawisko meteorologiczne' : 'Zjawisko hydrologiczne'),
+    stopien: (item['stopień'] ?? item['stopien'] ?? '1') as string | number,
+    prawdopodobienstwo: (item['prawdopodobienstwo'] ?? item['prawdopodobieństwo']) as string | number | undefined,
+    data_od: str(item['obowiazuje_od']) ?? str(item['data_od']) ?? '',
+    data_do: normalizeWarningEndDate(item['obowiazuje_do'] ?? item['data_do']),
+    opublikowano: str(item['opublikowano']),
+    biuro: str(item['biuro']),
+    przebieg: meaningful(item['tresc']) ?? meaningful(item['przebieg']),
+    komentarz: meaningful(item['komentarz']),
+    obszary,
+    teryt,
+  };
+}
+
+/** Czy ostrzeżenie dotyczy województwa (dokładne porównanie: „pomorskie” ≠ „zachodniopomorskie”). */
+export function warningInVoivodeship(w: Pick<ImgwWarning, 'obszary'>, voivodeship: string): boolean {
+  const v = normalizePl(voivodeship);
+  if (!v || !w.obszary || w.obszary.length === 0) return false;
+  return w.obszary.some((o) => normalizePl(o.wojewodztwo ?? '') === v);
 }
 
 export interface WeatherLocation {
@@ -848,18 +937,8 @@ export async function getImgwLocationDetails(locationId: string): Promise<Weathe
 
   const matchedMeteo = meteoList.length > 0 ? meteoList[0] : null;
 
-  // Filtruj ostrzeżenia pod kątem województwa danej lokalizacji
-  const normVoiv = normalizePl(loc.voivodeship);
-  const relevantWarnings = [
-    ...warningsRes.meteo.filter((w) => {
-      if (!w.obszary || w.obszary.length === 0) return true;
-      return w.obszary.some((o) => o.wojewodztwo && normalizePl(o.wojewodztwo).includes(normVoiv));
-    }),
-    ...warningsRes.hydro.filter((w) => {
-      if (!w.obszary || w.obszary.length === 0) return true;
-      return w.obszary.some((o) => o.wojewodztwo && normalizePl(o.wojewodztwo).includes(normVoiv));
-    }),
-  ];
+  // Ostrzeżenia dla województwa danej lokalizacji
+  const relevantWarnings = [...warningsRes.meteo, ...warningsRes.hydro].filter((w) => warningInVoivodeship(w, loc.voivodeship));
 
   return {
     location: loc,
@@ -886,15 +965,6 @@ export async function getImgwWarnings(): Promise<{
     };
   }
 
-  function normalizeWarningEndDate(rawDate: unknown): string {
-    if (typeof rawDate !== 'string') return '';
-    const trimmed = rawDate.trim();
-    if (trimmed.startsWith('9999') || trimmed.includes('9999') || trimmed.toLowerCase().includes('odwołania')) {
-      return 'do odwołania';
-    }
-    return trimmed;
-  }
-
   // 1. Meteo warnings
   try {
     const rMeteo = await fetch('https://danepubliczne.imgw.pl/api/data/warningsmeteo', {
@@ -903,20 +973,7 @@ export async function getImgwWarnings(): Promise<{
     if (rMeteo.ok) {
       const dMeteo = await rMeteo.json();
       if (Array.isArray(dMeteo)) {
-        warningsMeteoCache = dMeteo.map((item: Record<string, unknown>) => ({
-          type: 'meteo',
-          numer: typeof item['numer'] === 'string' ? item['numer'] : '',
-          zdarzenie: typeof item['zdarzenie'] === 'string' ? item['zdarzenie'] : 'Zjawisko meteorologiczne',
-          stopien: (item['stopień'] ?? item['stopien'] ?? '1') as string | number,
-          prawdopodobienstwo: (item['prawdopodobienstwo'] ?? item['prawdopodobieństwo']) as string | number | undefined,
-          data_od: typeof item['data_od'] === 'string' ? item['data_od'] : '',
-          data_do: normalizeWarningEndDate(item['data_do']),
-          opublikowano: typeof item['opublikowano'] === 'string' ? item['opublikowano'] : undefined,
-          biuro: typeof item['biuro'] === 'string' ? item['biuro'] : undefined,
-          przebieg: typeof item['przebieg'] === 'string' ? item['przebieg'] : undefined,
-          komentarz: typeof item['komentarz'] === 'string' ? item['komentarz'] : undefined,
-          obszary: item['obszary'] as { wojewodztwo?: string; opis?: string; kod_zlewni?: string[] }[] | undefined,
-        }));
+        warningsMeteoCache = dMeteo.map((item: Record<string, unknown>) => parseImgwWarning(item, 'meteo'));
       } else {
         warningsMeteoCache = [];
       }
@@ -933,20 +990,7 @@ export async function getImgwWarnings(): Promise<{
     if (rHydro.ok) {
       const dHydro = await rHydro.json();
       if (Array.isArray(dHydro)) {
-        warningsHydroCache = dHydro.map((item: Record<string, unknown>) => ({
-          type: 'hydro',
-          numer: typeof item['numer'] === 'string' ? item['numer'] : '',
-          zdarzenie: typeof item['zdarzenie'] === 'string' ? item['zdarzenie'] : 'Zjawisko hydrologiczne',
-          stopien: (item['stopień'] ?? item['stopien'] ?? '1') as string | number,
-          prawdopodobienstwo: (item['prawdopodobienstwo'] ?? item['prawdopodobieństwo']) as string | number | undefined,
-          data_od: typeof item['data_od'] === 'string' ? item['data_od'] : '',
-          data_do: normalizeWarningEndDate(item['data_do']),
-          opublikowano: typeof item['opublikowano'] === 'string' ? item['opublikowano'] : undefined,
-          biuro: typeof item['biuro'] === 'string' ? item['biuro'] : undefined,
-          przebieg: typeof item['przebieg'] === 'string' ? item['przebieg'] : undefined,
-          komentarz: typeof item['komentarz'] === 'string' ? item['komentarz'] : undefined,
-          obszary: item['obszary'] as { wojewodztwo?: string; opis?: string; kod_zlewni?: string[] }[] | undefined,
-        }));
+        warningsHydroCache = dHydro.map((item: Record<string, unknown>) => parseImgwWarning(item, 'hydro'));
       } else {
         warningsHydroCache = [];
       }

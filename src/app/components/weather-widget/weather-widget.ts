@@ -6,7 +6,7 @@ import {
   output,
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
-import { Weather, WeatherLocation } from '../../services/weather';
+import { Weather, WeatherLocation, warningInVoivodeship } from '../../services/weather';
 
 export interface WeatherWidgetCloudInfo {
   icon: string;
@@ -270,11 +270,7 @@ export class WeatherWidget {
   readonly locationWarnings = computed(() => {
     const loc = this.weather.selectedLocation();
     if (!loc) return [];
-    const voivNorm = (loc.voivodeship || '').toLowerCase();
-    return this.weather.meteoWarnings().filter((w) => {
-      if (!w.obszary) return true;
-      return w.obszary.some((o) => (o.wojewodztwo || '').toLowerCase().includes(voivNorm));
-    });
+    return this.weather.meteoWarnings().filter((w) => warningInVoivodeship(w, loc.voivodeship));
   });
 
   // Obliczenie ikony oraz opisu aktualnego zachmurzenia na bazie wilgotności, opadów i ciśnienia

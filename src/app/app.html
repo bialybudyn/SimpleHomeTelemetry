@@ -357,12 +357,11 @@
           <button
             type="button"
             (click)="setTab('weather')"
-            class="px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md"
+            class="px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md text-white"
             [class.bg-rose-600]="alert.highestLevel >= 3"
             [class.hover:bg-rose-500]="alert.highestLevel >= 3"
             [class.bg-amber-600]="alert.highestLevel < 3"
             [class.hover:bg-amber-500]="alert.highestLevel < 3"
-            class="text-white"
             title="Przejdź do zakładki Pogoda IMGW"
           >
             <mat-icon class="text-xs !w-3.5 !h-3.5">cloud</mat-icon>
@@ -1139,7 +1138,7 @@
 
       <!-- Lista szczegółowa ostrzeżeń -->
       <div class="overflow-y-auto py-4 space-y-3.5 flex-1 pr-1">
-        @for (w of weather.regionWarnings(); track w.numer || w.zdarzenie + w.data_od) {
+        @for (w of weather.regionWarnings(); track $index) {
           <div
             class="p-4 rounded-2xl border space-y-2 text-xs"
             [class.bg-rose-950/40]="w.stopien === '3' || w.stopien === 3"
@@ -1171,6 +1170,10 @@
               <p class="text-slate-200 leading-relaxed text-xs">
                 {{ w.przebieg }}
               </p>
+            }
+
+            @if (weather.areasText(w); as areas) {
+              <p class="text-slate-400 text-[11px]">Obszar: {{ areas }}</p>
             }
 
             @if (w.komentarz) {

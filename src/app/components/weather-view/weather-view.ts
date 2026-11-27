@@ -19,6 +19,7 @@ import {
   ImgwHourlyPoint,
   WeatherLocation,
   ImgwMeteoStation,
+  warningInVoivodeship,
 } from '../../services/weather';
 import { Telemetry } from '../../services/telemetry';
 import { Chart, ChartDataset, registerables } from 'chart.js';
@@ -122,7 +123,7 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
 
           @if (warningsExpanded()) {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-amber-700/50">
-              @for (w of allWarnings(); track w.numer || w.zdarzenie + w.data_od) {
+              @for (w of allWarnings(); track $index) {
                 <div
                   class="p-3 rounded-xl border space-y-1.5 text-xs transition-all"
                   [class.bg-rose-950/60]="isWarningForCurrentRegion(w)"
@@ -152,6 +153,9 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
                   </div>
                   @if (w.przebieg) {
                     <p class="text-slate-300 text-[11px] leading-relaxed">{{ w.przebieg }}</p>
+                  }
+                  @if (weather.areasText(w); as areas) {
+                    <p class="text-slate-500 text-[10px]">Obszar: {{ areas }}</p>
                   }
                   <div class="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800 font-mono">
                     <span>Ważne: {{ weather.formatValidity(w.data_od, w.data_do) }}</span>
@@ -710,23 +714,14 @@ export class WeatherView implements OnDestroy {
   });
 
   readonly allWarnings = computed<ImgwWarning[]>(() => {
-    return [...this.weather.meteoWarnings(), ...this.weather.hydroWarnings()];
+    // Najpierw ostrzeżenia dla wybranego województwa
+    const all = [...this.weather.meteoWarnings(), ...this.weather.hydroWarnings()];
+    return [...all.filter((w) => this.isWarningForCurrentRegion(w)), ...all.filter((w) => !this.isWarningForCurrentRegion(w))];
   });
 
   isWarningForCurrentRegion(w: ImgwWarning): boolean {
     const loc = this.weather.selectedLocation();
-    if (!loc) return false;
-    if (!w.obszary || w.obszary.length === 0) return true;
-
-    const locVoiv = (loc.voivodeship || '').toLowerCase();
-    const locName = (loc.name || '').toLowerCase();
-
-    return w.obszary.some((o) => {
-      const oVoiv = (o.wojewodztwo || '').toLowerCase();
-      const oOpis = (o.opis || '').toLowerCase();
-      return (oVoiv && (oVoiv.includes(locVoiv) || locVoiv.includes(oVoiv))) ||
-             (oOpis && (oOpis.includes(locName) || oOpis.includes(locVoiv)));
-    });
+    return !!loc && warningInVoivodeship(w, loc.voivodeship);
   }
 
   constructor() {

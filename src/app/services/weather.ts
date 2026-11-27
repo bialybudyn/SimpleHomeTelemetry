@@ -75,6 +75,18 @@ export interface ImgwWarning {
   przebieg?: string;
   komentarz?: string;
   obszary?: { wojewodztwo?: string; opis?: string; kod_zlewni?: string[] }[];
+  /** Kody TERYT powiatów (ostrzeżenia meteorologiczne). */
+  teryt?: string[];
+}
+
+/**
+ * Czy ostrzeżenie dotyczy województwa. Porównanie dokładne („pomorskie” ≠ „zachodniopomorskie”),
+ * a ostrzeżenie bez obszarów nie jest traktowane jako „wszędzie”.
+ */
+export function warningInVoivodeship(w: Pick<ImgwWarning, 'obszary'>, voivodeship: string | undefined): boolean {
+  const v = normalizePl(voivodeship ?? '');
+  if (!v || !w.obszary || w.obszary.length === 0) return false;
+  return w.obszary.some((o) => normalizePl(o.wojewodztwo ?? '') === v);
 }
 
 export interface WeatherLocation {
@@ -220,21 +232,7 @@ export class Weather {
     const all = this.allWarnings();
     if (!loc || all.length === 0) return [];
 
-    const locVoiv = normalizePl(loc.voivodeship);
-    const locName = normalizePl(loc.name);
-
-    return all.filter((w) => {
-      // Jeśli ostrzeżenie nie ma zdefiniowanych obszarów, przyjmujemy, że dotyczy całego kraju
-      if (!w.obszary || w.obszary.length === 0) return true;
-
-      return w.obszary.some((o) => {
-        const oVoiv = normalizePl(o.wojewodztwo || '');
-        const oOpis = normalizePl(o.opis || '');
-        if (oVoiv && (oVoiv.includes(locVoiv) || locVoiv.includes(oVoiv))) return true;
-        if (oOpis && (oOpis.includes(locName) || oOpis.includes(locVoiv))) return true;
-        return false;
-      });
-    });
+    return all.filter((w) => warningInVoivodeship(w, loc.voivodeship));
   });
 
   // Ostrzeżenia meteorologiczne dla wybranego regionu
@@ -318,6 +316,11 @@ export class Weather {
   }
 
   // Czytelne formatowanie okresu ważności ostrzeżenia (eliminuje techniczne daty IMGW 9999-12-31 dla suszy hydrologicznej)
+  /** Gdzie obowiązuje ostrzeżenie, np. „mazowieckie: 9 powiatów” albo opis zlewni dla hydrologicznych. */
+  areasText(w: ImgwWarning): string {
+    return (w.obszary ?? []).map((o) => o.opis || o.wojewodztwo || '').filter(Boolean).join(' · ');
+  }
+
   formatValidity(dataOd?: string, dataDo?: string): string {
     const from = (dataOd || '').trim();
     const to = (dataDo || '').trim();
