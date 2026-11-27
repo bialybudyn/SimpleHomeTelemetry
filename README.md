@@ -151,6 +151,16 @@ Zakładka **CCTV** pokazuje do 9 kamer na żywo w siatce 3×3; kliknięcie kafel
 - Hasła kamer nie wracają do przeglądarki (adres jest pokazywany z ukrytym hasłem).
 - Wymaga programu `ffmpeg` (instaluje go `install.sh`; inna ścieżka: zmienna `FFMPEG_PATH`).
 
+### Pogoda IMGW-PIB
+
+Zakładka korzysta wyłącznie z publicznych danych IMGW-PIB (danepubliczne.imgw.pl). Każdy panel można zwinąć, a stan jest zapamiętywany w przeglądarce.
+
+- **Pomiary i ostrzeżenia** — stacje synoptyczne, meteo i hydro oraz ostrzeżenia meteorologiczne (obszar z kodów TERYT powiatów) i hydrologiczne.
+- **Prognoza COSMO 2,8 km** — serwer co godzinę sprawdza nowe przebiegi modelu. Każda godzina prognozy to plik GRIB ~161 MB, a IMGW nie pozwala pobierać fragmentów, więc serwer czyta strumień tylko do pól przy powierzchni (~118 MB) i bierze co 3. godzinę: ok. 1,5–2,5 GB na przebieg, do 4 przebiegów na dobę. Wartości są wyjmowane dla wszystkich ~800 stacji meteo naraz i zapisywane w `cosmo_forecast.json`.
+- **Radar opadów** — kompozyt POLRAD (CMAX) co 5 min, animacja z ostatniej godziny, natężenie opadu nad miejscowością i najbliższe echo (odwzorowanie azymutalne, 1 km/px).
+- **Normy klimatyczne** — archiwum miesięczne stacji synoptycznych (~1 MB, pobierane raz na 30 dni): średnie 1991–2020 i rekordy.
+- **Mapa stacji** — stan rzek i temperatura na stacjach (OpenStreetMap + Leaflet).
+
 ## Rozwój
 
 ```bash

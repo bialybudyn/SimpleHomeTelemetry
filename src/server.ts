@@ -6,6 +6,7 @@ import { config } from './backend/config';
 import { basicAuthMiddleware, isUpgradeAuthorized } from './backend/auth';
 import { createBackend, type Backend } from './backend/context';
 import { initImgw } from './backend/imgw';
+import { startWeatherServices, stopWeatherServices } from './backend/weather/services';
 import { createPanelListener } from './backend/tls';
 import { devicesRouter } from './backend/routes/devices';
 import { inverterRouter } from './backend/routes/inverter';
@@ -99,6 +100,7 @@ if (isMainModule(import.meta.url) && backend) {
 
   backend.start();
   initImgw();
+  startWeatherServices();
 
   // Np. EADDRINUSE: kończymy proces, żeby systemd pokazał błąd i ponowił start,
   // zamiast zostawić żywy proces bez serwera HTTP (Angular SSR łapie uncaughtException).
@@ -113,6 +115,7 @@ if (isMainModule(import.meta.url) && backend) {
   const shutdown = (signal: string) => {
     console.log(`[HTTP] ${signal} — zamykanie...`);
     backend.stop();
+    stopWeatherServices();
     backend.db.close();
     listener.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();

@@ -42,6 +42,8 @@ export interface ImgwHydroStation {
 export interface ImgwMeteoStation {
   kod_stacji: string;
   nazwa_stacji: string;
+  lat?: string | number | null;
+  lon?: string | number | null;
   wysokosc_npm?: string | null;
   temperatura_powietrza?: string | number | null;
   temperatura_gruntu?: string | number | null;

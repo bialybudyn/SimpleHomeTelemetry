@@ -23,48 +23,34 @@ import {
 } from '../../services/weather';
 import { Telemetry } from '../../services/telemetry';
 import { Chart, ChartDataset, registerables } from 'chart.js';
+import { CollapsibleSection } from '../collapsible-section/collapsible-section';
+import { WeatherExtras } from './weather-extras';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   selector: 'app-weather-view',
-  imports: [MatIconModule],
+  imports: [MatIconModule, CollapsibleSection, WeatherExtras],
   template: `
     <div class="space-y-6">
 
       <!-- 1. NAGŁÓWEK PANELU POGODY -->
-      <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
-        <div>
-          <div class="inline-flex items-center gap-2 text-xs font-mono text-cyan-400 mb-1.5">
-            <mat-icon class="text-sm !w-4 !h-4 text-cyan-400">cloud</mat-icon>
-            <span>Instytut Meteorologii i Gospodarki Wodnej · Państwowy Instytut Badawczy (IMGW-PIB)</span>
-          </div>
-          <h2 class="text-xl md:text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
-            <span>Pogoda & Miejscowości w Polsce</span>
-            @if (weather.selectedLocation(); as loc) {
-              <span class="text-cyan-400 font-extrabold">· {{ loc.name }}</span>
-              <span class="text-xs px-2.5 py-0.5 rounded-lg bg-cyan-950/80 border border-cyan-700/60 text-cyan-300 font-medium">
-                {{ loc.voivodeship }}
-              </span>
-            }
-          </h2>
-          <p class="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-            Oficjalne dane telemetryczne IMGW dla ponad 850 miast, powiatów i stacji pomiarowych: synoptyka, opady 10-minutowe i godzinowe, temperatura gruntu, stan wód w rzekach oraz ostrzeżenia pogodowe zintegrowane z czujnikami Twojego domu.
-          </p>
-        </div>
-
-        <div class="flex items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            (click)="refreshData()"
-            [disabled]="weather.isLoadingLocations() || weather.isLoadingDetails()"
-            class="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white border border-slate-700 transition-colors cursor-pointer"
-            title="Odśwież pomiary ze stacji IMGW"
-          >
-            <mat-icon class="text-sm !w-4 !h-4 text-cyan-400" [class.animate-spin]="weather.isLoadingLocations() || weather.isLoadingDetails()">refresh</mat-icon>
-            <span>Odśwież dane</span>
-          </button>
-        </div>
-      </div>
+      <app-collapsible-section sectionId="weather.header" title="Pogoda IMGW-PIB" icon="cloud" iconClass="text-cyan-400"
+        [subtitle]="headerSubtitle()">
+        <button section-actions
+          type="button"
+          (click)="refreshData()"
+          [disabled]="weather.isLoadingLocations() || weather.isLoadingDetails()"
+          class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white border border-slate-700 transition-colors cursor-pointer"
+          title="Odśwież pomiary ze stacji IMGW"
+        >
+          <mat-icon class="text-sm !w-4 !h-4 text-cyan-400" [class.animate-spin]="weather.isLoadingLocations() || weather.isLoadingDetails()">refresh</mat-icon>
+          <span class="hidden sm:inline">Odśwież dane</span>
+        </button>
+        <p class="text-xs text-slate-400 max-w-3xl leading-relaxed">
+          Oficjalne dane IMGW-PIB dla ponad 850 miast i stacji pomiarowych: pomiary synoptyczne i meteorologiczne, stan rzek,
+          ostrzeżenia, prognoza modelu COSMO, radar opadów i normy klimatyczne — zestawione z czujnikami Twojego domu.
+        </p>
+      </app-collapsible-section>
 
       <!-- 2. PASEK OSTRZEŻEŃ METEO & HYDRO DLA POLSKI / REGIONU -->
       @if (totalWarningsCount() > 0) {
@@ -171,7 +157,9 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
       }
 
       <!-- 3. WYBÓR MIEJSCOWOŚCI, FILTRY WOJEWÓDZTW I ULUBIONE MIEJSCA ⭐ -->
-      <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+      <app-collapsible-section sectionId="weather.locations" title="Wybór miejscowości" icon="travel_explore" iconClass="text-amber-400"
+        subtitle="Ulubione, wyszukiwarka i filtry województw">
+      <div class="space-y-4">
 
         <!-- Górny pasek: Szybkie ulubione (Pinned Towns ⭐) -->
         <div>
@@ -352,9 +340,12 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
         </div>
 
       </div>
+      </app-collapsible-section>
 
       <!-- 4. GŁÓWNA KARTA AKTUALNYCH DANYCH POGODOWYCH DLA WYBRANEJ MIEJSCOWOŚCI -->
       @if (weather.selectedLocation(); as loc) {
+        <app-collapsible-section sectionId="weather.current" title="Aktualne pomiary" icon="thermostat" iconClass="text-amber-400"
+          [subtitle]="loc.name + (loc.measurementTime ? ' · ' + loc.measurementTime : '')">
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
 
           <!-- 1. Temperatura powietrza -->
@@ -458,27 +449,14 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
           </div>
 
         </div>
+        </app-collapsible-section>
       }
 
       <!-- 5. PORÓWNANIE Z WYBRANYM CZUJNIKIEM DOMOWYM (DELTA TEMPERATURY) ⚖️ -->
-      <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div class="flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-indigo-950 border border-indigo-700/60 flex items-center justify-center text-indigo-400">
-                <mat-icon class="text-base !w-4 !h-4">compare_arrows</mat-icon>
-              </div>
-              <div>
-                <h3 class="text-base font-bold text-white tracking-tight">
-                  Porównanie z Domowym Czujnikiem Telemetrycznym
-                </h3>
-                <p class="text-xs text-slate-400">
-                  Rzeczywista różnica temperatur (Delta t) pomiędzy czujnikiem w Twoim domu a stacją IMGW w wybranej miejscowości
-                </p>
-              </div>
-            </div>
-          </div>
-
+      <app-collapsible-section sectionId="weather.compare" title="Porównanie z czujnikiem domowym" icon="compare_arrows" iconClass="text-indigo-400"
+        subtitle="Różnica temperatur między czujnikiem w domu a stacją IMGW">
+      <div class="space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-end gap-4">
           <!-- Selektor domowego czujnika temperatury -->
           <div class="flex items-center gap-2 w-full md:w-auto">
             <label for="comparisonSensorSelect" class="text-xs font-semibold text-slate-300 shrink-0">Wybierz czujnik:</label>
@@ -551,62 +529,36 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
           </div>
         }
       </div>
+      </app-collapsible-section>
 
       <!-- 6. WYKRES GODZINOWY TEMPERATURY (CHART.JS) 📈 -->
-      <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
-              <mat-icon class="text-cyan-400 text-lg !w-5 !h-5">show_chart</mat-icon>
-              <span>Przebieg Godzinowy Temperatury (24h)</span>
-              @if (weather.selectedLocation(); as loc) {
-                <span class="text-xs font-mono text-cyan-400 font-semibold">· {{ loc.name }}</span>
-              }
-            </h3>
-            <p class="text-xs text-slate-400">
-              Analiza trendu synoptycznego z możliwością nakładania krzywej z Twojego domowego czujnika
-            </p>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              (click)="toggleOverlaySensorChart()"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer"
-              [class.bg-amber-950/60]="showSensorOnChart()"
-              [class.border-amber-600]="showSensorOnChart()"
-              [class.text-amber-300]="showSensorOnChart()"
-              [class.bg-slate-950]="!showSensorOnChart()"
-              [class.border-slate-800]="!showSensorOnChart()"
-              [class.text-slate-400]="!showSensorOnChart()"
-            >
-              <mat-icon class="text-sm !w-4 !h-4">{{ showSensorOnChart() ? 'check_box' : 'check_box_outline_blank' }}</mat-icon>
-              <span>Porównaj z czujnikiem domowym na wykresie</span>
-            </button>
-          </div>
-        </div>
-
+      <app-collapsible-section sectionId="weather.hourly" title="Przebieg temperatury (24 h)" icon="show_chart" iconClass="text-cyan-400"
+        [subtitle]="(weather.selectedLocation()?.name ?? '') + ' · pomiary synoptyczne'">
+        <button section-actions
+          type="button"
+          (click)="toggleOverlaySensorChart()"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer"
+          [class.bg-amber-950/60]="showSensorOnChart()"
+          [class.border-amber-600]="showSensorOnChart()"
+          [class.text-amber-300]="showSensorOnChart()"
+          [class.bg-slate-950]="!showSensorOnChart()"
+          [class.border-slate-800]="!showSensorOnChart()"
+          [class.text-slate-400]="!showSensorOnChart()"
+          title="Nałóż krzywą z czujnika domowego"
+        >
+          <mat-icon class="text-sm !w-4 !h-4">{{ showSensorOnChart() ? 'check_box' : 'check_box_outline_blank' }}</mat-icon>
+          <span class="hidden sm:inline">Czujnik domowy</span>
+        </button>
         <div class="relative h-72 w-full rounded-xl bg-slate-950/60 p-3 border border-slate-800/80">
           <canvas #hourlyWeatherChart class="w-full h-full"></canvas>
         </div>
-      </div>
+      </app-collapsible-section>
 
       <!-- 7. MONITORING HYDROLOGICZNY (STAN RZEK W REGIONIE) 🌊 -->
-      <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
-              <mat-icon class="text-blue-400 text-lg !w-5 !h-5">waves</mat-icon>
-              <span>Monitoring Hydrologiczny Rzek (IMGW Hydro)</span>
-              @if (weather.selectedLocation(); as loc) {
-                <span class="text-xs font-mono text-blue-400">· Województwo: {{ loc.voivodeship }}</span>
-              }
-            </h3>
-            <p class="text-xs text-slate-400">
-              Pomiary poziomu wód ze stacji hydrologicznych IMGW w rzekach Polski, stany ostrzegawcze i alarmowe
-            </p>
-          </div>
-
+      <app-collapsible-section sectionId="weather.hydro" title="Stan rzek (IMGW Hydro)" icon="waves" iconClass="text-blue-400"
+        subtitle="Poziom wód, stany ostrzegawcze i alarmowe">
+      <div class="space-y-4">
+        <div class="flex justify-end">
           <!-- Wyszukiwarka stacji hydro -->
           <div class="relative w-full sm:w-64">
             <mat-icon class="absolute left-3 top-2.5 text-slate-400 text-sm !w-4 !h-4">search</mat-icon>
@@ -671,6 +623,10 @@ import { Chart, ChartDataset, registerables } from 'chart.js';
           }
         </div>
       </div>
+      </app-collapsible-section>
+
+      <!-- 8–11. PROGNOZA COSMO, RADAR, NORMY KLIMATYCZNE, MAPA STACJI -->
+      <app-weather-extras />
 
     </div>
   `,
@@ -683,6 +639,10 @@ export class WeatherView implements OnDestroy {
   private chartInstance: Chart | null = null;
 
   readonly warningsExpanded = signal<boolean>(false);
+  readonly headerSubtitle = computed(() => {
+    const loc = this.weather.selectedLocation();
+    return loc ? `${loc.name} · woj. ${loc.voivodeship}` : 'Instytut Meteorologii i Gospodarki Wodnej';
+  });
   readonly showSensorOnChart = signal<boolean>(true);
 
   // Popularne miejscowości w Polsce dla szybkiego wyboru
