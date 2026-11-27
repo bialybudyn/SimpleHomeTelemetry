@@ -190,17 +190,17 @@ type Brand = 'sonoff' | 'tuya';
               @if (ewRedirectMismatch(); as expected) {
                 <div class="p-3 rounded-xl bg-amber-950/60 border border-amber-700 text-amber-200 space-y-2">
                   <p>
-                    Adres przekierowania nie pasuje do adresu, pod którym otwierasz panel
-                    (<span class="font-mono">{{ origin() }}</span>) — np. został zapisany przed włączeniem HTTPS.
-                    Po zalogowaniu przeglądarka nie trafi wtedy z powrotem do panelu.
+                    Adres przekierowania wskazuje inny serwer niż ten, pod którym otwierasz panel
+                    (<span class="font-mono">{{ origin() }}</span>). Po zalogowaniu przeglądarka nie trafi wtedy z powrotem do panelu.
                   </p>
                   <button (click)="ewRedirect.set(expected)" class="btn-secondary">Użyj {{ expected }}</button>
                 </div>
               }
               <p class="text-slate-500">
-                Komunikat eWeLink „Redirect url is not authenticated” oznacza, że ten adres — znak w znak, razem z
-                <span class="font-mono">https://</span> i portem — nie jest wpisany w ustawieniach Twojej aplikacji w
-                <span class="font-mono text-slate-300">dev.ewelink.cc</span>. Popraw go tam albo tutaj, zapisz i spróbuj ponownie.
+                Komunikat eWeLink „Redirect url is not authenticated” oznacza, że ten adres nie jest znak w znak taki sam jak
+                „Redirect URL” Twojej aplikacji w <span class="font-mono text-slate-300">dev.ewelink.cc</span> (liczy się też
+                <span class="font-mono">http</span> / <span class="font-mono">https</span>). Wpisz tu dokładnie ten sam adres, zapisz i spróbuj ponownie —
+                adres z <span class="font-mono">http://</span> też zadziała.
               </p>
               <div class="flex flex-wrap gap-2">
                 <button (click)="saveEwelink()" [disabled]="busy()" class="btn-secondary">Zapisz</button>
@@ -315,11 +315,19 @@ export class DeviceConfigModal implements OnInit {
   readonly ewAppSecret = signal('');
   readonly ewRedirect = signal('');
   readonly origin = signal(typeof window !== 'undefined' ? window.location.origin : '');
-  /** Właściwy adres przekierowania, gdy zapisany wskazuje inny protokół/host niż ten, pod którym działa panel. */
+  /**
+   * Właściwy adres przekierowania, gdy zapisany wskazuje inny host lub port niż panel.
+   * Sama różnica http/https nie jest błędem — panel przekierowuje zwykłe HTTP na HTTPS.
+   */
   readonly ewRedirectMismatch = computed(() => {
     const cur = this.ewRedirect().trim();
     const origin = this.origin();
-    if (!cur || !origin || cur.startsWith(origin + '/')) return null;
+    if (!cur || !origin) return null;
+    try {
+      if (new URL(cur).host === new URL(origin).host) return null;
+    } catch {
+      // niepoprawny adres — podpowiadamy właściwy
+    }
     return `${origin}/api/sonoff/ewelink/oauth/callback`;
   });
   readonly ewCode = signal('');
