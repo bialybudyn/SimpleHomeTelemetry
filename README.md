@@ -146,7 +146,7 @@ Zakładka **CCTV** pokazuje do 9 kamer na żywo w siatce 3×3; kliknięcie kafel
 - **Nic nie jest nagrywane.** ffmpeg czyta strumień RTSP i oddaje klatki JPEG tylko przez stdout, a serwer przekazuje je do przeglądarki
   jednym WebSocketem (`/ws/cctv`). Strumień działa tylko, gdy ktoś go ogląda (zatrzymuje się kilka sekund po zamknięciu podglądu).
   Zapisywana jest wyłącznie lista kamer (nazwa i adres) w bazie panelu.
-- Kafelek używa strumienia pomocniczego (niska rozdzielczość, 5 kl/s), powiększenie — głównego (do 1920 px, 12 kl/s).
+- Kafelek używa strumienia pomocniczego (niska rozdzielczość, do 15 kl/s), powiększenie — głównego (do 1920 px, do 30 kl/s). Wolniejsza kamera idzie ze swoją prędkością, klatki nie są dublowane.
   Podanie strumienia pomocniczego mocno odciąża serwer.
 - Hasła kamer nie wracają do przeglądarki (adres jest pokazywany z ukrytym hasłem).
 - Wymaga programu `ffmpeg` (instaluje go `install.sh`; inna ścieżka: zmienna `FFMPEG_PATH`).

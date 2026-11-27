@@ -35,9 +35,13 @@ export interface StreamStatus {
 
 export class CctvValidationError extends Error {}
 
+/**
+ * fps to górny limit: wolniejsza kamera idzie ze swoją prędkością (klatki nigdy nie są dublowane).
+ * Wartości są dzielnikami 30 — przy 30 kl/s z kamery odstępy między klatkami są równe.
+ */
 const QUALITY: Record<Quality, { fps: number; width: number; q: number }> = {
-  sub: { fps: 5, width: 640, q: 8 },
-  main: { fps: 12, width: 1920, q: 5 },
+  sub: { fps: 15, width: 640, q: 8 },
+  main: { fps: 30, width: 1920, q: 6 },
 };
 
 /** Ile procesów ffmpeg może działać naraz (9 kafelków + powiększenia z kilku ekranów). */
@@ -91,6 +95,9 @@ export function explainFfmpegError(text: string): string {
 
 export function ffmpegArgs(url: string, quality: Quality, frames?: number): string[] {
   const { fps, width, q } = QUALITY[quality];
+  // Filtr fps dorabiałby brakujące klatki (25 kl/s → 30 kl/s); select tylko pomija nadmiarowe.
+  // Próg 0,9 odstępu: drobne wahania znaczników czasu z RTSP nie gubią klatek.
+  const minGap = (0.9 / fps).toFixed(4);
   return [
     '-hide_banner',
     '-loglevel', 'error',
@@ -99,7 +106,8 @@ export function ffmpegArgs(url: string, quality: Quality, frames?: number): stri
     '-timeout', '10000000',
     '-i', url,
     '-an', '-sn', '-dn',
-    '-vf', `fps=${fps},scale='min(${width},iw)':-2`,
+    '-vf', `select='isnan(prev_selected_t)+gte(t-prev_selected_t,${minGap})',scale='min(${width},iw)':-2`,
+    '-fps_mode', 'passthrough',
     '-c:v', 'mjpeg',
     '-q:v', String(q),
     ...(frames ? ['-frames:v', String(frames)] : []),
