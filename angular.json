@@ -31,6 +31,7 @@
             ],
             "server": "src/main.server.ts",
             "outputMode": "server",
+            "allowedCommonJsDependencies": ["leaflet"],
             "ssr": {
               "entry": "src/server.ts"
             }
