@@ -14,6 +14,7 @@ import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { MatIconModule } from '@angular/material/icon';
 import { firstValueFrom } from 'rxjs';
+import { CctvPlayers, CctvStreamCanvas } from './cctv-players';
 
 interface Camera {
   id: string;
@@ -50,7 +51,8 @@ const EMPTY_DRAFT: Draft = { id: null, name: '', url: '', sub_url: '', enabled: 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   selector: 'app-cctv-view',
-  imports: [MatIconModule],
+  imports: [MatIconModule, CctvStreamCanvas],
+  providers: [CctvPlayers],
   template: `
     <div class="space-y-4">
       <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xl">
@@ -156,9 +158,8 @@ const EMPTY_DRAFT: Draft = { id: null, name: '', url: '', sub_url: '', enabled: 
         @for (slot of grid(); track $index) {
           @if (slot; as c) {
             <button (click)="zoom(c)" class="relative aspect-video rounded-xl overflow-hidden bg-black border border-slate-800 hover:border-rose-500/60 cursor-zoom-in group text-left">
-              @if (frame(c.id, 'sub'); as src) {
-                <img [src]="src" [alt]="c.name" class="absolute inset-0 w-full h-full object-cover" />
-              } @else {
+              <canvas [appCctvStream]="c.id + ':sub'" [class.invisible]="!isLive(c.id, 'sub')" class="absolute inset-0 w-full h-full object-cover"></canvas>
+              @if (!isLive(c.id, 'sub')) {
                 <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-500 text-xs p-4 text-center">
                   <mat-icon [class.animate-pulse]="!errorOf(c.id, 'sub')">{{ errorOf(c.id, 'sub') ? 'videocam_off' : 'videocam' }}</mat-icon>
                   <span>{{ errorOf(c.id, 'sub') || (c.enabled ? 'Łączenie z kamerą…' : 'Kamera wyłączona') }}</span>
@@ -200,9 +201,8 @@ const EMPTY_DRAFT: Draft = { id: null, name: '', url: '', sub_url: '', enabled: 
           </div>
         </div>
         <div class="flex-1 min-h-0 flex items-center justify-center p-2">
-          @if (frame(c.id, 'main') || frame(c.id, 'sub'); as src) {
-            <img [src]="src" [alt]="c.name" class="max-w-full max-h-full object-contain cursor-zoom-out" />
-          } @else {
+          <canvas [appCctvStream]="c.id + ':main'" [class.hidden]="!isLive(c.id, 'main')" class="max-w-full max-h-full object-contain cursor-zoom-out"></canvas>
+          @if (!isLive(c.id, 'main')) {
             <div class="text-slate-400 text-sm flex items-center gap-2">
               <mat-icon>{{ errorOf(c.id, 'main') ? 'videocam_off' : 'hourglass_top' }}</mat-icon>
               {{ errorOf(c.id, 'main') || 'Łączenie ze strumieniem głównym…' }}
@@ -229,8 +229,8 @@ export class CctvView implements OnDestroy {
   readonly socketState = signal<'connecting' | 'open' | 'closed'>('connecting');
   private readonly hidden = signal(false);
 
-  /** Ostatnia klatka każdego strumienia jako adres blob: ("<id>:<jakość>" → URL). */
-  private readonly frames = signal<Record<string, string>>({});
+  /** Odtwarzacze strumieni: równe tempo wyświetlania mimo nierównego przychodzenia klatek. */
+  private readonly players = inject(CctvPlayers);
   private readonly status = signal<Record<string, Partial<Record<Quality, StreamStatus>>>>({});
   private readonly errors = signal<Record<string, string>>({});
 
@@ -279,7 +279,6 @@ export class CctvView implements OnDestroy {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.messageTimer) clearTimeout(this.messageTimer);
     this.ws?.close();
-    for (const url of Object.values(this.frames())) URL.revokeObjectURL(url);
   }
 
   @HostListener('document:keydown', ['$event'])
@@ -292,8 +291,8 @@ export class CctvView implements OnDestroy {
 
   // --- podgląd ---
 
-  frame(id: string, q: Quality): string | null {
-    return this.frames()[`${id}:${q}`] ?? null;
+  isLive(id: string, q: Quality): boolean {
+    return this.players.live().has(`${id}:${q}`);
   }
 
   statusOf(id: string, q: Quality): StreamStatus | undefined {
@@ -344,18 +343,8 @@ export class CctvView implements OnDestroy {
 
   private sendSubscription(streams: { id: string; quality: Quality }[]): void {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'subscribe', streams }));
-    // Klatki strumieni, których już nie oglądamy, nie są potrzebne
-    const keep = new Set(streams.map((s) => `${s.id}:${s.quality}`));
-    const current = this.frames();
-    const stale = Object.keys(current).filter((k) => !keep.has(k));
-    if (stale.length === 0) return;
-    const next = { ...current };
-    for (const k of stale) {
-      const url = next[k];
-      delete next[k];
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
-    this.frames.set(next);
+    // Odtwarzacze strumieni, których już nie oglądamy, nie są potrzebne
+    this.players.keep(new Set(streams.map((s) => `${s.id}:${s.quality}`)));
   }
 
   private onFrame(buf: ArrayBuffer): void {
@@ -366,11 +355,7 @@ export class CctvView implements OnDestroy {
     const q: Quality = bytes[1 + idLen] === 1 ? 'main' : 'sub';
     const key = `${id}:${q}`;
     if (!this.wanted().some((s) => s.id === id && s.quality === q)) return;
-    const url = URL.createObjectURL(new Blob([bytes.subarray(2 + idLen)], { type: 'image/jpeg' }));
-    const prev = this.frames()[key];
-    this.frames.update((f) => ({ ...f, [key]: url }));
-    // Poprzednia klatka może się jeszcze dekodować — zwalniamy ją z opóźnieniem
-    if (prev) setTimeout(() => URL.revokeObjectURL(prev), 1000);
+    this.players.push(key, new Blob([bytes.subarray(2 + idLen)], { type: 'image/jpeg' }));
   }
 
   private onStatus(text: string): void {
