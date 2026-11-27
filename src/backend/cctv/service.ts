@@ -150,7 +150,10 @@ class LiveStream {
   get fps(): number {
     const now = Date.now();
     this.frameTimes = this.frameTimes.filter((t) => now - t < 5000);
-    return Math.round((this.frameTimes.length / 5) * 10) / 10;
+    if (!this.frameTimes.length) return 0;
+    // Świeży strumień: dzielimy przez czas, od kiedy są klatki (min. 1 s), a nie zawsze przez 5 s
+    const span = Math.min(5, Math.max(1, (now - this.frameTimes[0]) / 1000));
+    return Math.round((this.frameTimes.length / span) * 10) / 10;
   }
 
   add(fn: FrameListener): void {
@@ -213,7 +216,8 @@ class LiveStream {
     this.lastFrame = frame;
     this.lastFrameAt = Date.now();
     this.frameTimes.push(this.lastFrameAt);
-    if (this.frameTimes.length > 100) this.frameTimes.shift();
+    // Okno czasowe, nie liczba klatek (dawny limit 100 klatek zaniżał 30 kl/s do 20)
+    while (this.frameTimes.length && this.lastFrameAt - this.frameTimes[0] >= 5000) this.frameTimes.shift();
     this.state = 'live';
     this.error = null;
     this.retryDelay = 2000;

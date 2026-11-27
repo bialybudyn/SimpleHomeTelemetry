@@ -118,6 +118,18 @@ describe('CCTV: podgląd RTSP bez zapisu', () => {
     expect(procs[1].args).toContain('rtsp://10.0.0.5/main');
   });
 
+  it('licznik pokazuje pełne 30 kl/s', () => {
+    vi.useFakeTimers();
+    const cam = cctv.add({ name: 'Tele', url: 'rtsp://10.0.0.8/a' });
+    cctv.subscribe(cam.id, 'main', () => undefined);
+    for (let i = 0; i < 180; i++) {
+      procs[0].stdout.write(jpeg(i % 200));
+      vi.advanceTimersByTime(1000 / 30);
+    }
+    expect(cctv.status()[cam.id].main?.fps).toBeGreaterThanOrEqual(29);
+    expect(cctv.status()[cam.id].main?.fps).toBeLessThanOrEqual(31);
+  });
+
   it('błąd kamery jest opisany i strumień jest ponawiany', () => {
     vi.useFakeTimers();
     const cam = cctv.add({ name: 'Garaż', url: 'rtsp://10.0.0.7/a' });
